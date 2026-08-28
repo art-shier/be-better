@@ -38,6 +38,14 @@ INSERT INTO dayorder.client_mutations (
     sqlc.arg(id), sqlc.arg(user_id), sqlc.arg(device_id), sqlc.arg(mutation_id),
     sqlc.arg(request_hash), sqlc.arg(expires_at)
 )
+ON CONFLICT (user_id, device_id, mutation_id) DO UPDATE
+SET id = EXCLUDED.id,
+    request_hash = EXCLUDED.request_hash,
+    response_status = NULL,
+    response_body = NULL,
+    created_at = now(),
+    expires_at = EXCLUDED.expires_at
+WHERE dayorder.client_mutations.expires_at <= now()
 RETURNING *;
 
 -- name: CompleteClientMutation :one

@@ -28,6 +28,13 @@ INSERT INTO dayorder.audit_events (
 )
 RETURNING *;
 
+-- name: CreateAuditEventEntity :exec
+INSERT INTO dayorder.audit_event_entities (
+    audit_event_id, user_id, entity_type, entity_id
+) VALUES (
+    sqlc.arg(audit_event_id), sqlc.arg(user_id), sqlc.arg(entity_type), sqlc.arg(entity_id)
+);
+
 -- name: CreateOutboxEvent :one
 INSERT INTO dayorder.outbox_events (
     id, user_id, event_type, aggregate_type, aggregate_id, payload, available_at

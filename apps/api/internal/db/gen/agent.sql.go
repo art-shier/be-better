@@ -182,6 +182,24 @@ func (q *Queries) CreateAuditEvent(ctx context.Context, arg CreateAuditEventPara
 	return &i, err
 }
 
+const createAuditEventEntity = `-- name: CreateAuditEventEntity :exec
+INSERT INTO dayorder.audit_event_entities (
+    audit_event_id, user_id, entity_type, entity_id
+) VALUES (
+    $1, $2, $3, $4
+)
+`
+
+func (q *Queries) CreateAuditEventEntity(ctx context.Context, auditEventID pgtype.UUID, userID pgtype.UUID, entityType string, entityID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, createAuditEventEntity,
+		auditEventID,
+		userID,
+		entityType,
+		entityID,
+	)
+	return err
+}
+
 const createOutboxEvent = `-- name: CreateOutboxEvent :one
 INSERT INTO dayorder.outbox_events (
     id, user_id, event_type, aggregate_type, aggregate_id, payload, available_at

@@ -89,6 +89,14 @@ INSERT INTO dayorder.client_mutations (
     $1, $2, $3, $4,
     $5, $6
 )
+ON CONFLICT (user_id, device_id, mutation_id) DO UPDATE
+SET id = EXCLUDED.id,
+    request_hash = EXCLUDED.request_hash,
+    response_status = NULL,
+    response_body = NULL,
+    created_at = now(),
+    expires_at = EXCLUDED.expires_at
+WHERE dayorder.client_mutations.expires_at <= now()
 RETURNING id, user_id, device_id, mutation_id, request_hash, response_status, response_body, created_at, expires_at
 `
 

@@ -21,6 +21,7 @@ type Querier interface {
 	CreateAgentChange(ctx context.Context, arg CreateAgentChangeParams) (*DayorderAgentChange, error)
 	CreateAgentRun(ctx context.Context, arg CreateAgentRunParams) (*DayorderAgentRun, error)
 	CreateAuditEvent(ctx context.Context, arg CreateAuditEventParams) (*DayorderAuditEvent, error)
+	CreateAuditEventEntity(ctx context.Context, auditEventID pgtype.UUID, userID pgtype.UUID, entityType string, entityID pgtype.UUID) error
 	CreateCalendarEvent(ctx context.Context, arg CreateCalendarEventParams) (*DayorderCalendarEvent, error)
 	CreateClientMutation(ctx context.Context, arg CreateClientMutationParams) (*DayorderClientMutation, error)
 	CreateGoal(ctx context.Context, arg CreateGoalParams) (*DayorderGoal, error)
