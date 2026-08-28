@@ -1,0 +1,26 @@
+{
+  "name": "dayorder-monorepo",
+  "private": true,
+  "version": "0.2.0",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n web,api -c cyan,green \"npm:dev:web\" \"npm:dev:api\"",
+    "dev:web": "npm run dev --workspace @dayorder/web",
+    "dev:api": "go run ./apps/api/cmd/server",
+    "start": "go run ./apps/api/cmd/server -web-dir apps/web/dist",
+    "preview": "npm run preview --workspace @dayorder/web",
+    "typecheck": "npm run typecheck --workspace @dayorder/web",
+    "test": "npm run test:web && npm run test:api",
+    "test:web": "npm run test --workspace @dayorder/web",
+    "test:api": "go test ./apps/api/...",
+    "test:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/runtime-acceptance.ps1",
+    "build": "npm run build:web && npm run build:api",
+    "build:web": "npm run build --workspace @dayorder/web",
+    "build:api": "go build ./apps/api/..."
+  },
+  "devDependencies": {
+    "concurrently": "10.0.5"
+  }
+}

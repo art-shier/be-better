@@ -1,0 +1,19 @@
+{
+  "name": "日序 DayOrder",
+  "short_name": "日序",
+  "description": "本地优先的个人生活管理应用",
+  "lang": "zh-CN",
+  "start_url": "/#today",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f6f8",
+  "theme_color": "#293947",
+  "icons": [
+    {
+      "src": "/dayorder-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

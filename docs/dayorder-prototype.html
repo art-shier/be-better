@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f3f5f7" />
+  <title>日序 · 让今天更清楚</title>
+  <link rel="icon" href="data:," />
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f4f6f8;
+      --surface: #ffffff;
+      --surface-2: #f7f8fa;
+      --ink: #18232e;
+      --ink-2: #596775;
+      --ink-3: #8995a1;
+      --forest: #293947;
+      --forest-2: #202d38;
+      --jade: #52758a;
+      --mint: #e7eef2;
+      --apricot: #9b6954;
+      --apricot-soft: #f2eae6;
+      --sky: #71869a;
+      --sky-soft: #e6edf2;
+      --lilac: #ece9f1;
+      --line: #dde2e7;
+      --line-dark: rgba(255, 255, 255, 0.14);
+      --danger: #a65752;
+      --display: "Aptos Display", "Segoe UI Variable Display", "PingFang SC", "Microsoft YaHei", sans-serif;
+      --sans: Inter, "Segoe UI Variable Text", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --r-structure: 10px;
+      --r-panel: 8px;
+      --r-control: 6px;
+      --shadow-float: 0 18px 48px rgba(31, 41, 51, 0.16);
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--canvas); -webkit-font-smoothing: antialiased; }
+    body { margin: 0; min-height: 100vh; background: var(--canvas); color: var(--ink); font-family: var(--sans); line-height: 1.5; }
+    button, input, textarea { color: inherit; font: inherit; }
+    button { border: 0; }
+    button, [role="button"] { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+      outline: 3px solid rgba(67, 111, 139, 0.28); outline-offset: 2px;
+    }
+    ::selection { background: #d6e4ed; }
+    h1, h2, h3, p { margin-top: 0; }
+    svg { display: block; }
+    [hidden] { display: none !important; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+    .icon { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+    .app-header {
+      position: sticky; top: 0; z-index: 40; display: grid; grid-template-columns: auto minmax(0,1fr) auto;
+      height: 76px; align-items: center; gap: 34px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.94); color: var(--ink); padding: 0 28px;
+      box-shadow: 0 3px 14px rgba(31,41,51,.035); backdrop-filter: blur(18px);
+    }
+    .brand { display: flex; align-items: center; gap: 11px; color: var(--ink); }
+    .brand-mark { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 6px; background: var(--forest); color: #fff; font-weight: 800; }
+    .brand-copy strong, .brand-copy span { display: block; }
+    .brand-copy strong { font-size: 16px; letter-spacing: .08em; }
+    .brand-copy span { color: var(--ink-3); font-size: 10px; }
+    .primary-nav { display: flex; height: 100%; align-items: center; gap: 2px; }
+    .nav-button { position: relative; min-width: 62px; height: 100%; background: transparent; color: var(--ink-2); cursor: pointer; font-size: 13px; }
+    .nav-button:hover { color: var(--ink); }
+    .nav-button.active { color: var(--ink); font-weight: 700; }
+    .nav-button.active::after { position: absolute; right: 15px; bottom: 0; left: 15px; height: 3px; border-radius: 3px 3px 0 0; background: var(--apricot); content: ""; }
+    .nav-count { display: inline-grid; min-width: 17px; height: 17px; place-items: center; margin-left: 4px; border-radius: 4px; background: var(--apricot-soft); color: #8c5032; font: 700 9px var(--mono); }
+    .header-tools { display: flex; align-items: center; gap: 9px; }
+    .command-button { display: flex; width: 210px; height: 40px; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--surface-2); color: var(--ink-2); cursor: pointer; padding: 0 11px; text-align: left; }
+    .command-button:hover { border-color: #c8d0d7; background: #fff; color: var(--ink); }
+    .key { margin-left: auto; border: 1px solid #d5dbe0; border-radius: 4px; color: var(--ink-3); font: 9px var(--mono); padding: 1px 5px; }
+    .header-icon, .avatar-button { display: grid; width: 40px; height: 40px; place-items: center; border-radius: var(--r-control); background: transparent; color: var(--ink-2); cursor: pointer; }
+    .header-icon:hover, .avatar-button:hover { background: var(--surface-2); color: var(--ink); }
+    .avatar-button { background: var(--mint); color: var(--forest); font-size: 12px; font-weight: 800; }
+    .quick-button { display: inline-flex; min-height: 40px; align-items: center; gap: 7px; border-radius: var(--r-control); background: var(--jade); color: #fff; cursor: pointer; font-weight: 750; padding: 0 14px; }
+    .quick-button:hover { background: #365e78; }
+
+    .workspace { width: min(100%, 1480px); margin: 0 auto; padding: 34px 34px 70px; }
+    .view { display: none; }
+    .view.active { display: block; animation: enter 220ms ease both; }
+    @keyframes enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    .view-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+    .eyebrow { margin-bottom: 7px; color: var(--jade); font-size: 11px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+    .view-head h1 { max-width: 900px; margin-bottom: 6px; font-family: var(--display); font-size: clamp(32px, 3vw, 46px); font-weight: 670; letter-spacing: -.045em; line-height: 1.12; }
+    .view-head p { margin-bottom: 0; color: var(--ink-2); font-size: 14px; }
+    .head-actions, .inline-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+    .primary, .secondary, .text-button, .icon-button {
+      display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 8px; border-radius: var(--r-control); cursor: pointer; font-weight: 700; padding: 0 15px;
+    }
+    .primary { background: var(--jade); color: #fff; }
+    .primary:hover { background: #365e78; }
+    .secondary { border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+    .secondary:hover { border-color: #c5cdd5; background: #fff; }
+    .text-button { min-height: 36px; background: transparent; color: var(--jade); padding: 0 7px; }
+    .text-button:hover { background: var(--mint); }
+    .icon-button { width: 44px; padding: 0; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); }
+
+    .day-board { display: grid; grid-template-columns: minmax(300px,.78fr) minmax(0,1.42fr); gap: 14px; border-radius: var(--r-structure); background: var(--forest); color: #fff; padding: 14px; }
+    .focus-stage { display: flex; min-height: 360px; flex-direction: column; justify-content: space-between; border: 1px solid var(--line-dark); border-radius: 8px; background: var(--forest-2); padding: 26px; }
+    .stage-kicker { display: flex; align-items: center; gap: 9px; color: #b9cfdd; font-size: 11px; font-weight: 800; letter-spacing: .11em; }
+    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--apricot); box-shadow: 0 0 0 5px rgba(201,122,82,.12); }
+    .focus-copy { margin: 34px 0; }
+    .focus-copy h2 { max-width: 430px; margin-bottom: 12px; font-family: var(--display); font-size: clamp(28px,2.5vw,40px); font-weight: 620; letter-spacing: -.04em; line-height: 1.15; }
+    .focus-copy p { max-width: 470px; margin-bottom: 0; color: rgba(255,255,255,.62); font-size: 13px; }
+    .focus-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 20px; color: rgba(255,255,255,.72); font-size: 11px; }
+    .focus-meta span { display: inline-flex; align-items: center; gap: 6px; }
+    .stage-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+    .stage-primary, .stage-secondary { display: inline-flex; min-height: 44px; align-items: center; gap: 8px; border-radius: 6px; cursor: pointer; font-weight: 750; padding: 0 14px; }
+    .stage-primary { background: var(--apricot); color: var(--forest-2); }
+    .stage-secondary { border: 1px solid rgba(255,255,255,.18); background: transparent; color: #fff; }
+    .stage-secondary:hover { background: rgba(255,255,255,.08); }
+    .dayline { display: flex; min-width: 0; flex-direction: column; border: 1px solid var(--line-dark); border-radius: 8px; background: rgba(255,255,255,.06); padding: 22px 22px 18px; }
+    .dayline-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+    .dayline-head h2 { margin: 0; font-size: 15px; }
+    .dayline-head span { color: rgba(255,255,255,.52); font: 10px var(--mono); }
+    .ribbon-scroll { min-width: 0; overflow-x: auto; padding: 27px 0 20px; scrollbar-width: thin; }
+    .time-ribbon { position: relative; min-width: 650px; height: 132px; }
+    .ruler-labels { display: grid; grid-template-columns: repeat(9,1fr); color: rgba(255,255,255,.43); font: 9px var(--mono); }
+    .ruler-labels span:last-child { text-align: right; }
+    .ruler-line { position: absolute; top: 26px; right: 0; left: 0; height: 1px; background: rgba(255,255,255,.14); }
+    .time-event { position: absolute; top: 43px; display: grid; height: 64px; align-content: center; border-radius: 8px; padding: 0 11px; overflow: hidden; }
+    .time-event strong, .time-event small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .time-event strong { font-size: 11px; }
+    .time-event small { margin-top: 3px; opacity: .65; font: 9px var(--mono); }
+    .time-event.focus { left: 8%; width: 24%; background: var(--apricot); color: var(--forest-2); }
+    .time-event.meeting { left: 34%; width: 18%; background: #dce7ef; color: #243a48; }
+    .time-event.dentist { left: 62%; width: 15%; background: var(--lilac); color: #3e3950; }
+    .time-event.run { left: 82%; width: 17%; background: var(--mint); color: var(--forest-2); }
+    .now-marker { position: absolute; top: 18px; bottom: 2px; left: 29%; width: 2px; background: var(--apricot); }
+    .now-marker::before { position: absolute; top: -1px; left: -4px; width: 10px; height: 10px; border: 2px solid var(--forest); border-radius: 50%; background: var(--apricot); content: ""; }
+    .ai-strip { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 12px; margin-top: auto; border-top: 1px solid var(--line-dark); padding-top: 16px; }
+    .ai-mark { display: grid; width: 34px; height: 34px; place-items: center; border-radius: var(--r-control); background: rgba(227,236,242,.13); color: #b9cfdd; }
+    .ai-strip strong, .ai-strip span { display: block; }
+    .ai-strip strong { font-size: 12px; }
+    .ai-strip span { color: rgba(255,255,255,.52); font-size: 10px; }
+    .source-button { min-height: 38px; border-radius: 9px; background: rgba(255,255,255,.09); color: #fff; cursor: pointer; padding: 0 11px; font-size: 11px; }
+    .ai-buttons { display: flex; gap: 6px; }
+    .source-detail { margin-top: 12px; border-top: 1px dashed rgba(255,255,255,.16); color: rgba(255,255,255,.64); font-size: 11px; padding-top: 12px; }
+
+    .today-grid { display: grid; grid-template-columns: minmax(0,1.45fr) minmax(290px,.75fr); gap: 18px; margin-top: 18px; }
+    .panel { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); }
+    .panel-head { display: flex; min-height: 64px; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); padding: 0 20px; }
+    .panel-title { display: flex; min-width: 0; align-items: center; gap: 10px; }
+    .panel-title h2 { margin: 0; font-size: 16px; }
+    .panel-title span { color: var(--ink-3); font: 10px var(--mono); }
+    .agenda-list { padding: 3px 20px 8px; }
+    .agenda-row { display: grid; grid-template-columns: 72px 26px minmax(0,1fr) auto; min-height: 80px; align-items: center; gap: 12px; border-bottom: 1px solid #e5eae7; }
+    .agenda-row:last-child { border-bottom: 0; }
+    .agenda-time { color: var(--ink-3); font: 10px var(--mono); }
+    .agenda-row.current .agenda-time { color: var(--jade); font-weight: 800; }
+    .agenda-node { display: grid; width: 22px; height: 22px; place-items: center; border: 1px solid #bdc9c3; border-radius: 5px; background: #fff; color: transparent; cursor: pointer; }
+    .agenda-row.done .agenda-node { border-color: var(--jade); background: var(--jade); color: #fff; }
+    .agenda-copy { min-width: 0; }
+    .agenda-copy strong, .agenda-copy span { display: block; }
+    .agenda-copy strong { font-size: 13px; }
+    .agenda-copy span { margin-top: 4px; color: var(--ink-3); font-size: 10px; }
+    .agenda-row.done .agenda-copy { opacity: .48; text-decoration: line-through; }
+    .agenda-kind { color: var(--ink-2); font-size: 10px; }
+    .side-stack { display: grid; align-content: start; gap: 18px; }
+    .goal-pulse { padding: 20px; }
+    .goal-pulse-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    .goal-pulse-head h2 { margin-bottom: 4px; font-size: 16px; }
+    .goal-pulse-head p { margin-bottom: 0; color: var(--ink-3); font-size: 10px; }
+    .pace-ring { display: grid; width: 58px; height: 58px; place-items: center; border-radius: 50%; background: conic-gradient(var(--jade) 0 38%, #e5eae7 38%); }
+    .pace-ring::after { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 50%; background: var(--surface); content: "38%"; font: 700 11px var(--mono); }
+    .goal-row { margin-top: 16px; }
+    .goal-row-top { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; }
+    .goal-row-top span:last-child { color: var(--ink-3); font: 9px var(--mono); }
+    .progress { height: 5px; margin-top: 8px; overflow: hidden; border-radius: 3px; background: #e5eae7; }
+    .progress span { display: block; height: 100%; background: var(--jade); }
+    .capture-panel { border-color: #eac6ac; background: var(--apricot-soft); padding: 20px; }
+    .capture-panel h2 { margin-bottom: 6px; font-size: 16px; }
+    .capture-panel p { margin-bottom: 17px; color: #7a5d4a; font-size: 11px; }
+    .capture-field { display: flex; width: 100%; min-height: 48px; align-items: center; gap: 9px; border: 1px solid rgba(130,83,51,.2); border-radius: var(--r-control); background: rgba(255,255,255,.62); color: #765a47; cursor: pointer; padding: 0 13px; text-align: left; }
+
+    .goal-layout { display: grid; grid-template-columns: repeat(12,minmax(0,1fr)); gap: 18px; }
+    .goal-feature { grid-column: span 7; min-height: 320px; border-radius: var(--r-structure); background: var(--forest); color: #fff; padding: 28px; }
+    .goal-feature-top { display: flex; justify-content: space-between; gap: 18px; }
+    .area-label { color: #b9cfdd; font-size: 11px; font-weight: 800; letter-spacing: .1em; }
+    .health { color: var(--apricot); font-size: 11px; }
+    .goal-feature h2 { max-width: 520px; margin: 44px 0 10px; font-family: var(--display); font-size: 34px; letter-spacing: -.04em; }
+    .goal-feature p { max-width: 560px; color: rgba(255,255,255,.6); font-size: 12px; }
+    .feature-progress { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 14px; margin-top: 42px; }
+    .feature-progress strong { font: 700 32px var(--mono); }
+    .feature-progress .progress { grid-column: 1 / -1; background: rgba(255,255,255,.13); }
+    .feature-progress .progress span { background: var(--apricot); }
+    .goal-card { grid-column: span 5; min-height: 320px; padding: 24px; }
+    .goal-card.compact { grid-column: span 6; min-height: 235px; }
+    .goal-card-top { display: flex; align-items: center; justify-content: space-between; }
+    .goal-icon { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 10px; background: var(--mint); color: var(--jade); }
+    .goal-card h2 { margin: 50px 0 9px; font-size: 22px; }
+    .goal-card.compact h2 { margin-top: 30px; }
+    .goal-card p { color: var(--ink-2); font-size: 12px; }
+    .goal-stat { display: flex; align-items: center; justify-content: space-between; margin-top: 30px; font-size: 11px; }
+    .goal-stat strong { font: 700 18px var(--mono); }
+
+    .week-panel { overflow: hidden; }
+    .week-scroll { overflow-x: auto; }
+    .week-board { min-width: 900px; }
+    .week-head, .week-body { display: grid; grid-template-columns: 64px repeat(7,1fr); }
+    .week-head { border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .week-day { display: grid; min-height: 76px; place-items: center; border-left: 1px solid var(--line); }
+    .week-day span { color: var(--ink-3); font-size: 10px; }
+    .week-day strong { font: 700 18px var(--mono); }
+    .week-day.today strong { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 5px; background: var(--forest); color: #fff; }
+    .time-axis { display: grid; grid-template-rows: repeat(6,76px); color: var(--ink-3); font: 9px var(--mono); padding-top: 8px; text-align: center; }
+    .day-column { position: relative; height: 456px; border-left: 1px solid var(--line); background: repeating-linear-gradient(to bottom,transparent 0,transparent 75px,#e8ecea 75px,#e8ecea 76px); }
+    .cal-event { position: absolute; right: 6px; left: 6px; overflow: hidden; border-left: 3px solid var(--jade); border-radius: 8px; background: var(--mint); color: var(--forest); cursor: pointer; font-size: 10px; padding: 7px; text-align: left; }
+    .cal-event.sky { border-color: var(--sky); background: var(--sky-soft); color: #334a58; }
+    .cal-event.orange { border-color: var(--apricot); background: var(--apricot-soft); color: #714a32; }
+
+    .record-layout { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(300px,.75fr); gap: 18px; }
+    .record-feed { padding: 0 22px 8px; }
+    .record-item { display: grid; grid-template-columns: 62px 36px minmax(0,1fr); gap: 14px; border-bottom: 1px solid var(--line); padding: 22px 0; }
+    .record-item:last-child { border-bottom: 0; }
+    .record-time { color: var(--ink-3); font: 10px var(--mono); padding-top: 7px; }
+    .record-type { display: grid; width: 36px; height: 36px; place-items: center; border-radius: var(--r-control); background: var(--mint); color: var(--jade); }
+    .record-copy p { margin-bottom: 10px; font-size: 13px; }
+    .tags { display: flex; flex-wrap: wrap; gap: 7px; }
+    .tag { border-radius: 4px; background: #edf1ef; color: var(--ink-2); font-size: 9px; padding: 4px 7px; }
+    .inbox-panel { padding: 22px; }
+    .inbox-panel h2 { margin-bottom: 6px; font-size: 17px; }
+    .inbox-panel > p { color: var(--ink-2); font-size: 11px; }
+    .parse-card { margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); padding: 15px; }
+    .parse-card strong, .parse-card span { display: block; }
+    .parse-card strong { font-size: 12px; }
+    .parse-card span { margin-top: 6px; color: var(--ink-3); font-size: 10px; }
+    .parse-result { display: flex; align-items: center; gap: 7px; margin-top: 13px; color: var(--jade); font-size: 10px; }
+
+    .note-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+    .filter-button { min-height: 40px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink-2); cursor: pointer; padding: 0 13px; }
+    .filter-button.active { border-color: var(--forest); background: var(--forest); color: #fff; }
+    .note-grid { display: grid; grid-template-columns: repeat(12,minmax(0,1fr)); gap: 18px; }
+    .note-card { grid-column: span 4; min-height: 260px; cursor: pointer; padding: 22px; text-align: left; }
+    .note-card.wide { grid-column: span 8; }
+    .note-card:hover { border-color: #b4c2bb; background: #fff; }
+    .note-card .note-label { color: var(--jade); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+    .note-card h2 { max-width: 520px; margin: 42px 0 12px; font-size: 22px; letter-spacing: -.02em; }
+    .note-card p { max-width: 620px; color: var(--ink-2); font-size: 12px; }
+    .note-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 28px; color: var(--ink-3); font-size: 9px; }
+
+    .agent-hero { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 26px; border-radius: var(--r-structure); background: var(--forest); color: #fff; padding: 26px 28px; }
+    .agent-status { display: flex; align-items: center; gap: 8px; color: #b9cfdd; font-size: 10px; font-weight: 800; letter-spacing: .1em; }
+    .agent-hero h2 { margin: 14px 0 7px; font-size: 25px; }
+    .agent-hero p { margin-bottom: 0; color: rgba(255,255,255,.58); font-size: 12px; }
+    .agent-hero .primary { background: var(--apricot); color: var(--forest-2); }
+    .agent-layout { display: grid; grid-template-columns: minmax(0,1.45fr) minmax(290px,.55fr); gap: 18px; margin-top: 18px; }
+    .run-panel { overflow: hidden; }
+    .run-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; border-bottom: 1px solid var(--line); padding: 22px; }
+    .run-header small { color: var(--ink-3); font: 9px var(--mono); }
+    .run-header h2 { max-width: 700px; margin: 8px 0 0; font-size: 18px; }
+    .status-label { border-radius: 4px; background: var(--apricot-soft); color: #8a5633; font-size: 10px; padding: 6px 8px; }
+    .run-steps { padding: 8px 22px; }
+    .run-step { display: grid; grid-template-columns: 30px minmax(0,1fr) auto; min-height: 68px; align-items: center; gap: 12px; }
+    .step-node { display: grid; width: 26px; height: 26px; place-items: center; border: 1px solid var(--line); border-radius: 9px; color: var(--ink-3); }
+    .run-step.done .step-node { border-color: #b8d0c4; background: var(--mint); color: var(--jade); }
+    .run-step.current .step-node { border-color: #e6b995; background: var(--apricot-soft); color: #9a5e35; }
+    .run-step strong, .run-step span { display: block; }
+    .run-step strong { font-size: 12px; }
+    .run-step span, .step-meta { margin-top: 3px; color: var(--ink-3); font-size: 9px; }
+    .approval-box { border-top: 1px solid var(--line); background: var(--surface-2); padding: 22px; }
+    .approval-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+    .approval-head h3 { margin-bottom: 4px; font-size: 15px; }
+    .approval-head p { margin-bottom: 0; color: var(--ink-3); font-size: 10px; }
+    .risk { color: var(--sky); font-size: 10px; }
+    .change-row { display: grid; grid-template-columns: 22px minmax(0,1fr); gap: 12px; margin-top: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 15px; }
+    .change-row input { width: 17px; height: 17px; accent-color: var(--jade); }
+    .change-row strong, .change-row span { display: block; }
+    .change-row strong { font-size: 12px; }
+    .change-row span { margin-top: 5px; color: var(--ink-2); font-size: 10px; }
+    .diff { font-family: var(--mono); }
+    .diff del { color: var(--danger); }
+    .diff ins { color: var(--jade); text-decoration: none; }
+    .approval-actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 16px; }
+    .agent-side { display: grid; align-content: start; gap: 18px; }
+    .permission-panel, .audit-panel { padding: 20px; }
+    .permission-panel h2, .audit-panel h2 { margin-bottom: 14px; font-size: 16px; }
+    .permission-row { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
+    .permission-row:last-child { border-bottom: 0; }
+    .permission-copy strong, .permission-copy span { display: block; }
+    .permission-copy strong { font-size: 11px; }
+    .permission-copy span { color: var(--ink-3); font-size: 9px; }
+    .switch { position: relative; width: 40px; height: 24px; flex: 0 0 auto; border-radius: 12px; background: #ccd3cf; cursor: pointer; }
+    .switch::after { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.16); content: ""; transition: transform 160ms ease; }
+    .switch[aria-pressed="true"] { background: var(--jade); }
+    .switch[aria-pressed="true"]::after { transform: translateX(16px); }
+    .audit-item { position: relative; margin-left: 6px; border-left: 1px solid var(--line); padding: 0 0 18px 16px; }
+    .audit-item:last-child { padding-bottom: 0; }
+    .audit-item::before { position: absolute; top: 4px; left: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--jade); content: ""; }
+    .audit-item strong, .audit-item span { display: block; }
+    .audit-item strong { font-size: 10px; }
+    .audit-item span { margin-top: 4px; color: var(--ink-3); font-size: 9px; }
+
+    .bottom-nav { display: none; }
+    .overlay { position: fixed; inset: 0; z-index: 80; display: none; align-items: center; justify-content: center; background: rgba(8,24,19,.55); backdrop-filter: blur(8px); padding: 20px; }
+    .overlay.open { display: flex; }
+    .modal { width: min(100%,600px); max-height: calc(100vh - 40px); overflow: auto; border: 1px solid rgba(255,255,255,.62); border-radius: var(--r-structure); background: var(--surface); box-shadow: var(--shadow-float); }
+    .modal.small { width: min(100%,520px); }
+    .modal-head { display: flex; min-height: 68px; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); padding: 0 20px; }
+    .modal-head h2 { margin: 0; font-size: 17px; }
+    .modal-body { padding: 20px; }
+    .modal-footer { display: flex; align-items: center; justify-content: flex-end; gap: 9px; border-top: 1px solid var(--line); background: var(--surface-2); padding: 14px 20px; }
+    .auth-copy { margin: 4px 0 0; color: var(--ink-3); font-size: 10px; }
+    .auth-tabs, .account-tabs { display: grid; grid-template-columns: repeat(2,1fr); gap: 3px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--surface-2); padding: 3px; }
+    .auth-tabs button, .account-tabs button { min-height: 38px; border-radius: 4px; background: transparent; color: var(--ink-2); cursor: pointer; font-weight: 700; }
+    .auth-tabs button.active, .account-tabs button.active { background: #fff; box-shadow: 0 1px 4px rgba(24,35,46,.08); color: var(--ink); }
+    .auth-form { display: grid; gap: 12px; margin-top: 16px; }
+    .auth-field { display: grid; gap: 6px; font-size: 10px; font-weight: 700; }
+    .auth-field input { width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: var(--r-control); outline: 0; padding: 0 11px; }
+    .auth-field input:focus { border-color: var(--jade); box-shadow: 0 0 0 3px rgba(82,117,138,.1); }
+    .migration-choice { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 10px; border: 1px solid #d7c0b5; border-radius: var(--r-panel); background: var(--apricot-soft); padding: 12px; }
+    .migration-choice input { width: 18px; height: 18px; accent-color: var(--apricot); }
+    .migration-choice strong, .migration-choice small { display: block; }
+    .migration-choice strong { font-size: 11px; }
+    .migration-choice small { color: var(--ink-3); font: 9px var(--mono); }
+    .migration-note { border-left: 2px solid var(--apricot); background: var(--apricot-soft); color: #735447; padding: 9px 11px; font-size: 9px; }
+    .auth-error { min-height: 18px; margin: 0; color: var(--danger); font-size: 10px; }
+    .auth-submit { width: 100%; }
+    .account-menu { position: fixed; top: 68px; right: 24px; z-index: 65; display: none; width: 292px; border: 1px solid var(--line); border-radius: var(--r-panel); background: #fff; box-shadow: var(--shadow-float); padding: 7px; }
+    .account-menu.open { display: block; }
+    .account-menu-head { display: grid; grid-template-columns: 36px minmax(0,1fr); align-items: center; gap: 9px; padding: 9px; }
+    .account-menu-head > span { display: grid; width: 36px; height: 36px; place-items: center; border-radius: var(--r-control); background: var(--forest); color: #fff; font-weight: 800; }
+    .account-menu-head strong, .account-menu-head small { display: block; }
+    .account-menu-head small { color: var(--ink-3); font-size: 9px; }
+    .identity-band { margin: 2px 4px 7px; border-left: 2px solid var(--jade); background: var(--mint); color: var(--jade); padding: 9px 10px; font-size: 10px; }
+    .identity-band small { display: block; color: var(--ink-2); font: 8px var(--mono); }
+    .account-menu > button { width: 100%; min-height: 42px; border-radius: var(--r-control); background: transparent; color: var(--ink-2); cursor: pointer; padding: 0 9px; text-align: left; }
+    .account-menu > button:hover { background: var(--surface-2); color: var(--ink); }
+    .account-menu > button.danger { border-top: 1px solid var(--line); color: var(--danger); }
+    .account-tabs { grid-template-columns: repeat(3,1fr); }
+    .account-pane { display: none; margin-top: 16px; }
+    .account-pane.active { display: block; }
+    .account-row { display: flex; min-height: 54px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
+    .account-row strong, .account-row small { display: block; }
+    .account-row small { color: var(--ink-3); font-size: 9px; }
+    .account-row b { border-radius: 4px; background: var(--mint); color: var(--jade); font-size: 9px; padding: 4px 7px; }
+    .close-button { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer; }
+    .close-button:hover { background: #edf1ef; }
+    .capture-types { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .type-button { min-height: 38px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--ink-2); cursor: pointer; padding: 0 11px; }
+    .type-button.active { border-color: var(--jade); background: var(--mint); color: var(--forest); }
+    .capture-area, .agent-area { width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 6px; background: #fff; padding: 14px; }
+    .capture-area { min-height: 140px; }
+    .agent-area { min-height: 110px; }
+    .capture-area:focus, .agent-area:focus { border-color: var(--jade); }
+    .parse-preview { display: flex; align-items: center; gap: 8px; margin-top: 13px; color: var(--ink-3); font-size: 10px; }
+    .search-wrap { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; padding: 0 13px; }
+    .search-wrap input { width: 100%; height: 50px; border: 0; outline: 0; background: transparent; }
+    .search-results { display: grid; gap: 5px; margin-top: 14px; }
+    .search-result { display: grid; grid-template-columns: 36px minmax(0,1fr); align-items: center; gap: 10px; min-height: 58px; border-radius: 6px; cursor: pointer; padding: 8px; }
+    .search-result:hover { background: var(--surface-2); }
+    .search-result strong, .search-result span { display: block; }
+    .search-result strong { font-size: 12px; }
+    .search-result span { color: var(--ink-3); font-size: 9px; }
+    .plan-list { display: grid; gap: 10px; }
+    .plan-row { display: grid; grid-template-columns: 22px 72px minmax(0,1fr); gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+    .plan-row input { width: 17px; height: 17px; accent-color: var(--jade); }
+    .plan-time { font: 10px var(--mono); }
+    .plan-copy strong, .plan-copy span { display: block; }
+    .plan-copy strong { font-size: 12px; }
+    .plan-copy span { margin-top: 4px; color: var(--ink-3); font-size: 9px; }
+    .toast { position: fixed; right: 22px; bottom: 22px; z-index: 100; max-width: min(360px,calc(100vw - 32px)); border-radius: 8px; background: var(--forest-2); box-shadow: var(--shadow-float); color: #fff; opacity: 0; padding: 12px 16px; pointer-events: none; transform: translateY(10px); transition: opacity 160ms ease, transform 160ms ease; font-size: 12px; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 1080px) {
+      .command-button { width: 170px; }
+      .today-grid, .agent-layout, .record-layout { grid-template-columns: 1fr; }
+      .side-stack { grid-template-columns: repeat(2,minmax(0,1fr)); }
+      .agent-side { grid-template-columns: repeat(2,minmax(0,1fr)); }
+      .goal-feature { grid-column: span 12; }
+      .goal-card { grid-column: span 6; }
+    }
+
+    @media (max-width: 820px) {
+      .app-header { height: 66px; grid-template-columns: 1fr auto; padding: 0 14px; }
+      .brand-copy, .primary-nav, .command-button, .header-icon { display: none; }
+      .workspace { padding: 24px 16px 96px; }
+      .view-head { align-items: flex-start; flex-direction: column; }
+      .view-head h1 { font-size: 34px; }
+      .day-board { grid-template-columns: minmax(0,1fr); }
+      .focus-stage { min-height: 300px; }
+      .side-stack, .agent-side { grid-template-columns: 1fr; }
+      .goal-card, .goal-card.compact, .note-card, .note-card.wide { grid-column: span 12; }
+      .bottom-nav { position: fixed; right: 10px; bottom: 10px; left: 10px; z-index: 60; display: grid; grid-template-columns: repeat(6,1fr); min-height: 68px; border: 1px solid rgba(255,255,255,.14); border-radius: 10px; background: rgba(29,39,50,.96); box-shadow: var(--shadow-float); backdrop-filter: blur(18px); padding: 6px; }
+      .bottom-button { display: grid; min-width: 0; place-items: center; gap: 2px; border-radius: 6px; background: transparent; color: rgba(255,255,255,.54); cursor: pointer; font-size: 9px; padding: 4px 0; }
+      .bottom-button.active { background: rgba(255,255,255,.1); color: #fff; }
+      .bottom-button.active .icon { color: var(--apricot); }
+    }
+
+    @media (max-width: 560px) {
+      .quick-button span { display: none; }
+      .quick-button { width: 42px; padding: 0; justify-content: center; }
+      .workspace { padding: 20px 12px 94px; }
+      .view-head { margin-bottom: 18px; }
+      .view-head h1 { font-size: 29px; }
+      .head-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+      .head-actions > * { width: 100%; }
+      .day-board { border-radius: 10px; padding: 9px; }
+      .focus-stage, .dayline { border-radius: 8px; padding: 18px; }
+      .focus-stage { min-height: 280px; }
+      .focus-copy h2 { font-size: 28px; }
+      .ai-strip { grid-template-columns: auto minmax(0,1fr); }
+      .ai-buttons { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+      .source-button { width: 100%; }
+      .panel { border-radius: var(--r-panel); }
+      .panel-head { min-height: 58px; padding: 0 14px; }
+      .agenda-list { padding: 3px 14px 8px; }
+      .agenda-row { grid-template-columns: 52px 24px minmax(0,1fr); gap: 9px; }
+      .agenda-kind { display: none; }
+      .record-item { grid-template-columns: 36px minmax(0,1fr); }
+      .record-time { display: none; }
+      .goal-feature { min-height: 300px; border-radius: var(--r-structure); padding: 22px; }
+      .goal-feature h2 { margin-top: 36px; font-size: 29px; }
+      .agent-hero { grid-template-columns: 1fr; border-radius: var(--r-structure); padding: 22px; }
+      .agent-hero .primary { width: 100%; }
+      .run-header, .approval-head, .approval-actions { align-items: stretch; flex-direction: column; }
+      .run-step { grid-template-columns: 30px minmax(0,1fr); }
+      .step-meta { display: none; }
+      .approval-actions { display: grid; grid-template-columns: 1fr 1fr; }
+      .modal-footer { align-items: stretch; flex-direction: column-reverse; }
+      .modal-footer button { width: 100%; }
+      .overlay { align-items: flex-end; padding: 0; }
+      .modal, .modal.small { max-height: calc(100vh - 34px); border-radius: 10px 10px 0 0; }
+      .account-menu { top: 60px; right: 10px; width: min(292px,calc(100vw - 20px)); }
+      .toast { right: 16px; bottom: 92px; left: 16px; max-width: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="sr-only" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11 12 3l9 8v9H3Z"/><path d="M9 20v-6h6v6"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><path d="m15 9 6-6M17 3h4v4"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></symbol>
+    <symbol id="i-record" viewBox="0 0 24 24"><path d="M5 3h14v18H5Z"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5Z"/><path d="M14 3v5h5M8 12h8M8 16h6"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 2 1.6 5.4L19 9l-5.4 1.6L12 16l-1.6-5.4L5 9l5.4-1.6Z"/><path d="m19 15 .7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7Z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="7"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l4 2"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 4h6a3 3 0 0 1 3 3v14a3 3 0 0 0-3-3H4ZM20 4h-6a3 3 0 0 0-3 3v14a3 3 0 0 1 3-3h6Z"/></symbol>
+  </svg>
+
+  <header class="app-header">
+    <div class="brand"><div class="brand-mark">序</div><div class="brand-copy"><strong>日序</strong><span>DayOrder</span></div></div>
+    <nav class="primary-nav" aria-label="主导航">
+      <button class="nav-button active" data-view="today">今天</button>
+      <button class="nav-button" data-view="goals">目标</button>
+      <button class="nav-button" data-view="calendar">日程</button>
+      <button class="nav-button" data-view="records">记录 <span class="nav-count">3</span></button>
+      <button class="nav-button" data-view="notes">笔记</button>
+      <button class="nav-button" data-view="agent">Agent <span class="nav-count approval-count">2</span></button>
+    </nav>
+    <div class="header-tools">
+      <button class="command-button" id="searchButton"><svg class="icon"><use href="#i-search"/></svg><span>查找任何内容</span><span class="key">Ctrl K</span></button>
+      <button class="header-icon" aria-label="游客数据仅保存在本机" id="privacyButton"><svg class="icon"><use href="#i-lock"/></svg></button>
+      <button class="quick-button" data-open-capture><svg class="icon"><use href="#i-plus"/></svg><span>快速记录</span></button>
+      <button class="avatar-button" id="accountButton" aria-label="登录或注册" aria-expanded="false">游</button>
+    </div>
+  </header>
+  <div class="account-menu" id="accountMenu" role="menu" aria-label="账户菜单">
+    <div class="account-menu-head"><span>YS</span><div><strong>一山</strong><small>yishan@example.com</small></div></div>
+    <div class="identity-band"><strong>账户数据已同步</strong><small>最近同步 20:38</small></div>
+    <button role="menuitem" data-open-account="profile">账户资料</button>
+    <button role="menuitem" data-open-account="security">账户安全</button>
+    <button role="menuitem" data-open-account="session">数据与当前会话</button>
+    <button class="danger" role="menuitem" id="logoutButton">退出登录</button>
+  </div>
+
+  <main class="workspace">
+    <section class="view active" data-panel="today">
+      <div class="view-head">
+        <div><div class="eyebrow" id="todayDate">8 月 27 日 · 星期四</div><h1 id="greeting">下午好，把注意力留给重要的事。</h1><p>今天还有 3 小时 20 分钟可安排，下一项固定日程在 10:30。</p></div>
+        <div class="head-actions"><button class="secondary" id="energyButton">精力 3 / 5</button><button class="primary" id="reviewButton">晚间复盘</button></div>
+      </div>
+
+      <section class="day-board" aria-label="今日行动与时间安排">
+        <div class="focus-stage">
+          <div class="stage-kicker"><span class="live-dot"></span>现在 · 09:00—10:10</div>
+          <div class="focus-copy"><h2>完成产品方案核心流程</h2><p>先把首次使用、今日计划和晚间复盘串成一条可验证路径。暂时关闭消息提醒。</p><div class="focus-meta"><span><svg class="icon"><use href="#i-target"/></svg>完成个人产品方案</span><span><svg class="icon"><use href="#i-clock"/></svg>剩余 43 分钟</span></div></div>
+          <div class="stage-actions"><button class="stage-primary" id="focusButton"><svg class="icon"><use href="#i-play"/></svg><span>开始专注</span></button><button class="stage-secondary" data-open-capture><svg class="icon"><use href="#i-plus"/></svg>记下干扰</button></div>
+        </div>
+        <div class="dayline">
+          <div class="dayline-head"><h2>日序时间带</h2><span>08:00—20:00 · 可用 3h20m</span></div>
+          <div class="ribbon-scroll"><div class="time-ribbon"><div class="ruler-labels"><span>08</span><span>09</span><span>10</span><span>12</span><span>14</span><span>16</span><span>18</span><span>19</span><span>20</span></div><div class="ruler-line"></div><div class="now-marker"></div><button class="time-event focus" data-detail="产品方案初稿 · 70 分钟专注块"><strong>产品方案</strong><small>09:00—10:10</small></button><button class="time-event meeting" data-detail="项目周会 · 腾讯会议"><strong>项目周会</strong><small>10:30—11:15</small></button><button class="time-event dentist" data-detail="牙医复诊 · 瑞尔齿科"><strong>牙医复诊</strong><small>14:30—15:20</small></button><button class="time-event run" data-detail="轻松跑 5 公里 · 关联健康目标"><strong>轻松跑</strong><small>18:10—18:45</small></button></div></div>
+          <div class="ai-strip"><span class="ai-mark"><svg class="icon"><use href="#i-spark"/></svg></span><div><strong>把跑步提前到晚饭前，完成率可能更高</strong><span>基于近两周执行记录，写入前仍需确认</span></div><div class="ai-buttons"><button class="source-button" id="planButton">建议计划</button><button class="source-button" id="sourceButton">3 条依据</button></div></div>
+          <div class="source-detail" id="sourceDetail" hidden>目标：跑完 10 公里 · 日程：18:10 无冲突 · 记录：近两周 3 次晚间训练被推迟</div>
+        </div>
+      </section>
+
+      <div class="today-grid">
+        <section class="panel">
+          <div class="panel-head"><div class="panel-title"><h2>接下来</h2><span id="taskCount">1 / 4 完成</span></div><button class="text-button" data-open-capture>添加任务 <svg class="icon"><use href="#i-plus"/></svg></button></div>
+          <div class="agenda-list" id="agendaList">
+            <div class="agenda-row current"><time class="agenda-time">09:00</time><button class="agenda-node" aria-label="完成产品方案核心流程"><svg class="icon"><use href="#i-check"/></svg></button><div class="agenda-copy"><strong>产品方案核心流程</strong><span>预计 70 分钟 · 目标推进</span></div><span class="agenda-kind">正在进行</span></div>
+            <div class="agenda-row"><time class="agenda-time">14:10</time><button class="agenda-node" aria-label="完成带上牙片和医保卡"><svg class="icon"><use href="#i-check"/></svg></button><div class="agenda-copy"><strong>带上牙片和医保卡</strong><span>牙医复诊前 · 低精力可做</span></div><span class="agenda-kind">重要</span></div>
+            <div class="agenda-row done"><time class="agenda-time">已完成</time><button class="agenda-node" aria-label="恢复整理用户访谈记录"><svg class="icon"><use href="#i-check"/></svg></button><div class="agenda-copy"><strong>整理用户访谈记录</strong><span>用时 32 分钟 · 关联产品方案</span></div><span class="agenda-kind">08:46</span></div>
+            <div class="agenda-row"><time class="agenda-time">灵活</time><button class="agenda-node" aria-label="完成阅读 20 页"><svg class="icon"><use href="#i-check"/></svg></button><div class="agenda-copy"><strong>阅读《设计中的设计》20 页</strong><span>预计 25 分钟 · 年度阅读</span></div><span class="agenda-kind">普通</span></div>
+          </div>
+        </section>
+        <aside class="side-stack">
+          <section class="panel goal-pulse"><div class="goal-pulse-head"><div><h2>目标脉搏</h2><p>本周 2 项保持节奏，1 项需关注</p></div><div class="pace-ring"></div></div><div class="goal-row"><div class="goal-row-top"><span>个人产品方案</span><span>42%</span></div><div class="progress"><span style="width:42%"></span></div></div><div class="goal-row"><div class="goal-row-top"><span>稳定跑完 10 公里</span><span>2 / 3 次</span></div><div class="progress"><span style="width:66%;background:var(--apricot)"></span></div></div><div class="goal-row"><div class="goal-row-top"><span>年度阅读 24 本</span><span>15 / 24</span></div><div class="progress"><span style="width:62%;background:var(--sky)"></span></div></div></section>
+          <section class="panel capture-panel"><h2>先记下来，再决定放哪</h2><p>原文会一直保留；解析失败也不会丢失。</p><button class="capture-field" data-open-capture><svg class="icon"><use href="#i-record"/></svg>“周五下午三点看牙…”</button></section>
+        </aside>
+      </div>
+    </section>
+
+    <section class="view" data-panel="goals">
+      <div class="view-head"><div><div class="eyebrow">方向与进展</div><h1>目标不是数字，是接下来要发生的变化。</h1><p>用里程碑、累计、习惯或项目完成度衡量，不强迫所有目标变成百分比。</p></div><div class="head-actions"><button class="secondary">本周复盘</button><button class="primary" data-open-capture data-capture-type="goal"><svg class="icon"><use href="#i-plus"/></svg>新建目标</button></div></div>
+      <div class="goal-layout">
+        <article class="goal-feature"><div class="goal-feature-top"><span class="area-label">工作 · 项目完成</span><span class="health">需要关注 · 4 天未推进</span></div><h2>完成个人产品方案</h2><p>把生活管理的想法收敛成一份可验证、可开发的产品方案，并验证“今天优先”的核心闭环。</p><div class="feature-progress"><span>2 / 5 个里程碑</span><strong>42%</strong><div class="progress"><span style="width:42%"></span></div></div></article>
+        <article class="panel goal-card"><div class="goal-card-top"><span class="goal-icon"><svg class="icon"><use href="#i-target"/></svg></span><span class="health" style="color:var(--jade)">进展正常</span></div><h2>稳定跑完 10 公里</h2><p>每周三次训练，先建立稳定跑量，再逐步增加距离。</p><div class="goal-stat"><span>本周训练</span><strong>2 / 3</strong></div><div class="progress"><span style="width:66%;background:var(--apricot)"></span></div></article>
+        <article class="panel goal-card compact"><div class="goal-card-top"><span class="goal-icon" style="background:var(--sky-soft);color:var(--sky)"><svg class="icon"><use href="#i-book"/></svg></span><span class="health" style="color:var(--jade)">进展正常</span></div><h2>年度阅读 24 本</h2><p>保留每本书真正改变了什么。</p><div class="goal-stat"><span>今年已读</span><strong>15 / 24</strong></div></article>
+        <article class="panel goal-card compact"><div class="goal-card-top"><span class="goal-icon" style="background:var(--lilac);color:#625c7b"><svg class="icon"><use href="#i-record"/></svg></span><span class="health" style="color:var(--ink-3)">已暂停</span></div><h2>学习基础摄影</h2><p>历史进度保留，等工作节奏稳定后继续。</p><div class="goal-stat"><span>整体进度</span><strong>28%</strong></div></article>
+      </div>
+    </section>
+
+    <section class="view" data-panel="calendar">
+      <div class="view-head"><div><div class="eyebrow">8 月 24—30 日</div><h1>先看真实可用的时间。</h1><p>固定日程、缓冲和任务时间块放在同一张周视图中。</p></div><div class="head-actions"><button class="secondary">今天</button><button class="primary" data-open-capture data-capture-type="event"><svg class="icon"><use href="#i-plus"/></svg>添加日程</button></div></div>
+      <section class="panel week-panel"><div class="week-scroll"><div class="week-board"><div class="week-head"><div></div><div class="week-day"><span>周一</span><strong>24</strong></div><div class="week-day"><span>周二</span><strong>25</strong></div><div class="week-day"><span>周三</span><strong>26</strong></div><div class="week-day today"><span>周四</span><strong>27</strong></div><div class="week-day"><span>周五</span><strong>28</strong></div><div class="week-day"><span>周六</span><strong>29</strong></div><div class="week-day"><span>周日</span><strong>30</strong></div></div><div class="week-body"><div class="time-axis"><span>08:00</span><span>10:00</span><span>12:00</span><span>14:00</span><span>16:00</span><span>18:00</span></div><div class="day-column"><button class="cal-event sky" style="top:76px;height:56px">团队同步<br>10:00</button></div><div class="day-column"><button class="cal-event" style="top:150px;height:70px">方案专注块<br>12:00</button></div><div class="day-column"><button class="cal-event orange" style="top:304px;height:56px">力量训练<br>16:00</button></div><div class="day-column"><button class="cal-event" style="top:38px;height:68px">产品方案<br>09:00</button><button class="cal-event sky" style="top:112px;height:52px">项目周会<br>10:30</button><button class="cal-event orange" style="top:246px;height:64px">牙医复诊<br>14:30</button><button class="cal-event" style="top:382px;height:48px">轻松跑 5km<br>18:10</button></div><div class="day-column"><button class="cal-event sky" style="top:92px;height:70px">产品评审<br>10:20</button></div><div class="day-column"><button class="cal-event orange" style="top:224px;height:62px">朋友聚餐<br>13:50</button></div><div class="day-column"><button class="cal-event" style="top:334px;height:70px">周复盘<br>16:50</button></div></div></div></div></section>
+    </section>
+
+    <section class="view" data-panel="records">
+      <div class="view-head"><div><div class="eyebrow">发生过的真实片段</div><h1>记录不要求立刻变得有用。</h1><p>先保留原文和发生时间，之后再整理成任务、日程或笔记。</p></div><button class="primary" data-open-capture><svg class="icon"><use href="#i-plus"/></svg>写一条记录</button></div>
+      <div class="record-layout"><section class="panel"><div class="panel-head"><div class="panel-title"><h2>今天</h2><span>3 条记录</span></div><button class="text-button">筛选</button></div><div class="record-feed" id="recordFeed"><article class="record-item"><time class="record-time">08:42</time><span class="record-type"><svg class="icon"><use href="#i-clock"/></svg></span><div class="record-copy"><p>昨晚睡得稍晚，但起床后的状态比预想中好。上午先不要被消息打断。</p><div class="tags"><span class="tag">精力 3/5</span><span class="tag">晨间状态</span></div></div></article><article class="record-item"><time class="record-time">10:18</time><span class="record-type" style="background:var(--apricot-soft);color:#925b36"><svg class="icon"><use href="#i-spark"/></svg></span><div class="record-copy"><p>产品首页不应该只是数据仪表盘，而要先回答“今天做什么”。</p><div class="tags"><span class="tag">产品思考</span><span class="tag">待整理为笔记</span></div></div></article><article class="record-item"><time class="record-time">11:35</time><span class="record-type" style="background:var(--sky-soft);color:var(--sky)"><svg class="icon"><use href="#i-check"/></svg></span><div class="record-copy"><p>完成访谈记录整理，发现“计划太满”是最常出现的挫败来源。</p><div class="tags"><span class="tag">已完成</span><span class="tag">个人产品方案</span></div></div></article></div></section><aside class="panel inbox-panel"><h2>收件箱解析</h2><p>系统只生成草稿，你确认后才会写入其他模块。</p><div class="parse-card"><strong>“周五下午三点看牙”</strong><span>原文 · 今天 12:06</span><div class="parse-result"><svg class="icon"><use href="#i-calendar"/></svg>识别为日程 · 周五 15:00</div></div><div class="parse-card"><strong>“明早跑 5 公里”</strong><span>原文 · 今天 11:48</span><div class="parse-result"><svg class="icon"><use href="#i-target"/></svg>任务草稿 · 关联健康目标</div></div><button class="secondary" style="width:100%;margin-top:16px">整理 2 条草稿</button></aside></div>
+    </section>
+
+    <section class="view" data-panel="notes">
+      <div class="view-head"><div><div class="eyebrow">长期知识</div><h1>把碎片整理成以后还能找到的东西。</h1><p>笔记保留标题、正文、标签和与目标、日程之间的关系。</p></div><button class="primary" data-open-capture data-capture-type="note"><svg class="icon"><use href="#i-plus"/></svg>新建笔记</button></div>
+      <div class="note-toolbar"><button class="filter-button active" data-note-filter="all">全部 18</button><button class="filter-button" data-note-filter="product">产品思考 6</button><button class="filter-button" data-note-filter="reading">阅读笔记 5</button><button class="filter-button" data-note-filter="health">健康训练 4</button></div>
+      <div class="note-grid"><button class="panel note-card wide" data-note-kind="product"><span class="note-label">产品思考</span><h2>生活管理产品的核心闭环</h2><p>从目标出发，将真实时间约束、个人精力和历史执行记录组合成今天真正可行的计划。</p><div class="note-meta"><span>今天 10:26</span><span>关联 3 个目标</span></div></button><button class="panel note-card" data-note-kind="reading"><span class="note-label">阅读笔记</span><h2>《设计中的设计》</h2><p>设计是重新发现事物之间关系的一种方式。</p><div class="note-meta"><span>昨天</span><span>1,284 字</span></div></button><button class="panel note-card" data-note-kind="health"><span class="note-label">健康训练</span><h2>10 公里训练阶段复盘</h2><p>下一阶段优先保持轻松跑心率，不急于增加强度。</p><div class="note-meta"><span>8 月 24 日</span><span>关联健康目标</span></div></button><button class="panel note-card wide" data-note-kind="product"><span class="note-label">生活方法</span><h2>低精力日的任务选择</h2><p>把任务分为创造、沟通与整理三种。精力不足时不靠意志力硬顶，而是切换到准备好的替代清单。</p><div class="note-meta"><span>8 月 20 日</span><span>856 字</span></div></button></div>
+    </section>
+
+    <section class="view" data-panel="agent">
+      <div class="view-head"><div><div class="eyebrow">可委托、可监督</div><h1>把整理交出去，把决定留给自己。</h1><p>查看读取范围、运行步骤、待确认变更和操作历史。</p></div><button class="primary" id="delegateButton"><svg class="icon"><use href="#i-spark"/></svg>发起委托</button></div>
+      <section class="agent-hero"><div><div class="agent-status"><span class="live-dot" style="background:#83aec8"></span>本地 Agent 已就绪</div><h2 id="agentHeroTitle">有 2 项变更正在等待你的确认</h2><p>只读分析已经完成，目前没有修改任何数据。</p></div><button class="primary" id="jumpApproval">检查 2 项变更</button></section>
+      <div class="agent-layout"><section class="panel run-panel"><div class="run-header"><div><small>当前委托 · 今天 09:12</small><h2>整理本周剩余计划，优先保证产品方案和跑步目标</h2></div><span class="status-label" id="runStatus">等待确认</span></div><div class="run-steps"><div class="run-step done"><span class="step-node"><svg class="icon"><use href="#i-check"/></svg></span><div><strong>读取授权数据</strong><span>目标、未完成任务和本周日程</span></div><span class="step-meta">18 个对象</span></div><div class="run-step done"><span class="step-node"><svg class="icon"><use href="#i-check"/></svg></span><div><strong>检查时间与目标冲突</strong><span>发现 1 个冲突、1 个停滞目标</span></div><span class="step-meta">规则校验通过</span></div><div class="run-step current"><span class="step-node"><svg class="icon"><use href="#i-spark"/></svg></span><div><strong>生成待确认变更</strong><span>2 项变更，需要你的决定</span></div><span class="step-meta">当前步骤</span></div><div class="run-step"><span class="step-node"><svg class="icon"><use href="#i-lock"/></svg></span><div><strong>写入并核验</strong><span>确认后执行；失败不会产生部分写入</span></div><span class="step-meta">尚未开始</span></div></div><div class="approval-box" id="approvalBox"><div class="approval-head"><div><h3>待确认变更</h3><p>取消勾选即可让 Agent 跳过该项。</p></div><span class="risk">低风险 · 可撤销</span></div><label class="change-row"><input class="agent-change" type="checkbox" checked/><span><strong>调整“轻松跑 5 公里”的时间</strong><span class="diff"><del>周四 20:30</del> → <ins>周四 18:10</ins></span><span>近两周晚间训练更容易被推迟，18:10 与固定日程无冲突。</span></span></label><label class="change-row"><input class="agent-change" type="checkbox" checked/><span><strong>创建“产品方案核心流程”专注任务</strong><span class="diff"><ins>今天 09:00—10:10 · 70 分钟</ins></span><span>该目标已 4 天未推进，上午是深度任务完成率最高的时段。</span></span></label><div class="approval-actions"><button class="text-button" id="showAgentSources">查看 3 条依据</button><div class="inline-actions"><button class="secondary" id="rejectChanges">全部拒绝</button><button class="primary" id="approveChanges">确认并执行 2 项</button></div></div></div></section><aside class="agent-side"><section class="panel permission-panel"><h2>数据权限</h2><div class="permission-row"><div class="permission-copy"><strong>目标与任务</strong><span>允许读取全部</span></div><button class="switch" aria-label="目标与任务权限" aria-pressed="true"></button></div><div class="permission-row"><div class="permission-copy"><strong>日程</strong><span>只读未来 30 天</span></div><button class="switch" aria-label="日程权限" aria-pressed="true"></button></div><div class="permission-row"><div class="permission-copy"><strong>记录</strong><span>只读最近 14 天</span></div><button class="switch" aria-label="记录权限" aria-pressed="true"></button></div><div class="permission-row"><div class="permission-copy"><strong>私人笔记</strong><span>本次任务不允许</span></div><button class="switch" aria-label="私人笔记权限" aria-pressed="false"></button></div></section><section class="panel audit-panel"><h2>最近活动</h2><div class="audit-item"><strong>生成周计划建议</strong><span>今天 09:12 · 等待确认</span></div><div class="audit-item"><strong>整理 4 条会议记录</strong><span>昨天 17:40 · 已创建 3 个任务</span></div><div class="audit-item"><strong>检查目标健康度</strong><span>8 月 25 日 · 只读运行</span></div></section></aside></div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav" aria-label="移动端主导航"><button class="bottom-button active" data-view="today"><svg class="icon"><use href="#i-home"/></svg><span>今天</span></button><button class="bottom-button" data-view="goals"><svg class="icon"><use href="#i-target"/></svg><span>目标</span></button><button class="bottom-button" data-view="calendar"><svg class="icon"><use href="#i-calendar"/></svg><span>日程</span></button><button class="bottom-button" data-view="records"><svg class="icon"><use href="#i-record"/></svg><span>记录</span></button><button class="bottom-button" data-view="notes"><svg class="icon"><use href="#i-note"/></svg><span>笔记</span></button><button class="bottom-button" data-view="agent"><svg class="icon"><use href="#i-spark"/></svg><span>Agent</span></button></nav>
+
+  <div class="overlay" id="captureOverlay" role="dialog" aria-modal="true" aria-labelledby="captureTitle"><div class="modal"><div class="modal-head"><h2 id="captureTitle">快速记录</h2><button class="close-button" data-close="captureOverlay" aria-label="关闭"><svg class="icon"><use href="#i-x"/></svg></button></div><div class="modal-body"><div class="capture-types"><button class="type-button active" data-type="record">记录</button><button class="type-button" data-type="task">任务</button><button class="type-button" data-type="event">日程</button><button class="type-button" data-type="note">笔记</button><button class="type-button" data-type="goal">目标</button></div><textarea class="capture-area" id="captureText" placeholder="写下原话，例如：周五下午 3 点看牙"></textarea><div class="parse-preview"><svg class="icon"><use href="#i-spark"/></svg>系统会先解析为草稿，再由你确认。</div></div><div class="modal-footer"><button class="secondary" data-close="captureOverlay">取消</button><button class="primary" id="saveCapture">保留原文并继续</button></div></div></div>
+  <div class="overlay" id="searchOverlay" role="dialog" aria-modal="true" aria-labelledby="searchTitle"><div class="modal small"><div class="modal-head"><h2 id="searchTitle">查找任何内容</h2><button class="close-button" data-close="searchOverlay" aria-label="关闭"><svg class="icon"><use href="#i-x"/></svg></button></div><div class="modal-body"><div class="search-wrap"><svg class="icon"><use href="#i-search"/></svg><input id="searchInput" autocomplete="off" placeholder="搜索目标、记录和笔记" /></div><div class="search-results" id="searchResults"><div class="search-result" data-result="goals"><span class="record-type"><svg class="icon"><use href="#i-target"/></svg></span><div><strong>完成个人产品方案</strong><span>目标 · 42% · 4 天未推进</span></div></div><div class="search-result" data-result="notes"><span class="record-type"><svg class="icon"><use href="#i-note"/></svg></span><div><strong>生活管理产品的核心闭环</strong><span>笔记 · 今天 10:26 更新</span></div></div><div class="search-result" data-result="records"><span class="record-type"><svg class="icon"><use href="#i-record"/></svg></span><div><strong>计划太满是最常见的挫败来源</strong><span>记录 · 今天 11:35</span></div></div></div></div></div></div>
+  <div class="overlay" id="planOverlay" role="dialog" aria-modal="true" aria-labelledby="planTitle"><div class="modal"><div class="modal-head"><h2 id="planTitle">建议的今日计划</h2><button class="close-button" data-close="planOverlay" aria-label="关闭"><svg class="icon"><use href="#i-x"/></svg></button></div><div class="modal-body"><div class="plan-list"><label class="plan-row"><input type="checkbox" checked/><span class="plan-time">09:00</span><span class="plan-copy"><strong>产品方案专注块</strong><span>70 分钟 · 依据目标停滞与上午精力</span></span></label><label class="plan-row"><input type="checkbox" checked/><span class="plan-time">13:40</span><span class="plan-copy"><strong>整理会议行动项</strong><span>25 分钟 · 牙医复诊前完成</span></span></label><label class="plan-row"><input type="checkbox" checked/><span class="plan-time">18:10</span><span class="plan-copy"><strong>轻松跑 5 公里</strong><span>35 分钟 · 避开历史低完成时段</span></span></label></div></div><div class="modal-footer"><button class="secondary" data-close="planOverlay">暂不调整</button><button class="primary" id="acceptPlan">确认写入 3 项</button></div></div></div>
+  <div class="overlay" id="agentOverlay" role="dialog" aria-modal="true" aria-labelledby="agentTitle"><div class="modal"><div class="modal-head"><h2 id="agentTitle">发起 Agent 委托</h2><button class="close-button" data-close="agentOverlay" aria-label="关闭"><svg class="icon"><use href="#i-x"/></svg></button></div><div class="modal-body"><textarea class="agent-area" id="agentText" placeholder="描述结果，例如：整理本周未完成事项，优先保证产品方案和跑步目标"></textarea><div class="parse-preview"><svg class="icon"><use href="#i-lock"/></svg>默认读取目标、任务和未来 7 天日程；任何写入都需要确认。</div></div><div class="modal-footer"><button class="secondary" data-close="agentOverlay">取消</button><button class="primary" id="startAgent">生成执行步骤</button></div></div></div>
+  <div class="overlay" id="authOverlay" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+    <div class="modal small"><div class="modal-head"><div><h2 id="authTitle">账户与同步</h2><p class="auth-copy" id="authCopy">登录后可同步数据；不登录也能继续使用核心功能。</p></div><button class="close-button" data-close="authOverlay" aria-label="关闭"><svg class="icon"><use href="#i-x"/></svg></button></div>
+      <div class="modal-body"><div class="auth-tabs" role="tablist"><button class="active" role="tab" aria-selected="true" data-auth-tab="login">登录</button><button role="tab" aria-selected="false" data-auth-tab="register">注册</button></div>
+        <form class="auth-form" id="authForm"><label class="auth-field" id="nameField" hidden>称呼<input id="authName" autocomplete="name" placeholder="例如：一山" /></label><label class="auth-field">邮箱<input id="authEmail" type="email" autocomplete="email" placeholder="name@example.com" /></label><label class="auth-field">密码<input id="authPassword" type="password" autocomplete="current-password" placeholder="至少 10 个字符" /></label>
+          <label class="migration-choice" id="migrationChoice" hidden><input id="migrationInput" type="checkbox" checked /><span><strong>迁移这台设备的数据</strong><small>3 个目标 · 5 个任务 · 4 篇笔记</small></span></label><div class="migration-note" id="migrationNote" hidden>只有账户创建成功后才清空游客空间；失败时本机数据不会变化。</div><p class="auth-error" id="authError" role="alert"></p><button class="primary auth-submit" id="authSubmit" type="submit">登录账户</button></form>
+      </div>
+    </div>
+  </div>
+  <div class="overlay" id="accountOverlay" role="dialog" aria-modal="true" aria-labelledby="accountTitle">
+    <div class="modal"><div class="modal-head"><div><h2 id="accountTitle">账户</h2><p class="auth-copy">管理资料、安全设置和当前会话。</p></div><button class="close-button" data-close="accountOverlay" aria-label="关闭"><svg class="icon"><use href="#i-x"/></svg></button></div>
+      <div class="modal-body"><div class="account-tabs" role="tablist"><button class="active" data-account-tab="profile">个人资料</button><button data-account-tab="security">账户安全</button><button data-account-tab="session">当前会话</button></div>
+        <div class="account-pane active" data-account-pane="profile"><label class="auth-field">称呼<input value="一山" /></label><label class="auth-field" style="margin-top:12px">邮箱<input value="yishan@example.com" disabled /></label><button class="primary" style="margin-top:14px">保存称呼</button></div>
+        <div class="account-pane" data-account-pane="security"><div class="account-row"><span><strong>修改邮箱</strong><small>需要验证当前密码</small></span><button class="secondary">更新</button></div><div class="account-row"><span><strong>修改密码</strong><small>更新后其他设备会退出</small></span><button class="secondary">更新</button></div></div>
+        <div class="account-pane" data-account-pane="session"><div class="account-row"><span><strong>当前浏览器</strong><small>HttpOnly Session · 30 天</small></span><b>已验证</b></div><div class="account-row"><span><strong>账户数据已同步</strong><small>可使用 Agent 与账户设置</small></span><b>在线</b></div><div class="account-row"><span><strong>离线账户</strong><small>核心功能可用，Agent 与退出暂停</small></span><b>离线</b></div><div class="account-row"><span><strong>登录已过期</strong><small>本机更改保留，重新登录后继续同步</small></span><b>需验证</b></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const $ = (selector, root = document) => root.querySelector(selector);
+    const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+    const views = ["today", "goals", "calendar", "records", "notes", "agent"];
+    let captureType = "record";
+    let authenticated = false;
+    let authTab = "login";
+    let authReason = "account";
+    let toastTimer;
+
+    function showToast(message) {
+      const toast = $("#toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 2400);
+    }
+
+    function setView(name) {
+      if (!views.includes(name)) return;
+      if (name === "agent" && !authenticated) { openAuth("agent"); return; }
+      $$("[data-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === name));
+      $$("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
+      history.replaceState(null, "", `#${name}`);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function openOverlay(id) {
+      $("#" + id).classList.add("open");
+      setTimeout(() => $("#" + id).querySelector("textarea, input")?.focus(), 80);
+    }
+
+    function closeOverlay(id) { $("#" + id).classList.remove("open"); }
+
+    function openAuth(reason = "account") {
+      authReason = reason;
+      $("#authTitle").textContent = reason === "agent" ? "登录后使用 Agent" : "账户与同步";
+      $("#authCopy").textContent = reason === "agent" ? "Agent 会读取账户内的授权数据，因此需要先验证身份并保持在线。" : "登录后可同步数据；不登录也能继续使用今天、目标、日程、记录和笔记。";
+      openOverlay("authOverlay");
+    }
+
+    function setCaptureType(type) {
+      captureType = type || "record";
+      $$(".type-button").forEach((button) => button.classList.toggle("active", button.dataset.type === captureType));
+    }
+
+    $$("[data-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
+    $$("[data-open-capture]").forEach((button) => button.addEventListener("click", () => { setCaptureType(button.dataset.captureType); openOverlay("captureOverlay"); }));
+    $$("[data-close]").forEach((button) => button.addEventListener("click", () => closeOverlay(button.dataset.close)));
+    $$(".overlay").forEach((overlay) => overlay.addEventListener("click", (event) => { if (event.target === overlay) closeOverlay(overlay.id); }));
+    $$(".type-button").forEach((button) => button.addEventListener("click", () => setCaptureType(button.dataset.type)));
+
+    $("#saveCapture").addEventListener("click", () => {
+      const text = $("#captureText").value.trim();
+      if (!text) { $("#captureText").focus(); showToast("先写下一点内容"); return; }
+      const names = { record: "记录", task: "任务草稿", event: "日程草稿", note: "笔记", goal: "目标草稿" };
+      $("#captureText").value = "";
+      closeOverlay("captureOverlay");
+      showToast(`${names[captureType]}已保留原文，可继续确认解析结果`);
+    });
+
+    $("#searchButton").addEventListener("click", () => openOverlay("searchOverlay"));
+    $("#searchInput").addEventListener("input", (event) => {
+      const query = event.target.value.trim().toLowerCase();
+      $$(".search-result").forEach((row) => row.hidden = query && !row.textContent.toLowerCase().includes(query));
+    });
+    $$(".search-result").forEach((row) => row.addEventListener("click", () => { closeOverlay("searchOverlay"); setView(row.dataset.result); }));
+
+    $("#sourceButton").addEventListener("click", () => {
+      const detail = $("#sourceDetail");
+      detail.hidden = !detail.hidden;
+      $("#sourceButton").textContent = detail.hidden ? "3 条依据" : "收起依据";
+    });
+    $("#planButton").addEventListener("click", () => openOverlay("planOverlay"));
+    $("#acceptPlan").addEventListener("click", () => {
+      const count = $$("#planOverlay input:checked").length;
+      closeOverlay("planOverlay");
+      showToast(`已将 ${count} 项计划写入今天，操作可撤销`);
+    });
+    $("#showAgentSources").addEventListener("click", () => showToast("依据：目标停滞、固定日程、近两周训练记录"));
+    $("#energyButton").addEventListener("click", () => showToast("精力已记录为 3 / 5，今日排序会参考此状态"));
+    $("#reviewButton").addEventListener("click", () => showToast("晚间复盘将在 20:30 开放，预计 2 分钟"));
+    $("#privacyButton").addEventListener("click", () => showToast(authenticated ? "账户数据已同步；断网时继续保存在本机" : "游客数据仅保存在本机；注册时可选择迁移"));
+
+    $("#accountButton").addEventListener("click", () => {
+      if (!authenticated) { openAuth("account"); return; }
+      $("#accountMenu").classList.toggle("open");
+      $("#accountButton").setAttribute("aria-expanded", $("#accountMenu").classList.contains("open"));
+    });
+    $$('[data-auth-tab]').forEach((button) => button.addEventListener("click", () => {
+      authTab = button.dataset.authTab;
+      $$('[data-auth-tab]').forEach((item) => { item.classList.toggle("active", item === button); item.setAttribute("aria-selected", item === button); });
+      const registering = authTab === "register";
+      $("#nameField").hidden = !registering; $("#migrationChoice").hidden = !registering; $("#migrationNote").hidden = !registering;
+      $("#authPassword").autocomplete = registering ? "new-password" : "current-password";
+      $("#authSubmit").textContent = registering ? "创建账户" : "登录账户"; $("#authError").textContent = "";
+    }));
+    $("#authForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const email = $("#authEmail").value.trim(); const password = $("#authPassword").value;
+      if (authTab === "register" && !$("#authName").value.trim()) { $("#authError").textContent = "请输入希望显示的称呼"; $("#authName").focus(); return; }
+      if (!email.includes("@")) { $("#authError").textContent = "请输入有效邮箱"; $("#authEmail").focus(); return; }
+      if (password.length < 10) { $("#authError").textContent = "密码需要至少 10 个字符"; $("#authPassword").focus(); return; }
+      authenticated = true; $("#accountButton").textContent = "YS"; $("#accountButton").setAttribute("aria-label", "打开账户菜单"); closeOverlay("authOverlay");
+      showToast(authTab === "register" && $("#migrationInput").checked ? "账户已创建，本机数据已安全迁移" : "已登录，游客数据保持不变");
+      if (authReason === "agent") setView("agent");
+    });
+    $$('[data-open-account]').forEach((button) => button.addEventListener("click", () => { $("#accountMenu").classList.remove("open"); openOverlay("accountOverlay"); const tab = button.dataset.openAccount; $(`[data-account-tab="${tab}"]`)?.click(); }));
+    $$('[data-account-tab]').forEach((button) => button.addEventListener("click", () => { $$('[data-account-tab]').forEach((item) => item.classList.toggle("active", item === button)); $$('[data-account-pane]').forEach((pane) => pane.classList.toggle("active", pane.dataset.accountPane === button.dataset.accountTab)); }));
+    $("#logoutButton").addEventListener("click", () => { authenticated = false; $("#accountButton").textContent = "游"; $("#accountButton").setAttribute("aria-label", "登录或注册"); $("#accountMenu").classList.remove("open"); setView("today"); showToast("已退出账户，回到本机游客空间"); });
+
+    let focusing = false;
+    $("#focusButton").addEventListener("click", () => {
+      focusing = !focusing;
+      $("#focusButton").innerHTML = focusing ? '<svg class="icon"><use href="#i-pause"/></svg><span>暂停专注</span>' : '<svg class="icon"><use href="#i-play"/></svg><span>继续专注</span>';
+      showToast(focusing ? "专注计时已开始，消息提醒已静音" : "专注已暂停，进度仍然保留");
+    });
+
+    function updateTasks() {
+      const rows = $$(".agenda-row");
+      const done = rows.filter((row) => row.classList.contains("done")).length;
+      $("#taskCount").textContent = `${done} / ${rows.length} 完成`;
+    }
+    $$(".agenda-node").forEach((button) => button.addEventListener("click", () => { button.closest(".agenda-row").classList.toggle("done"); updateTasks(); showToast("今日任务状态已更新"); }));
+    $$(".time-event, .cal-event").forEach((button) => button.addEventListener("click", () => showToast(button.dataset.detail || button.textContent.trim().replace(/\s+/g, " "))));
+
+    $$(".filter-button").forEach((button) => button.addEventListener("click", () => {
+      $$(".filter-button").forEach((item) => item.classList.toggle("active", item === button));
+      const filter = button.dataset.noteFilter;
+      $$(".note-card").forEach((card) => card.hidden = filter !== "all" && card.dataset.noteKind !== filter);
+    }));
+
+    $$(".switch").forEach((button) => button.addEventListener("click", () => {
+      const enabled = button.getAttribute("aria-pressed") !== "true";
+      button.setAttribute("aria-pressed", enabled);
+      showToast(`${button.getAttribute("aria-label")}${enabled ? "已开启" : "已关闭"}`);
+    }));
+
+    $("#delegateButton").addEventListener("click", () => authenticated ? openOverlay("agentOverlay") : openAuth("agent"));
+    $("#startAgent").addEventListener("click", () => {
+      const text = $("#agentText").value.trim();
+      if (!text) { $("#agentText").focus(); showToast("先描述希望 Agent 完成什么"); return; }
+      closeOverlay("agentOverlay"); setView("agent");
+      $("#runStatus").textContent = "正在生成步骤";
+      showToast("Agent 已开始只读检查，可随时停止");
+      setTimeout(() => { $("#runStatus").textContent = "等待确认"; showToast("只读检查完成，没有修改数据"); }, 900);
+    });
+    $("#jumpApproval").addEventListener("click", () => $("#approvalBox").scrollIntoView({ behavior: "smooth", block: "center" }));
+    $$(".agent-change").forEach((box) => box.addEventListener("change", () => {
+      const count = $$(".agent-change:checked").length;
+      $("#approveChanges").textContent = count ? `确认并执行 ${count} 项` : "请选择至少一项";
+    }));
+    $("#approveChanges").addEventListener("click", () => {
+      const count = $$(".agent-change:checked").length;
+      if (!count) { showToast("请选择至少一项变更"); return; }
+      $("#runStatus").textContent = "已完成";
+      $("#agentHeroTitle").textContent = `Agent 已执行并核验 ${count} 项变更`;
+      $("#approvalBox").hidden = true;
+      $$(".approval-count").forEach((item) => item.textContent = "0");
+      showToast(`${count} 项变更已执行，操作可撤销`);
+    });
+    $("#rejectChanges").addEventListener("click", () => {
+      $("#runStatus").textContent = "已取消";
+      $("#agentHeroTitle").textContent = "变更已全部拒绝，没有修改数据";
+      $("#approvalBox").hidden = true;
+      showToast("已拒绝全部变更，没有修改数据");
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") $$(".overlay.open").forEach((overlay) => closeOverlay(overlay.id));
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openOverlay("searchOverlay"); }
+      if (event.key.toLowerCase() === "n" && !event.ctrlKey && !event.metaKey && !["INPUT","TEXTAREA"].includes(document.activeElement.tagName)) openOverlay("captureOverlay");
+    });
+
+    const now = new Date();
+    const weekdays = ["星期日","星期一","星期二","星期三","星期四","星期五","星期六"];
+    $("#todayDate").textContent = `${now.getMonth() + 1} 月 ${now.getDate()} 日 · ${weekdays[now.getDay()]}`;
+    const hour = now.getHours();
+    $("#greeting").textContent = hour < 6 ? "夜深了，先照顾好明天的自己。" : hour < 12 ? "早上好，把最清醒的时间留给重要的事。" : hour < 18 ? "下午好，把注意力留给重要的事。" : "晚上好，给今天一个清楚的收尾。";
+    updateTasks();
+    if (views.includes(location.hash.slice(1))) setView(location.hash.slice(1));
+  </script>
+</body>
+</html>
