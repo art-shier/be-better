@@ -9,6 +9,8 @@
     "dev": "concurrently -k -n web,api -c cyan,green \"npm:dev:web\" \"npm:dev:api\"",
     "dev:web": "npm run dev --workspace @dayorder/web",
     "dev:api": "go run ./apps/api/cmd/server",
+    "dev:api:postgres": "go run ./apps/api/cmd/server-next",
+    "dev:worker": "go run ./apps/api/cmd/worker",
     "start": "go run ./apps/api/cmd/server -web-dir apps/web/dist",
     "preview": "npm run preview --workspace @dayorder/web",
     "typecheck": "npm run typecheck --workspace @dayorder/web",

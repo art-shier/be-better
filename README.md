@@ -20,13 +20,19 @@ PostgreSQL 新链路可从空库初始化：
 
 ```powershell
 Copy-Item .env.example .env
+Get-Content .env | Where-Object { $_ -match '^[^#].*=' } | ForEach-Object { $name, $value = $_ -split '=', 2; Set-Item -Path "Env:$name" -Value $value }
 npm run db:up
 npm run db:bootstrap # 仅旧开发卷或需要轮换本地角色密码时运行
 npm run db:migrate
 npm run db:check
+npm run dev:api:postgres
+# 另一个终端
+npm run dev:worker
 ```
 
 新建开发卷会通过 Compose 自动创建相互隔离的 `dayorder_migrator`、`dayorder_api` 和 `dayorder_worker` 角色。Migration 只使用 `MIGRATION_DATABASE_URL`；API 与 Worker 分别使用受限连接，不拥有 DDL 权限。真实 PostgreSQL 集成测试需要 Docker，缺少 Docker 时会明确跳过而不会退回 SQLite。
+
+PostgreSQL 新 API 的注册流程先创建 `pending_verification` 账号，验证邮箱后才允许登录。开发默认 `DAYORDER_MAIL_SINK=log`，只记录收件人与正文大小，不记录验证/重置令牌，也不会真正投递；需要走完整邮件流程时请配置本地捕获邮箱或 SMTP，并把 `DAYORDER_MAIL_SINK` 改为 `smtp`。生产环境强制使用 SMTP 和 TLS。
 
 ## 使用模式
 

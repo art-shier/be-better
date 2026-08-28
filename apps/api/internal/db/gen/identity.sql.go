@@ -11,11 +11,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const activateUser = `-- name: ActivateUser :one
+UPDATE dayorder.users
+SET status = 'active',
+    email_verified_at = coalesce(email_verified_at, now()),
+    updated_at = now()
+WHERE id = $1
+  AND status = 'pending_verification'
+  AND deleted_at IS NULL
+RETURNING id, email, normalized_email, display_name, password_hash, status, email_verified_at, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) ActivateUser(ctx context.Context, userID pgtype.UUID) (*DayorderUser, error) {
+	row := q.db.QueryRow(ctx, activateUser, userID)
+	var i DayorderUser
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.NormalizedEmail,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.Status,
+		&i.EmailVerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
 const authenticateSession = `-- name: AuthenticateSession :one
 SELECT
     result.session_id::uuid AS session_id,
     result.user_id::uuid AS user_id,
     result.user_status::varchar AS user_status,
+    result.email::varchar AS email,
     result.display_name::varchar AS display_name,
     result.email_verified_at::timestamptz AS email_verified_at,
     result.session_expires_at::timestamptz AS session_expires_at
@@ -26,6 +56,7 @@ type AuthenticateSessionRow struct {
 	SessionID        pgtype.UUID        `db:"session_id" json:"session_id"`
 	UserID           pgtype.UUID        `db:"user_id" json:"user_id"`
 	UserStatus       string             `db:"user_status" json:"user_status"`
+	Email            string             `db:"email" json:"email"`
 	DisplayName      string             `db:"display_name" json:"display_name"`
 	EmailVerifiedAt  pgtype.Timestamptz `db:"email_verified_at" json:"email_verified_at"`
 	SessionExpiresAt pgtype.Timestamptz `db:"session_expires_at" json:"session_expires_at"`
@@ -38,11 +69,21 @@ func (q *Queries) AuthenticateSession(ctx context.Context, tokenHash []byte) (*A
 		&i.SessionID,
 		&i.UserID,
 		&i.UserStatus,
+		&i.Email,
 		&i.DisplayName,
 		&i.EmailVerifiedAt,
 		&i.SessionExpiresAt,
 	)
 	return &i, err
+}
+
+const clearLoginThrottle = `-- name: ClearLoginThrottle :exec
+SELECT dayorder.clear_login_throttle($1, $2)
+`
+
+func (q *Queries) ClearLoginThrottle(ctx context.Context, dimension string, keyHash []byte) error {
+	_, err := q.db.Exec(ctx, clearLoginThrottle, dimension, keyHash)
+	return err
 }
 
 const consumeAccountToken = `-- name: ConsumeAccountToken :execrows
@@ -190,6 +231,73 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (*Dayord
 	return &i, err
 }
 
+const createUserSettings = `-- name: CreateUserSettings :one
+INSERT INTO dayorder.user_settings (user_id, schema_version, version, settings)
+VALUES ($1, 1, 1, '{}'::jsonb)
+RETURNING user_id, schema_version, version, settings, updated_at
+`
+
+func (q *Queries) CreateUserSettings(ctx context.Context, userID pgtype.UUID) (*DayorderUserSetting, error) {
+	row := q.db.QueryRow(ctx, createUserSettings, userID)
+	var i DayorderUserSetting
+	err := row.Scan(
+		&i.UserID,
+		&i.SchemaVersion,
+		&i.Version,
+		&i.Settings,
+		&i.UpdatedAt,
+	)
+	return &i, err
+}
+
+const getSession = `-- name: GetSession :one
+SELECT id, user_id, token_hash, user_agent, created_at, last_seen_at, expires_at, revoked_at
+FROM dayorder.sessions
+WHERE user_id = $1
+  AND id = $2
+`
+
+func (q *Queries) GetSession(ctx context.Context, userID pgtype.UUID, sessionID pgtype.UUID) (*DayorderSession, error) {
+	row := q.db.QueryRow(ctx, getSession, userID, sessionID)
+	var i DayorderSession
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.UserAgent,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+	)
+	return &i, err
+}
+
+const getUser = `-- name: GetUser :one
+SELECT id, email, normalized_email, display_name, password_hash, status, email_verified_at, created_at, updated_at, deleted_at
+FROM dayorder.users
+WHERE id = $1
+  AND deleted_at IS NULL
+`
+
+func (q *Queries) GetUser(ctx context.Context, userID pgtype.UUID) (*DayorderUser, error) {
+	row := q.db.QueryRow(ctx, getUser, userID)
+	var i DayorderUser
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.NormalizedEmail,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.Status,
+		&i.EmailVerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
 const getUserSettings = `-- name: GetUserSettings :one
 SELECT user_id, schema_version, version, settings, updated_at FROM dayorder.user_settings WHERE user_id = $1
 `
@@ -204,6 +312,41 @@ func (q *Queries) GetUserSettings(ctx context.Context, userID pgtype.UUID) (*Day
 		&i.Settings,
 		&i.UpdatedAt,
 	)
+	return &i, err
+}
+
+const invalidateAccountTokens = `-- name: InvalidateAccountTokens :execrows
+UPDATE dayorder.account_tokens
+SET consumed_at = now()
+WHERE user_id = $1
+  AND purpose = $2
+  AND consumed_at IS NULL
+`
+
+func (q *Queries) InvalidateAccountTokens(ctx context.Context, userID pgtype.UUID, purpose string) (int64, error) {
+	result, err := q.db.Exec(ctx, invalidateAccountTokens, userID, purpose)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const loginThrottleStatus = `-- name: LoginThrottleStatus :one
+SELECT
+    result.failures::integer AS failures,
+    result.blocked_until::timestamptz AS blocked_until
+FROM dayorder.login_throttle_status($1, $2) AS result
+`
+
+type LoginThrottleStatusRow struct {
+	Failures     int32              `db:"failures" json:"failures"`
+	BlockedUntil pgtype.Timestamptz `db:"blocked_until" json:"blocked_until"`
+}
+
+func (q *Queries) LoginThrottleStatus(ctx context.Context, dimension string, keyHash []byte) (*LoginThrottleStatusRow, error) {
+	row := q.db.QueryRow(ctx, loginThrottleStatus, dimension, keyHash)
+	var i LoginThrottleStatusRow
+	err := row.Scan(&i.Failures, &i.BlockedUntil)
 	return &i, err
 }
 
@@ -238,17 +381,27 @@ func (q *Queries) LookupAccountToken(ctx context.Context, tokenHash []byte) (*Lo
 const lookupLoginAccount = `-- name: LookupLoginAccount :one
 SELECT
     result.user_id::uuid AS user_id,
+    result.email::varchar AS email,
+    result.normalized_email::varchar AS normalized_email,
+    result.display_name::varchar AS display_name,
     result.password_hash::text AS password_hash,
     result.user_status::varchar AS user_status,
-    result.email_verified_at::timestamptz AS email_verified_at
+    result.email_verified_at::timestamptz AS email_verified_at,
+    result.created_at::timestamptz AS created_at,
+    result.updated_at::timestamptz AS updated_at
 FROM dayorder.lookup_login_account($1) AS result
 `
 
 type LookupLoginAccountRow struct {
 	UserID          pgtype.UUID        `db:"user_id" json:"user_id"`
+	Email           string             `db:"email" json:"email"`
+	NormalizedEmail string             `db:"normalized_email" json:"normalized_email"`
+	DisplayName     string             `db:"display_name" json:"display_name"`
 	PasswordHash    string             `db:"password_hash" json:"password_hash"`
 	UserStatus      string             `db:"user_status" json:"user_status"`
 	EmailVerifiedAt pgtype.Timestamptz `db:"email_verified_at" json:"email_verified_at"`
+	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
 func (q *Queries) LookupLoginAccount(ctx context.Context, normalizedEmail string) (*LookupLoginAccountRow, error) {
@@ -256,11 +409,64 @@ func (q *Queries) LookupLoginAccount(ctx context.Context, normalizedEmail string
 	var i LookupLoginAccountRow
 	err := row.Scan(
 		&i.UserID,
+		&i.Email,
+		&i.NormalizedEmail,
+		&i.DisplayName,
 		&i.PasswordHash,
 		&i.UserStatus,
 		&i.EmailVerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return &i, err
+}
+
+const passwordHashByUserID = `-- name: PasswordHashByUserID :one
+SELECT password_hash
+FROM dayorder.users
+WHERE id = $1
+  AND deleted_at IS NULL
+`
+
+func (q *Queries) PasswordHashByUserID(ctx context.Context, userID pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, passwordHashByUserID, userID)
+	var password_hash string
+	err := row.Scan(&password_hash)
+	return password_hash, err
+}
+
+const recordLoginFailure = `-- name: RecordLoginFailure :one
+SELECT
+    result.failures::integer AS failures,
+    result.blocked_until::timestamptz AS blocked_until
+FROM dayorder.record_login_failure($1, $2) AS result
+`
+
+type RecordLoginFailureRow struct {
+	Failures     int32              `db:"failures" json:"failures"`
+	BlockedUntil pgtype.Timestamptz `db:"blocked_until" json:"blocked_until"`
+}
+
+func (q *Queries) RecordLoginFailure(ctx context.Context, dimension string, keyHash []byte) (*RecordLoginFailureRow, error) {
+	row := q.db.QueryRow(ctx, recordLoginFailure, dimension, keyHash)
+	var i RecordLoginFailureRow
+	err := row.Scan(&i.Failures, &i.BlockedUntil)
+	return &i, err
+}
+
+const revokeAllUserSessions = `-- name: RevokeAllUserSessions :execrows
+UPDATE dayorder.sessions
+SET revoked_at = now()
+WHERE user_id = $1
+  AND revoked_at IS NULL
+`
+
+func (q *Queries) RevokeAllUserSessions(ctx context.Context, userID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeAllUserSessions, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revokeSession = `-- name: RevokeSession :execrows
@@ -273,6 +479,95 @@ WHERE user_id = $1
 
 func (q *Queries) RevokeSession(ctx context.Context, userID pgtype.UUID, sessionID pgtype.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeSession, userID, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const touchSession = `-- name: TouchSession :execrows
+UPDATE dayorder.sessions
+SET last_seen_at = now()
+WHERE user_id = $1
+  AND id = $2
+  AND revoked_at IS NULL
+  AND last_seen_at < now() - $3::interval
+`
+
+func (q *Queries) TouchSession(ctx context.Context, userID pgtype.UUID, sessionID pgtype.UUID, touchInterval pgtype.Interval) (int64, error) {
+	result, err := q.db.Exec(ctx, touchSession, userID, sessionID, touchInterval)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateDisplayName = `-- name: UpdateDisplayName :one
+UPDATE dayorder.users
+SET display_name = $1, updated_at = now()
+WHERE id = $2
+  AND deleted_at IS NULL
+RETURNING id, email, normalized_email, display_name, password_hash, status, email_verified_at, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) UpdateDisplayName(ctx context.Context, displayName string, userID pgtype.UUID) (*DayorderUser, error) {
+	row := q.db.QueryRow(ctx, updateDisplayName, displayName, userID)
+	var i DayorderUser
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.NormalizedEmail,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.Status,
+		&i.EmailVerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const updateEmail = `-- name: UpdateEmail :one
+UPDATE dayorder.users
+SET email = $1,
+    normalized_email = $2,
+    status = 'pending_verification',
+    email_verified_at = NULL,
+    updated_at = now()
+WHERE id = $3
+  AND status = 'active'
+  AND deleted_at IS NULL
+RETURNING id, email, normalized_email, display_name, password_hash, status, email_verified_at, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) UpdateEmail(ctx context.Context, email string, normalizedEmail string, userID pgtype.UUID) (*DayorderUser, error) {
+	row := q.db.QueryRow(ctx, updateEmail, email, normalizedEmail, userID)
+	var i DayorderUser
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.NormalizedEmail,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.Status,
+		&i.EmailVerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const updatePasswordHash = `-- name: UpdatePasswordHash :execrows
+UPDATE dayorder.users
+SET password_hash = $1, updated_at = now()
+WHERE id = $2
+  AND deleted_at IS NULL
+`
+
+func (q *Queries) UpdatePasswordHash(ctx context.Context, passwordHash string, userID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, updatePasswordHash, passwordHash, userID)
 	if err != nil {
 		return 0, err
 	}
