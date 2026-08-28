@@ -254,6 +254,19 @@ func (service *GoalService) ListMilestones(ctx context.Context, userID, goalID u
 	return milestones, err
 }
 
+func (service *GoalService) GetMilestone(ctx context.Context, userID, milestoneID uuid.UUID) (model.GoalMilestone, error) {
+	if userID == uuid.Nil || milestoneID == uuid.Nil {
+		return model.GoalMilestone{}, fmt.Errorf("%w: user and milestone IDs are required", ErrValidation)
+	}
+	var milestone model.GoalMilestone
+	err := service.transactor.WithUser(ctx, userID, func(ctx context.Context, tx database.Tx) error {
+		var readErr error
+		milestone, readErr = service.store.GetMilestone(ctx, tx, userID, milestoneID)
+		return readErr
+	})
+	return milestone, err
+}
+
 func (service *GoalService) UpdateMilestone(ctx context.Context, mutation MutationContext, milestoneID uuid.UUID, expectedVersion int64, input UpdateMilestoneInput) (model.GoalMilestone, error) {
 	candidate := model.GoalMilestone{ID: milestoneID, Title: strings.TrimSpace(input.Title), DueAt: utcTime(input.DueAt), CompletedAt: utcTime(input.CompletedAt), SortOrder: input.SortOrder}
 	if expectedVersion < 1 {

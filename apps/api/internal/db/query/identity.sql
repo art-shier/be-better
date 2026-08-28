@@ -143,6 +143,42 @@ WHERE id = sqlc.arg(user_id)
   AND deleted_at IS NULL
 RETURNING *;
 
+-- name: CreateUserDevice :one
+INSERT INTO dayorder.user_devices (id, user_id, device_name, platform)
+VALUES (sqlc.arg(id), sqlc.arg(user_id), sqlc.arg(device_name), sqlc.arg(platform))
+ON CONFLICT DO NOTHING
+RETURNING *;
+
+-- name: RefreshUserDevice :one
+UPDATE dayorder.user_devices
+SET device_name = sqlc.arg(device_name),
+    platform = sqlc.arg(platform),
+    last_seen_at = now()
+WHERE user_id = sqlc.arg(user_id)
+  AND id = sqlc.arg(id)
+  AND revoked_at IS NULL
+RETURNING *;
+
+-- name: ListUserDevices :many
+SELECT * FROM dayorder.user_devices
+WHERE user_id = sqlc.arg(user_id)
+ORDER BY revoked_at NULLS FIRST, last_seen_at DESC, id;
+
+-- name: GetActiveUserDevice :one
+SELECT * FROM dayorder.user_devices
+WHERE user_id = sqlc.arg(user_id)
+  AND id = sqlc.arg(id)
+  AND revoked_at IS NULL;
+
+-- name: AdvanceUserDeviceSyncCursor :one
+UPDATE dayorder.user_devices
+SET last_sync_cursor = greatest(last_sync_cursor, sqlc.arg(sequence)),
+    last_seen_at = now()
+WHERE user_id = sqlc.arg(user_id)
+  AND id = sqlc.arg(id)
+  AND revoked_at IS NULL
+RETURNING *;
+
 -- name: TouchSession :execrows
 UPDATE dayorder.sessions
 SET last_seen_at = now()

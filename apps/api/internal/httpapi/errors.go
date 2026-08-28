@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"dayorder.local/api/internal/model"
 	"dayorder.local/api/internal/service"
 )
 
@@ -23,6 +24,18 @@ type apiErrorBody struct {
 
 func (router *Router) handleServiceError(response http.ResponseWriter, request *http.Request, err error) {
 	switch {
+	case errors.Is(err, model.ErrNotFound):
+		router.writeError(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "资源不存在", false, nil)
+	case errors.Is(err, model.ErrConflict):
+		router.writeError(response, request, http.StatusConflict, "ENTITY_VERSION_CONFLICT", "资源版本已变化，请获取最新版本", false, nil)
+	case errors.Is(err, model.ErrDeviceNotActive):
+		router.writeError(response, request, http.StatusPreconditionRequired, "DEVICE_REGISTRATION_REQUIRED", "设备未注册或已被撤销，请重新注册设备", false, nil)
+	case errors.Is(err, service.ErrIdempotencyConflict):
+		router.writeError(response, request, http.StatusConflict, "IDEMPOTENCY_CONFLICT", "同一幂等键不能用于不同请求", false, nil)
+	case errors.Is(err, service.ErrInvalidCursor), errors.Is(err, service.ErrInvalidSyncCursor):
+		router.writeError(response, request, http.StatusBadRequest, "INVALID_CURSOR", "游标无效", false, nil)
+	case errors.Is(err, service.ErrSyncResetRequired):
+		router.writeError(response, request, http.StatusConflict, "SYNC_RESET_REQUIRED", "同步游标已过期，需要重建本地缓存", false, nil)
 	case errors.Is(err, service.ErrValidation):
 		router.writeError(response, request, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "请求数据不符合要求", false, nil)
 	case errors.Is(err, service.ErrEmailInUse):

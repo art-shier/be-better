@@ -49,8 +49,69 @@ func main() {
 		logger.Error("create session service", "error", err)
 		os.Exit(1)
 	}
+	transactor, err := database.NewPoolTransactor(pool)
+	if err != nil {
+		logger.Error("create transaction coordinator", "error", err)
+		os.Exit(1)
+	}
+	idempotency, err := service.NewIdempotencyService(postgresstore.NewIdempotencyRepository())
+	if err != nil {
+		logger.Error("create idempotency service", "error", err)
+		os.Exit(1)
+	}
+	syncService, err := service.NewSyncService(postgresstore.NewSyncRepository(), transactor, configuration.AuthHMACKey)
+	if err != nil {
+		logger.Error("create sync service", "error", err)
+		os.Exit(1)
+	}
+	auditService, err := service.NewAuditService(postgresstore.NewAuditRepository())
+	if err != nil {
+		logger.Error("create audit service", "error", err)
+		os.Exit(1)
+	}
+	commands, err := service.NewCommandService(transactor, idempotency, syncService, auditService, postgresstore.NewOutboxWriter())
+	if err != nil {
+		logger.Error("create command service", "error", err)
+		os.Exit(1)
+	}
+	cursors, err := service.NewResourceCursorCodec(configuration.AuthHMACKey)
+	if err != nil {
+		logger.Error("create resource cursor codec", "error", err)
+		os.Exit(1)
+	}
+	goals, err := service.NewGoalService(postgresstore.NewGoalRepository(), transactor, commands, cursors)
+	if err != nil {
+		logger.Error("create goal service", "error", err)
+		os.Exit(1)
+	}
+	tasks, err := service.NewTaskService(postgresstore.NewTaskRepository(), transactor, commands, cursors)
+	if err != nil {
+		logger.Error("create task service", "error", err)
+		os.Exit(1)
+	}
+	calendar, err := service.NewCalendarService(postgresstore.NewCalendarRepository(), transactor, commands)
+	if err != nil {
+		logger.Error("create calendar service", "error", err)
+		os.Exit(1)
+	}
+	content, err := service.NewContentService(postgresstore.NewContentRepository(), transactor, commands, cursors)
+	if err != nil {
+		logger.Error("create content service", "error", err)
+		os.Exit(1)
+	}
+	settings, err := service.NewSettingsService(postgresstore.NewSettingsRepository(), transactor, commands)
+	if err != nil {
+		logger.Error("create settings service", "error", err)
+		os.Exit(1)
+	}
+	devices, err := service.NewDeviceService(postgresstore.NewDeviceRepository(), transactor, auditService)
+	if err != nil {
+		logger.Error("create device service", "error", err)
+		os.Exit(1)
+	}
 	handler, err := httpapi.NewRouter(httpapi.RouterOptions{
-		Accounts: accounts, Sessions: sessions, AllowedOrigins: configuration.AllowedOrigins, Logger: logger,
+		Accounts: accounts, Sessions: sessions, Goals: goals, Tasks: tasks, Calendar: calendar,
+		Content: content, Settings: settings, Devices: devices, Sync: syncService, AllowedOrigins: configuration.AllowedOrigins, Logger: logger,
 		Ready: func(ctx context.Context) error {
 			if err := database.Ping(ctx, pool, configuration.Database.HealthTimeout); err != nil {
 				return err

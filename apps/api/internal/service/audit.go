@@ -21,7 +21,7 @@ const (
 )
 
 var auditEntityTypes = map[string]struct{}{
-	"goal": {}, "milestone": {}, "task": {}, "calendar_event": {},
+	"goal": {}, "milestone": {}, "task": {}, "calendar_event": {}, "reminder": {},
 	"record": {}, "note": {}, "daily_review": {}, "agent_run": {},
 }
 

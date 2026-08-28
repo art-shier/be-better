@@ -433,8 +433,13 @@ func mapDatabaseError(operation string, err error) error {
 		return model.ErrNotFound
 	}
 	var postgresError *pgconn.PgError
-	if errors.As(err, &postgresError) && postgresError.Code == "23505" {
-		return model.ErrConflict
+	if errors.As(err, &postgresError) {
+		switch postgresError.Code {
+		case "23505":
+			return model.ErrConflict
+		case "23503":
+			return model.ErrNotFound
+		}
 	}
 	return fmt.Errorf("%s: %w", operation, err)
 }

@@ -13,7 +13,17 @@ import (
 )
 
 type memorySyncStore struct {
-	changes []model.SyncChange
+	changes  []model.SyncChange
+	active   bool
+	advanced int64
+	missing  map[uuid.UUID]bool
+}
+
+func (store *memorySyncStore) Resolve(_ context.Context, _ database.Tx, _ uuid.UUID, change model.SyncChange) ([]byte, error) {
+	if store.missing[change.EntityID] {
+		return nil, model.ErrNotFound
+	}
+	return []byte(`{"id":"` + change.EntityID.String() + `"}`), nil
 }
 
 func (store *memorySyncStore) Append(_ context.Context, _ database.Tx, _ uuid.UUID, draft model.SyncChangeDraft) (model.SyncChange, error) {
@@ -44,6 +54,18 @@ func (store *memorySyncStore) List(_ context.Context, _ database.Tx, _ uuid.UUID
 		}
 	}
 	return result, nil
+}
+
+func (store *memorySyncStore) RequireActiveDevice(context.Context, database.Tx, uuid.UUID, uuid.UUID) error {
+	if !store.active {
+		return model.ErrDeviceNotActive
+	}
+	return nil
+}
+
+func (store *memorySyncStore) AdvanceDeviceCursor(_ context.Context, _ database.Tx, _ uuid.UUID, _ uuid.UUID, sequence int64) error {
+	store.advanced = sequence
+	return nil
 }
 
 func TestSyncServiceRecordsDeleteTombstoneAndPaginatesOpaqueCursor(t *testing.T) {
@@ -87,6 +109,25 @@ func TestSyncServiceRecordsDeleteTombstoneAndPaginatesOpaqueCursor(t *testing.T)
 	if second.Changes[0].Operation != "delete" || second.Changes[0].EntityID != entityID {
 		t.Fatalf("delete tombstone = %#v", second.Changes[0])
 	}
+	if len(first.Changes[0].Data) == 0 || len(second.Changes[0].Data) != 0 {
+		t.Fatalf("resolved create/delete data = %s/%s", first.Changes[0].Data, second.Changes[0].Data)
+	}
+}
+
+func TestSyncChangesNormalizesMissingCurrentEntityToTombstone(t *testing.T) {
+	entityID := uuid.New()
+	store := &memorySyncStore{
+		changes: []model.SyncChange{{Sequence: 1, EntityType: "task", EntityID: entityID, Operation: "update", EntityVersion: 3}},
+		missing: map[uuid.UUID]bool{entityID: true},
+	}
+	service, _ := NewSyncService(store, immediateUserTransactor{tx: &testTransaction{}}, []byte("0123456789abcdef0123456789abcdef"))
+	service.now = func() time.Time { return time.Date(2026, 8, 28, 10, 0, 0, 0, time.UTC) }
+	userID := uuid.New()
+	cursor, _ := service.encodeCursor(userID, 0, service.now())
+	page, err := service.Changes(context.Background(), userID, cursor, 10)
+	if err != nil || len(page.Changes) != 1 || page.Changes[0].Operation != "delete" || len(page.Changes[0].Data) != 0 {
+		t.Fatalf("Changes() = %#v, %v", page, err)
+	}
 }
 
 func TestSyncCursorIsTamperEvidentUserBoundAndExpires(t *testing.T) {
@@ -129,5 +170,29 @@ func TestSyncServiceRejectsInvalidChangeBeforeWriting(t *testing.T) {
 	})
 	if !errors.Is(err, ErrValidation) || len(store.changes) != 0 {
 		t.Fatalf("Record() error = %v, stored = %d", err, len(store.changes))
+	}
+}
+
+func TestSyncBootstrapAndDeviceChangesRequireActiveDeviceAndAdvanceCursor(t *testing.T) {
+	store := &memorySyncStore{changes: []model.SyncChange{{Sequence: 5, EntityType: "task", EntityID: uuid.New(), Operation: "update", EntityVersion: 2}}}
+	service, _ := NewSyncService(
+		store, immediateUserTransactor{tx: &testTransaction{}},
+		[]byte("0123456789abcdef0123456789abcdef"),
+	)
+	service.now = func() time.Time { return time.Date(2026, 8, 28, 10, 0, 0, 0, time.UTC) }
+	userID := uuid.New()
+	deviceID := uuid.New()
+	if _, err := service.Bootstrap(context.Background(), userID, deviceID); !errors.Is(err, model.ErrDeviceNotActive) {
+		t.Fatalf("inactive Bootstrap() error = %v", err)
+	}
+	store.active = true
+	bootstrap, err := service.Bootstrap(context.Background(), userID, deviceID)
+	if err != nil || bootstrap.Cursor == "" || store.advanced != 5 {
+		t.Fatalf("Bootstrap() = %#v, advanced=%d, err=%v", bootstrap, store.advanced, err)
+	}
+	start, _ := service.encodeCursor(userID, 0, service.now())
+	page, err := service.DeviceChanges(context.Background(), userID, deviceID, start, 10)
+	if err != nil || len(page.Changes) != 1 || store.advanced != 5 {
+		t.Fatalf("DeviceChanges() = %#v, advanced=%d, err=%v", page, store.advanced, err)
 	}
 }

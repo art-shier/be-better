@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -10,6 +11,7 @@ import (
 	"dayorder.local/api/internal/model"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 type SyncRepository struct{}
@@ -69,6 +71,117 @@ func (*SyncRepository) List(
 		changes = append(changes, syncChangeFromRow(row))
 	}
 	return changes, nil
+}
+
+func (*SyncRepository) Resolve(
+	ctx context.Context,
+	tx database.Tx,
+	userID uuid.UUID,
+	change model.SyncChange,
+) ([]byte, error) {
+	if tx == nil {
+		return nil, errors.New("sync transaction is required")
+	}
+	var value any
+	var err error
+	switch change.EntityType {
+	case "goal":
+		value, err = NewGoalRepository().GetGoal(ctx, tx, userID, change.EntityID)
+	case "milestone":
+		value, err = NewGoalRepository().GetMilestone(ctx, tx, userID, change.EntityID)
+	case "task":
+		value, err = NewTaskRepository().GetTask(ctx, tx, userID, change.EntityID)
+	case "calendar_event":
+		value, err = NewCalendarRepository().GetEvent(ctx, tx, userID, change.EntityID)
+	case "reminder":
+		var row *db.DayorderCalendarEventReminder
+		row, err = db.New(tx).GetCalendarReminder(ctx, pgUUID(userID), pgUUID(change.EntityID))
+		if err == nil {
+			value = calendarReminderFromRow(row)
+		} else {
+			err = mapDatabaseError("get sync reminder", err)
+		}
+	case "record":
+		repository := NewContentRepository()
+		var record model.Record
+		record, err = repository.GetRecord(ctx, tx, userID, change.EntityID)
+		if err == nil {
+			record.Tags, err = repository.ListRecordTags(ctx, tx, userID, change.EntityID)
+			value = record
+		}
+	case "note":
+		repository := NewContentRepository()
+		var note model.Note
+		note, err = repository.GetNote(ctx, tx, userID, change.EntityID)
+		if err == nil {
+			note.Tags, err = repository.ListNoteTags(ctx, tx, userID, change.EntityID)
+			value = note
+		}
+	case "daily_review":
+		value, err = NewContentRepository().GetReview(ctx, tx, userID, change.EntityID)
+	case "tag":
+		var row *db.DayorderTag
+		row, err = db.New(tx).GetTag(ctx, pgUUID(userID), pgUUID(change.EntityID))
+		if err == nil {
+			value = tagFromRow(row)
+		} else {
+			err = mapDatabaseError("get sync tag", err)
+		}
+	case "settings":
+		if change.EntityID != userID {
+			return nil, model.ErrNotFound
+		}
+		value, err = NewSettingsRepository().Get(ctx, tx, userID)
+	default:
+		return nil, model.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("encode sync entity: %w", err)
+	}
+	return encoded, nil
+}
+
+func (*SyncRepository) RequireActiveDevice(
+	ctx context.Context,
+	tx database.Tx,
+	userID uuid.UUID,
+	deviceID uuid.UUID,
+) error {
+	if tx == nil {
+		return errors.New("sync transaction is required")
+	}
+	_, err := db.New(tx).GetActiveUserDevice(ctx, pgUUID(userID), pgUUID(deviceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.ErrDeviceNotActive
+	}
+	if err != nil {
+		return fmt.Errorf("validate sync device: %w", err)
+	}
+	return nil
+}
+
+func (*SyncRepository) AdvanceDeviceCursor(
+	ctx context.Context,
+	tx database.Tx,
+	userID uuid.UUID,
+	deviceID uuid.UUID,
+	sequence int64,
+) error {
+	if tx == nil {
+		return errors.New("sync transaction is required")
+	}
+	_, err := db.New(tx).AdvanceUserDeviceSyncCursor(ctx, sequence, pgUUID(userID), pgUUID(deviceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.ErrDeviceNotActive
+	}
+	if err != nil {
+		return fmt.Errorf("advance device sync cursor: %w", err)
+	}
+	return nil
 }
 
 func syncChangeFromRow(row *db.DayorderSyncChange) model.SyncChange {

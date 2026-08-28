@@ -73,3 +73,33 @@ func optionalUUID(value pgtype.UUID) *uuid.UUID {
 	identifier := uuid.UUID(value.Bytes)
 	return &identifier
 }
+
+func pgOptionalText(value *string) pgtype.Text {
+	if value == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: *value, Valid: true}
+}
+
+func optionalText(value pgtype.Text) *string {
+	if !value.Valid {
+		return nil
+	}
+	text := value.String
+	return &text
+}
+
+func pgOptionalInt2(value *int) pgtype.Int2 {
+	if value == nil {
+		return pgtype.Int2{}
+	}
+	return pgtype.Int2{Int16: int16(*value), Valid: true}
+}
+
+func optionalInt2(value pgtype.Int2) *int {
+	if !value.Valid {
+		return nil
+	}
+	converted := int(value.Int16)
+	return &converted
+}

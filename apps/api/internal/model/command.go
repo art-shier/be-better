@@ -29,12 +29,13 @@ type ClientMutationDraft struct {
 }
 
 type SyncChange struct {
-	Sequence      int64     `json:"sequence"`
-	EntityType    string    `json:"entityType"`
-	EntityID      uuid.UUID `json:"entityId"`
-	Operation     string    `json:"operation"`
-	EntityVersion int64     `json:"entityVersion"`
-	ChangedAt     time.Time `json:"changedAt"`
+	Sequence      int64           `json:"sequence"`
+	EntityType    string          `json:"entityType"`
+	EntityID      uuid.UUID       `json:"entityId"`
+	Operation     string          `json:"operation"`
+	EntityVersion int64           `json:"entityVersion"`
+	ChangedAt     time.Time       `json:"changedAt"`
+	Data          json.RawMessage `json:"data,omitempty"`
 }
 
 type ResourcePosition struct {

@@ -27,6 +27,11 @@ func (*IdempotencyRepository) Claim(
 		return model.ClientMutation{}, false, errors.New("idempotency transaction is required")
 	}
 	queries := db.New(tx)
+	if _, err := queries.GetActiveUserDevice(ctx, pgUUID(draft.UserID), pgUUID(draft.DeviceID)); errors.Is(err, pgx.ErrNoRows) {
+		return model.ClientMutation{}, false, model.ErrDeviceNotActive
+	} else if err != nil {
+		return model.ClientMutation{}, false, mapDatabaseError("validate mutation device", err)
+	}
 	row, err := queries.CreateClientMutation(ctx, db.CreateClientMutationParams{
 		ID: pgUUID(draft.ID), UserID: pgUUID(draft.UserID), DeviceID: pgUUID(draft.DeviceID),
 		MutationID: pgUUID(draft.MutationID), RequestHash: bytes.Clone(draft.RequestHash),

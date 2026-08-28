@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("not found")
-	ErrConflict = errors.New("conflict")
+	ErrNotFound        = errors.New("not found")
+	ErrConflict        = errors.New("conflict")
+	ErrDeviceNotActive = errors.New("device is not registered or has been revoked")
 )
 
 type AccountStatus string

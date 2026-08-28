@@ -41,7 +41,7 @@ func (router *Router) middleware(next http.Handler) http.Handler {
 				response.Header().Set("Access-Control-Allow-Origin", origin)
 				response.Header().Set("Access-Control-Allow-Credentials", "true")
 				response.Header().Set("Vary", "Origin")
-				response.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID")
+				response.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID, X-Device-ID, Idempotency-Key, If-Match")
 				response.Header().Set("Access-Control-Allow-Methods", "GET, PUT, PATCH, POST, DELETE, OPTIONS")
 			}
 		}

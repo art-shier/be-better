@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -44,12 +45,19 @@ type SyncStore interface {
 	Append(context.Context, database.Tx, uuid.UUID, model.SyncChangeDraft) (model.SyncChange, error)
 	CurrentCursor(context.Context, database.Tx, uuid.UUID) (int64, error)
 	List(context.Context, database.Tx, uuid.UUID, int64, int) ([]model.SyncChange, error)
+	Resolve(context.Context, database.Tx, uuid.UUID, model.SyncChange) ([]byte, error)
+	RequireActiveDevice(context.Context, database.Tx, uuid.UUID, uuid.UUID) error
+	AdvanceDeviceCursor(context.Context, database.Tx, uuid.UUID, uuid.UUID, int64) error
 }
 
 type SyncPage struct {
 	Changes    []model.SyncChange `json:"changes"`
 	NextCursor string             `json:"nextCursor"`
 	HasMore    bool               `json:"hasMore"`
+}
+
+type SyncBootstrap struct {
+	Cursor string `json:"cursor"`
 }
 
 type SyncService struct {
@@ -117,9 +125,58 @@ func (service *SyncService) CurrentCursor(ctx context.Context, userID uuid.UUID)
 	return service.encodeCursor(userID, sequence, service.now().UTC())
 }
 
+func (service *SyncService) Bootstrap(ctx context.Context, userID, deviceID uuid.UUID) (SyncBootstrap, error) {
+	if service == nil || service.transactor == nil || userID == uuid.Nil || deviceID == uuid.Nil {
+		return SyncBootstrap{}, fmt.Errorf("%w: sync user and device are required", ErrValidation)
+	}
+	var sequence int64
+	err := service.transactor.WithUser(ctx, userID, func(ctx context.Context, tx database.Tx) error {
+		if requireErr := service.store.RequireActiveDevice(ctx, tx, userID, deviceID); requireErr != nil {
+			return requireErr
+		}
+		var readErr error
+		sequence, readErr = service.store.CurrentCursor(ctx, tx, userID)
+		if readErr != nil {
+			return readErr
+		}
+		return service.store.AdvanceDeviceCursor(ctx, tx, userID, deviceID, sequence)
+	})
+	if err != nil {
+		return SyncBootstrap{}, fmt.Errorf("prepare sync bootstrap: %w", err)
+	}
+	cursor, err := service.encodeCursor(userID, sequence, service.now().UTC())
+	if err != nil {
+		return SyncBootstrap{}, err
+	}
+	return SyncBootstrap{Cursor: cursor}, nil
+}
+
 func (service *SyncService) Changes(
 	ctx context.Context,
 	userID uuid.UUID,
+	cursor string,
+	pageSize int,
+) (SyncPage, error) {
+	return service.changes(ctx, userID, uuid.Nil, cursor, pageSize)
+}
+
+func (service *SyncService) DeviceChanges(
+	ctx context.Context,
+	userID uuid.UUID,
+	deviceID uuid.UUID,
+	cursor string,
+	pageSize int,
+) (SyncPage, error) {
+	if deviceID == uuid.Nil {
+		return SyncPage{}, fmt.Errorf("%w: sync device is required", ErrValidation)
+	}
+	return service.changes(ctx, userID, deviceID, cursor, pageSize)
+}
+
+func (service *SyncService) changes(
+	ctx context.Context,
+	userID uuid.UUID,
+	deviceID uuid.UUID,
 	cursor string,
 	pageSize int,
 ) (SyncPage, error) {
@@ -139,9 +196,47 @@ func (service *SyncService) Changes(
 	}
 	var changes []model.SyncChange
 	err = service.transactor.WithUser(ctx, userID, func(ctx context.Context, tx database.Tx) error {
+		if deviceID != uuid.Nil {
+			if requireErr := service.store.RequireActiveDevice(ctx, tx, userID, deviceID); requireErr != nil {
+				return requireErr
+			}
+		}
 		var readErr error
 		changes, readErr = service.store.List(ctx, tx, userID, sequence, pageSize+1)
-		return readErr
+		if readErr != nil {
+			return readErr
+		}
+		visible := changes
+		if len(visible) > pageSize {
+			visible = visible[:pageSize]
+		}
+		for index := range visible {
+			if visible[index].Operation == "delete" {
+				continue
+			}
+			data, resolveErr := service.store.Resolve(ctx, tx, userID, visible[index])
+			if errors.Is(resolveErr, model.ErrNotFound) {
+				visible[index].Operation = "delete"
+				visible[index].Data = nil
+				continue
+			}
+			if resolveErr != nil {
+				return fmt.Errorf("resolve sync entity: %w", resolveErr)
+			}
+			var object map[string]any
+			if jsonErr := json.Unmarshal(data, &object); jsonErr != nil || object == nil {
+				return fmt.Errorf("%w: resolved sync entity must be a JSON object", ErrValidation)
+			}
+			visible[index].Data = append([]byte(nil), data...)
+		}
+		if deviceID == uuid.Nil {
+			return nil
+		}
+		nextSequence := sequence
+		if len(visible) > 0 {
+			nextSequence = visible[len(visible)-1].Sequence
+		}
+		return service.store.AdvanceDeviceCursor(ctx, tx, userID, deviceID, nextSequence)
 	})
 	if err != nil {
 		return SyncPage{}, fmt.Errorf("list sync changes: %w", err)

@@ -68,6 +68,148 @@ func (q *Queries) CreateCalendarEvent(ctx context.Context, arg CreateCalendarEve
 	return &i, err
 }
 
+const createCalendarReminder = `-- name: CreateCalendarReminder :one
+INSERT INTO dayorder.calendar_event_reminders (
+    id, user_id, event_id, offset_minutes, channel, scheduled_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6
+)
+RETURNING id, user_id, event_id, offset_minutes, channel, scheduled_at, status, delivered_at, attempts, version, created_at, updated_at, deleted_at
+`
+
+type CreateCalendarReminderParams struct {
+	ID            pgtype.UUID        `db:"id" json:"id"`
+	UserID        pgtype.UUID        `db:"user_id" json:"user_id"`
+	EventID       pgtype.UUID        `db:"event_id" json:"event_id"`
+	OffsetMinutes int32              `db:"offset_minutes" json:"offset_minutes"`
+	Channel       string             `db:"channel" json:"channel"`
+	ScheduledAt   pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
+}
+
+func (q *Queries) CreateCalendarReminder(ctx context.Context, arg CreateCalendarReminderParams) (*DayorderCalendarEventReminder, error) {
+	row := q.db.QueryRow(ctx, createCalendarReminder,
+		arg.ID,
+		arg.UserID,
+		arg.EventID,
+		arg.OffsetMinutes,
+		arg.Channel,
+		arg.ScheduledAt,
+	)
+	var i DayorderCalendarEventReminder
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.EventID,
+		&i.OffsetMinutes,
+		&i.Channel,
+		&i.ScheduledAt,
+		&i.Status,
+		&i.DeliveredAt,
+		&i.Attempts,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const createDailyReview = `-- name: CreateDailyReview :one
+INSERT INTO dayorder.daily_reviews (
+    id, user_id, review_date, wins, blockers, mood, energy, tomorrow_focus, ai_summary
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9
+) RETURNING id, user_id, review_date, wins, blockers, mood, energy, tomorrow_focus, ai_summary, version, created_at, updated_at, deleted_at
+`
+
+type CreateDailyReviewParams struct {
+	ID            pgtype.UUID `db:"id" json:"id"`
+	UserID        pgtype.UUID `db:"user_id" json:"user_id"`
+	ReviewDate    pgtype.Date `db:"review_date" json:"review_date"`
+	Wins          string      `db:"wins" json:"wins"`
+	Blockers      string      `db:"blockers" json:"blockers"`
+	Mood          pgtype.Int2 `db:"mood" json:"mood"`
+	Energy        pgtype.Int2 `db:"energy" json:"energy"`
+	TomorrowFocus string      `db:"tomorrow_focus" json:"tomorrow_focus"`
+	AiSummary     pgtype.Text `db:"ai_summary" json:"ai_summary"`
+}
+
+func (q *Queries) CreateDailyReview(ctx context.Context, arg CreateDailyReviewParams) (*DayorderDailyReview, error) {
+	row := q.db.QueryRow(ctx, createDailyReview,
+		arg.ID,
+		arg.UserID,
+		arg.ReviewDate,
+		arg.Wins,
+		arg.Blockers,
+		arg.Mood,
+		arg.Energy,
+		arg.TomorrowFocus,
+		arg.AiSummary,
+	)
+	var i DayorderDailyReview
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ReviewDate,
+		&i.Wins,
+		&i.Blockers,
+		&i.Mood,
+		&i.Energy,
+		&i.TomorrowFocus,
+		&i.AiSummary,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const createEntityLink = `-- name: CreateEntityLink :one
+INSERT INTO dayorder.entity_links (
+    id, user_id, source_type, source_id, target_type, target_id, relation_type
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7
+) RETURNING id, user_id, source_type, source_id, target_type, target_id, relation_type, created_at
+`
+
+type CreateEntityLinkParams struct {
+	ID           pgtype.UUID `db:"id" json:"id"`
+	UserID       pgtype.UUID `db:"user_id" json:"user_id"`
+	SourceType   string      `db:"source_type" json:"source_type"`
+	SourceID     pgtype.UUID `db:"source_id" json:"source_id"`
+	TargetType   string      `db:"target_type" json:"target_type"`
+	TargetID     pgtype.UUID `db:"target_id" json:"target_id"`
+	RelationType string      `db:"relation_type" json:"relation_type"`
+}
+
+func (q *Queries) CreateEntityLink(ctx context.Context, arg CreateEntityLinkParams) (*DayorderEntityLink, error) {
+	row := q.db.QueryRow(ctx, createEntityLink,
+		arg.ID,
+		arg.UserID,
+		arg.SourceType,
+		arg.SourceID,
+		arg.TargetType,
+		arg.TargetID,
+		arg.RelationType,
+	)
+	var i DayorderEntityLink
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.SourceType,
+		&i.SourceID,
+		&i.TargetType,
+		&i.TargetID,
+		&i.RelationType,
+		&i.CreatedAt,
+	)
+	return &i, err
+}
+
 const createGoal = `-- name: CreateGoal :one
 INSERT INTO dayorder.goals (
     id, user_id, title, why, area, metric_type, target_value, current_value,
@@ -272,6 +414,34 @@ func (q *Queries) CreateRecord(ctx context.Context, arg CreateRecordParams) (*Da
 	return &i, err
 }
 
+const createTag = `-- name: CreateTag :one
+INSERT INTO dayorder.tags (id, user_id, name, normalized_name)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (user_id, normalized_name) WHERE deleted_at IS NULL DO NOTHING
+RETURNING id, user_id, name, normalized_name, version, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) CreateTag(ctx context.Context, iD pgtype.UUID, userID pgtype.UUID, name string, normalizedName string) (*DayorderTag, error) {
+	row := q.db.QueryRow(ctx, createTag,
+		iD,
+		userID,
+		name,
+		normalizedName,
+	)
+	var i DayorderTag
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.NormalizedName,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
 const createTask = `-- name: CreateTask :one
 INSERT INTO dayorder.tasks (
     id, user_id, title, status, priority, estimate_minutes, due_at,
@@ -337,6 +507,18 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (*Dayord
 	return &i, err
 }
 
+const deleteEntityLink = `-- name: DeleteEntityLink :execrows
+DELETE FROM dayorder.entity_links WHERE user_id = $1 AND id = $2
+`
+
+func (q *Queries) DeleteEntityLink(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteEntityLink, userID, iD)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const detachGoalTasks = `-- name: DetachGoalTasks :many
 UPDATE dayorder.tasks
 SET goal_id = NULL, version = version + 1, updated_at = now()
@@ -381,6 +563,85 @@ func (q *Queries) DetachGoalTasks(ctx context.Context, userID pgtype.UUID, goalI
 		return nil, err
 	}
 	return items, nil
+}
+
+const getCalendarEvent = `-- name: GetCalendarEvent :one
+SELECT id, user_id, title, start_at, end_at, timezone, location, kind, source_calendar, goal_id, version, created_at, updated_at, deleted_at FROM dayorder.calendar_events
+WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetCalendarEvent(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderCalendarEvent, error) {
+	row := q.db.QueryRow(ctx, getCalendarEvent, userID, iD)
+	var i DayorderCalendarEvent
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Title,
+		&i.StartAt,
+		&i.EndAt,
+		&i.Timezone,
+		&i.Location,
+		&i.Kind,
+		&i.SourceCalendar,
+		&i.GoalID,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const getCalendarReminder = `-- name: GetCalendarReminder :one
+SELECT id, user_id, event_id, offset_minutes, channel, scheduled_at, status, delivered_at, attempts, version, created_at, updated_at, deleted_at FROM dayorder.calendar_event_reminders
+WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetCalendarReminder(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderCalendarEventReminder, error) {
+	row := q.db.QueryRow(ctx, getCalendarReminder, userID, iD)
+	var i DayorderCalendarEventReminder
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.EventID,
+		&i.OffsetMinutes,
+		&i.Channel,
+		&i.ScheduledAt,
+		&i.Status,
+		&i.DeliveredAt,
+		&i.Attempts,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const getDailyReview = `-- name: GetDailyReview :one
+SELECT id, user_id, review_date, wins, blockers, mood, energy, tomorrow_focus, ai_summary, version, created_at, updated_at, deleted_at FROM dayorder.daily_reviews
+WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetDailyReview(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderDailyReview, error) {
+	row := q.db.QueryRow(ctx, getDailyReview, userID, iD)
+	var i DayorderDailyReview
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ReviewDate,
+		&i.Wins,
+		&i.Blockers,
+		&i.Mood,
+		&i.Energy,
+		&i.TomorrowFocus,
+		&i.AiSummary,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
 }
 
 const getGoal = `-- name: GetGoal :one
@@ -443,6 +704,238 @@ func (q *Queries) GetGoalMilestone(ctx context.Context, userID pgtype.UUID, iD p
 	return &i, err
 }
 
+const getNote = `-- name: GetNote :one
+SELECT id, user_id, title, body_markdown, category, archived_at, search_vector, version, created_at, updated_at, deleted_at FROM dayorder.notes
+WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetNote(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderNote, error) {
+	row := q.db.QueryRow(ctx, getNote, userID, iD)
+	var i DayorderNote
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Title,
+		&i.BodyMarkdown,
+		&i.Category,
+		&i.ArchivedAt,
+		&i.SearchVector,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const getRecord = `-- name: GetRecord :one
+SELECT id, user_id, raw_text, kind, occurred_at, mood, energy, archived_at, version, created_at, updated_at, deleted_at FROM dayorder.records
+WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetRecord(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderRecord, error) {
+	row := q.db.QueryRow(ctx, getRecord, userID, iD)
+	var i DayorderRecord
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.RawText,
+		&i.Kind,
+		&i.OccurredAt,
+		&i.Mood,
+		&i.Energy,
+		&i.ArchivedAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const getReminderDelivery = `-- name: GetReminderDelivery :one
+SELECT
+    reminder.user_id,
+    reminder.id AS reminder_id,
+    reminder.event_id,
+    reminder.channel,
+    reminder.scheduled_at,
+    reminder.status,
+    reminder.version AS reminder_version,
+    reminder.deleted_at AS reminder_deleted_at,
+	account.status AS account_status,
+	account.deleted_at AS account_deleted_at,
+    account.email,
+    account.display_name,
+    event.title AS event_title,
+    event.start_at AS event_start_at,
+	event.timezone,
+	event.deleted_at AS event_deleted_at
+FROM dayorder.calendar_event_reminders AS reminder
+JOIN dayorder.calendar_events AS event
+  ON event.user_id = reminder.user_id AND event.id = reminder.event_id
+JOIN dayorder.users AS account
+  ON account.id = reminder.user_id
+WHERE reminder.user_id = $1
+  AND reminder.id = $2
+`
+
+type GetReminderDeliveryRow struct {
+	UserID            pgtype.UUID        `db:"user_id" json:"user_id"`
+	ReminderID        pgtype.UUID        `db:"reminder_id" json:"reminder_id"`
+	EventID           pgtype.UUID        `db:"event_id" json:"event_id"`
+	Channel           string             `db:"channel" json:"channel"`
+	ScheduledAt       pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
+	Status            string             `db:"status" json:"status"`
+	ReminderVersion   int64              `db:"reminder_version" json:"reminder_version"`
+	ReminderDeletedAt pgtype.Timestamptz `db:"reminder_deleted_at" json:"reminder_deleted_at"`
+	AccountStatus     string             `db:"account_status" json:"account_status"`
+	AccountDeletedAt  pgtype.Timestamptz `db:"account_deleted_at" json:"account_deleted_at"`
+	Email             string             `db:"email" json:"email"`
+	DisplayName       string             `db:"display_name" json:"display_name"`
+	EventTitle        string             `db:"event_title" json:"event_title"`
+	EventStartAt      pgtype.Timestamptz `db:"event_start_at" json:"event_start_at"`
+	Timezone          string             `db:"timezone" json:"timezone"`
+	EventDeletedAt    pgtype.Timestamptz `db:"event_deleted_at" json:"event_deleted_at"`
+}
+
+func (q *Queries) GetReminderDelivery(ctx context.Context, userID pgtype.UUID, reminderID pgtype.UUID) (*GetReminderDeliveryRow, error) {
+	row := q.db.QueryRow(ctx, getReminderDelivery, userID, reminderID)
+	var i GetReminderDeliveryRow
+	err := row.Scan(
+		&i.UserID,
+		&i.ReminderID,
+		&i.EventID,
+		&i.Channel,
+		&i.ScheduledAt,
+		&i.Status,
+		&i.ReminderVersion,
+		&i.ReminderDeletedAt,
+		&i.AccountStatus,
+		&i.AccountDeletedAt,
+		&i.Email,
+		&i.DisplayName,
+		&i.EventTitle,
+		&i.EventStartAt,
+		&i.Timezone,
+		&i.EventDeletedAt,
+	)
+	return &i, err
+}
+
+const getReminderDeliveryForUpdate = `-- name: GetReminderDeliveryForUpdate :one
+SELECT
+    reminder.user_id,
+    reminder.id AS reminder_id,
+    reminder.event_id,
+    reminder.channel,
+    reminder.scheduled_at,
+    reminder.status,
+    reminder.version AS reminder_version,
+    reminder.deleted_at AS reminder_deleted_at,
+	account.status AS account_status,
+	account.deleted_at AS account_deleted_at,
+    account.email,
+    account.display_name,
+    event.title AS event_title,
+    event.start_at AS event_start_at,
+	event.timezone,
+	event.deleted_at AS event_deleted_at
+FROM dayorder.calendar_event_reminders AS reminder
+JOIN dayorder.calendar_events AS event
+  ON event.user_id = reminder.user_id AND event.id = reminder.event_id
+JOIN dayorder.users AS account
+  ON account.id = reminder.user_id
+WHERE reminder.user_id = $1
+  AND reminder.id = $2
+FOR UPDATE OF reminder
+`
+
+type GetReminderDeliveryForUpdateRow struct {
+	UserID            pgtype.UUID        `db:"user_id" json:"user_id"`
+	ReminderID        pgtype.UUID        `db:"reminder_id" json:"reminder_id"`
+	EventID           pgtype.UUID        `db:"event_id" json:"event_id"`
+	Channel           string             `db:"channel" json:"channel"`
+	ScheduledAt       pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
+	Status            string             `db:"status" json:"status"`
+	ReminderVersion   int64              `db:"reminder_version" json:"reminder_version"`
+	ReminderDeletedAt pgtype.Timestamptz `db:"reminder_deleted_at" json:"reminder_deleted_at"`
+	AccountStatus     string             `db:"account_status" json:"account_status"`
+	AccountDeletedAt  pgtype.Timestamptz `db:"account_deleted_at" json:"account_deleted_at"`
+	Email             string             `db:"email" json:"email"`
+	DisplayName       string             `db:"display_name" json:"display_name"`
+	EventTitle        string             `db:"event_title" json:"event_title"`
+	EventStartAt      pgtype.Timestamptz `db:"event_start_at" json:"event_start_at"`
+	Timezone          string             `db:"timezone" json:"timezone"`
+	EventDeletedAt    pgtype.Timestamptz `db:"event_deleted_at" json:"event_deleted_at"`
+}
+
+func (q *Queries) GetReminderDeliveryForUpdate(ctx context.Context, userID pgtype.UUID, reminderID pgtype.UUID) (*GetReminderDeliveryForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getReminderDeliveryForUpdate, userID, reminderID)
+	var i GetReminderDeliveryForUpdateRow
+	err := row.Scan(
+		&i.UserID,
+		&i.ReminderID,
+		&i.EventID,
+		&i.Channel,
+		&i.ScheduledAt,
+		&i.Status,
+		&i.ReminderVersion,
+		&i.ReminderDeletedAt,
+		&i.AccountStatus,
+		&i.AccountDeletedAt,
+		&i.Email,
+		&i.DisplayName,
+		&i.EventTitle,
+		&i.EventStartAt,
+		&i.Timezone,
+		&i.EventDeletedAt,
+	)
+	return &i, err
+}
+
+const getTag = `-- name: GetTag :one
+SELECT id, user_id, name, normalized_name, version, created_at, updated_at, deleted_at FROM dayorder.tags
+WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetTag(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderTag, error) {
+	row := q.db.QueryRow(ctx, getTag, userID, iD)
+	var i DayorderTag
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.NormalizedName,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const getTagByNormalizedName = `-- name: GetTagByNormalizedName :one
+SELECT id, user_id, name, normalized_name, version, created_at, updated_at, deleted_at FROM dayorder.tags
+WHERE user_id = $1 AND normalized_name = $2 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetTagByNormalizedName(ctx context.Context, userID pgtype.UUID, normalizedName string) (*DayorderTag, error) {
+	row := q.db.QueryRow(ctx, getTagByNormalizedName, userID, normalizedName)
+	var i DayorderTag
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.NormalizedName,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
 const getTask = `-- name: GetTask :one
 SELECT id, user_id, title, status, priority, estimate_minutes, due_at, scheduled_start, scheduled_end, goal_id, source_record_id, completed_at, version, created_at, updated_at, deleted_at
 FROM dayorder.tasks
@@ -473,6 +966,191 @@ func (q *Queries) GetTask(ctx context.Context, userID pgtype.UUID, iD pgtype.UUI
 		&i.DeletedAt,
 	)
 	return &i, err
+}
+
+const linkNoteTag = `-- name: LinkNoteTag :exec
+INSERT INTO dayorder.note_tags (user_id, note_id, tag_id)
+VALUES ($1, $2, $3) ON CONFLICT DO NOTHING
+`
+
+func (q *Queries) LinkNoteTag(ctx context.Context, userID pgtype.UUID, noteID pgtype.UUID, tagID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, linkNoteTag, userID, noteID, tagID)
+	return err
+}
+
+const linkRecordTag = `-- name: LinkRecordTag :exec
+INSERT INTO dayorder.record_tags (user_id, record_id, tag_id)
+VALUES ($1, $2, $3) ON CONFLICT DO NOTHING
+`
+
+func (q *Queries) LinkRecordTag(ctx context.Context, userID pgtype.UUID, recordID pgtype.UUID, tagID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, linkRecordTag, userID, recordID, tagID)
+	return err
+}
+
+const listCalendarEvents = `-- name: ListCalendarEvents :many
+SELECT id, user_id, title, start_at, end_at, timezone, location, kind, source_calendar, goal_id, version, created_at, updated_at, deleted_at FROM dayorder.calendar_events
+WHERE user_id = $1
+  AND deleted_at IS NULL
+  AND ($2::timestamptz IS NULL OR end_at >= $2)
+  AND ($3::timestamptz IS NULL OR start_at <= $3)
+ORDER BY start_at, id
+LIMIT $4
+`
+
+func (q *Queries) ListCalendarEvents(ctx context.Context, userID pgtype.UUID, windowStart pgtype.Timestamptz, windowEnd pgtype.Timestamptz, pageSize int32) ([]*DayorderCalendarEvent, error) {
+	rows, err := q.db.Query(ctx, listCalendarEvents,
+		userID,
+		windowStart,
+		windowEnd,
+		pageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderCalendarEvent{}
+	for rows.Next() {
+		var i DayorderCalendarEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Title,
+			&i.StartAt,
+			&i.EndAt,
+			&i.Timezone,
+			&i.Location,
+			&i.Kind,
+			&i.SourceCalendar,
+			&i.GoalID,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCalendarReminders = `-- name: ListCalendarReminders :many
+SELECT id, user_id, event_id, offset_minutes, channel, scheduled_at, status, delivered_at, attempts, version, created_at, updated_at, deleted_at FROM dayorder.calendar_event_reminders
+WHERE user_id = $1 AND event_id = $2 AND deleted_at IS NULL
+ORDER BY offset_minutes DESC, channel, id
+`
+
+func (q *Queries) ListCalendarReminders(ctx context.Context, userID pgtype.UUID, eventID pgtype.UUID) ([]*DayorderCalendarEventReminder, error) {
+	rows, err := q.db.Query(ctx, listCalendarReminders, userID, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderCalendarEventReminder{}
+	for rows.Next() {
+		var i DayorderCalendarEventReminder
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.EventID,
+			&i.OffsetMinutes,
+			&i.Channel,
+			&i.ScheduledAt,
+			&i.Status,
+			&i.DeliveredAt,
+			&i.Attempts,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDailyReviews = `-- name: ListDailyReviews :many
+SELECT id, user_id, review_date, wins, blockers, mood, energy, tomorrow_focus, ai_summary, version, created_at, updated_at, deleted_at FROM dayorder.daily_reviews
+WHERE user_id = $1 AND deleted_at IS NULL
+ORDER BY review_date DESC, id DESC LIMIT $2
+`
+
+func (q *Queries) ListDailyReviews(ctx context.Context, userID pgtype.UUID, pageSize int32) ([]*DayorderDailyReview, error) {
+	rows, err := q.db.Query(ctx, listDailyReviews, userID, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderDailyReview{}
+	for rows.Next() {
+		var i DayorderDailyReview
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.ReviewDate,
+			&i.Wins,
+			&i.Blockers,
+			&i.Mood,
+			&i.Energy,
+			&i.TomorrowFocus,
+			&i.AiSummary,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEntityLinks = `-- name: ListEntityLinks :many
+SELECT id, user_id, source_type, source_id, target_type, target_id, relation_type, created_at FROM dayorder.entity_links
+WHERE user_id = $1 AND source_type = $2 AND source_id = $3
+ORDER BY created_at, id
+`
+
+func (q *Queries) ListEntityLinks(ctx context.Context, userID pgtype.UUID, sourceType string, sourceID pgtype.UUID) ([]*DayorderEntityLink, error) {
+	rows, err := q.db.Query(ctx, listEntityLinks, userID, sourceType, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderEntityLink{}
+	for rows.Next() {
+		var i DayorderEntityLink
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.SourceType,
+			&i.SourceID,
+			&i.TargetType,
+			&i.TargetID,
+			&i.RelationType,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listGoalMilestones = `-- name: ListGoalMilestones :many
@@ -576,6 +1254,203 @@ func (q *Queries) ListGoals(ctx context.Context, userID pgtype.UUID, afterUpdate
 	return items, nil
 }
 
+const listNoteTags = `-- name: ListNoteTags :many
+SELECT tags.id, tags.user_id, tags.name, tags.normalized_name, tags.version, tags.created_at, tags.updated_at, tags.deleted_at FROM dayorder.tags
+JOIN dayorder.note_tags links ON links.user_id = tags.user_id AND links.tag_id = tags.id
+WHERE links.user_id = $1 AND links.note_id = $2 AND tags.deleted_at IS NULL
+ORDER BY tags.normalized_name
+`
+
+func (q *Queries) ListNoteTags(ctx context.Context, userID pgtype.UUID, noteID pgtype.UUID) ([]*DayorderTag, error) {
+	rows, err := q.db.Query(ctx, listNoteTags, userID, noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderTag{}
+	for rows.Next() {
+		var i DayorderTag
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.NormalizedName,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotes = `-- name: ListNotes :many
+SELECT id, user_id, title, body_markdown, category, archived_at, search_vector, version, created_at, updated_at, deleted_at FROM dayorder.notes
+WHERE user_id = $1 AND deleted_at IS NULL
+  AND ($2::timestamptz IS NULL OR updated_at < $2
+       OR (updated_at = $2 AND id < $3::uuid))
+ORDER BY updated_at DESC, id DESC LIMIT $4
+`
+
+func (q *Queries) ListNotes(ctx context.Context, userID pgtype.UUID, afterUpdatedAt pgtype.Timestamptz, afterID pgtype.UUID, pageSize int32) ([]*DayorderNote, error) {
+	rows, err := q.db.Query(ctx, listNotes,
+		userID,
+		afterUpdatedAt,
+		afterID,
+		pageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderNote{}
+	for rows.Next() {
+		var i DayorderNote
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Title,
+			&i.BodyMarkdown,
+			&i.Category,
+			&i.ArchivedAt,
+			&i.SearchVector,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecordTags = `-- name: ListRecordTags :many
+SELECT tags.id, tags.user_id, tags.name, tags.normalized_name, tags.version, tags.created_at, tags.updated_at, tags.deleted_at FROM dayorder.tags
+JOIN dayorder.record_tags links ON links.user_id = tags.user_id AND links.tag_id = tags.id
+WHERE links.user_id = $1 AND links.record_id = $2 AND tags.deleted_at IS NULL
+ORDER BY tags.normalized_name
+`
+
+func (q *Queries) ListRecordTags(ctx context.Context, userID pgtype.UUID, recordID pgtype.UUID) ([]*DayorderTag, error) {
+	rows, err := q.db.Query(ctx, listRecordTags, userID, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderTag{}
+	for rows.Next() {
+		var i DayorderTag
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.NormalizedName,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecords = `-- name: ListRecords :many
+SELECT id, user_id, raw_text, kind, occurred_at, mood, energy, archived_at, version, created_at, updated_at, deleted_at FROM dayorder.records
+WHERE user_id = $1 AND deleted_at IS NULL
+  AND ($2::timestamptz IS NULL OR occurred_at < $2
+       OR (occurred_at = $2 AND id < $3::uuid))
+ORDER BY occurred_at DESC, id DESC LIMIT $4
+`
+
+func (q *Queries) ListRecords(ctx context.Context, userID pgtype.UUID, afterOccurredAt pgtype.Timestamptz, afterID pgtype.UUID, pageSize int32) ([]*DayorderRecord, error) {
+	rows, err := q.db.Query(ctx, listRecords,
+		userID,
+		afterOccurredAt,
+		afterID,
+		pageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderRecord{}
+	for rows.Next() {
+		var i DayorderRecord
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.RawText,
+			&i.Kind,
+			&i.OccurredAt,
+			&i.Mood,
+			&i.Energy,
+			&i.ArchivedAt,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTags = `-- name: ListTags :many
+SELECT id, user_id, name, normalized_name, version, created_at, updated_at, deleted_at FROM dayorder.tags WHERE user_id = $1 AND deleted_at IS NULL
+ORDER BY normalized_name, id LIMIT $2
+`
+
+func (q *Queries) ListTags(ctx context.Context, userID pgtype.UUID, pageSize int32) ([]*DayorderTag, error) {
+	rows, err := q.db.Query(ctx, listTags, userID, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderTag{}
+	for rows.Next() {
+		var i DayorderTag
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.NormalizedName,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTasks = `-- name: ListTasks :many
 SELECT id, user_id, title, status, priority, estimate_minutes, due_at, scheduled_start, scheduled_end, goal_id, source_record_id, completed_at, version, created_at, updated_at, deleted_at
 FROM dayorder.tasks
@@ -645,6 +1520,124 @@ func (q *Queries) ListTasks(ctx context.Context, arg ListTasksParams) ([]*Dayord
 	return items, nil
 }
 
+const recordReminderDeliveryResult = `-- name: RecordReminderDeliveryResult :one
+UPDATE dayorder.calendar_event_reminders
+SET status = $1,
+    delivered_at = CASE WHEN $1::varchar = 'delivered' THEN now() ELSE NULL END,
+    attempts = attempts + 1,
+    version = version + 1,
+    updated_at = now()
+WHERE user_id = $2
+  AND id = $3
+  AND event_id = $4
+  AND channel = $5
+  AND scheduled_at = $6
+  AND version = $7
+  AND deleted_at IS NULL
+  AND status IN ('pending', 'processing', 'failed')
+RETURNING id, user_id, event_id, offset_minutes, channel, scheduled_at, status, delivered_at, attempts, version, created_at, updated_at, deleted_at
+`
+
+type RecordReminderDeliveryResultParams struct {
+	Status          string             `db:"status" json:"status"`
+	UserID          pgtype.UUID        `db:"user_id" json:"user_id"`
+	ReminderID      pgtype.UUID        `db:"reminder_id" json:"reminder_id"`
+	EventID         pgtype.UUID        `db:"event_id" json:"event_id"`
+	Channel         string             `db:"channel" json:"channel"`
+	ScheduledAt     pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
+	ExpectedVersion int64              `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) RecordReminderDeliveryResult(ctx context.Context, arg RecordReminderDeliveryResultParams) (*DayorderCalendarEventReminder, error) {
+	row := q.db.QueryRow(ctx, recordReminderDeliveryResult,
+		arg.Status,
+		arg.UserID,
+		arg.ReminderID,
+		arg.EventID,
+		arg.Channel,
+		arg.ScheduledAt,
+		arg.ExpectedVersion,
+	)
+	var i DayorderCalendarEventReminder
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.EventID,
+		&i.OffsetMinutes,
+		&i.Channel,
+		&i.ScheduledAt,
+		&i.Status,
+		&i.DeliveredAt,
+		&i.Attempts,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const replaceNoteTagsDelete = `-- name: ReplaceNoteTagsDelete :exec
+DELETE FROM dayorder.note_tags WHERE user_id = $1 AND note_id = $2
+`
+
+func (q *Queries) ReplaceNoteTagsDelete(ctx context.Context, userID pgtype.UUID, noteID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, replaceNoteTagsDelete, userID, noteID)
+	return err
+}
+
+const replaceRecordTagsDelete = `-- name: ReplaceRecordTagsDelete :exec
+DELETE FROM dayorder.record_tags WHERE user_id = $1 AND record_id = $2
+`
+
+func (q *Queries) ReplaceRecordTagsDelete(ctx context.Context, userID pgtype.UUID, recordID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, replaceRecordTagsDelete, userID, recordID)
+	return err
+}
+
+const rescheduleCalendarReminders = `-- name: RescheduleCalendarReminders :many
+UPDATE dayorder.calendar_event_reminders
+SET scheduled_at = $1::timestamptz - (offset_minutes * interval '1 minute'),
+    status = 'pending', delivered_at = NULL, attempts = 0,
+    version = version + 1, updated_at = now()
+WHERE user_id = $2 AND event_id = $3 AND deleted_at IS NULL
+RETURNING id, user_id, event_id, offset_minutes, channel, scheduled_at, status, delivered_at, attempts, version, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) RescheduleCalendarReminders(ctx context.Context, startAt pgtype.Timestamptz, userID pgtype.UUID, eventID pgtype.UUID) ([]*DayorderCalendarEventReminder, error) {
+	rows, err := q.db.Query(ctx, rescheduleCalendarReminders, startAt, userID, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderCalendarEventReminder{}
+	for rows.Next() {
+		var i DayorderCalendarEventReminder
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.EventID,
+			&i.OffsetMinutes,
+			&i.Channel,
+			&i.ScheduledAt,
+			&i.Status,
+			&i.DeliveredAt,
+			&i.Attempts,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const searchNotes = `-- name: SearchNotes :many
 SELECT id, user_id, title, body_markdown, category, archived_at, search_vector, version, created_at, updated_at, deleted_at
 FROM dayorder.notes
@@ -685,6 +1678,104 @@ func (q *Queries) SearchNotes(ctx context.Context, userID pgtype.UUID, query str
 		return nil, err
 	}
 	return items, nil
+}
+
+const softDeleteCalendarEvent = `-- name: SoftDeleteCalendarEvent :one
+UPDATE dayorder.calendar_events
+SET deleted_at = now(), version = version + 1, updated_at = now()
+WHERE user_id = $1 AND id = $2
+  AND version = $3 AND deleted_at IS NULL
+RETURNING id, user_id, title, start_at, end_at, timezone, location, kind, source_calendar, goal_id, version, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) SoftDeleteCalendarEvent(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderCalendarEvent, error) {
+	row := q.db.QueryRow(ctx, softDeleteCalendarEvent, userID, iD, expectedVersion)
+	var i DayorderCalendarEvent
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Title,
+		&i.StartAt,
+		&i.EndAt,
+		&i.Timezone,
+		&i.Location,
+		&i.Kind,
+		&i.SourceCalendar,
+		&i.GoalID,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const softDeleteCalendarReminders = `-- name: SoftDeleteCalendarReminders :many
+UPDATE dayorder.calendar_event_reminders
+SET deleted_at = now(), status = 'cancelled', version = version + 1, updated_at = now()
+WHERE user_id = $1 AND event_id = $2 AND deleted_at IS NULL
+RETURNING id, user_id, event_id, offset_minutes, channel, scheduled_at, status, delivered_at, attempts, version, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) SoftDeleteCalendarReminders(ctx context.Context, userID pgtype.UUID, eventID pgtype.UUID) ([]*DayorderCalendarEventReminder, error) {
+	rows, err := q.db.Query(ctx, softDeleteCalendarReminders, userID, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderCalendarEventReminder{}
+	for rows.Next() {
+		var i DayorderCalendarEventReminder
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.EventID,
+			&i.OffsetMinutes,
+			&i.Channel,
+			&i.ScheduledAt,
+			&i.Status,
+			&i.DeliveredAt,
+			&i.Attempts,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const softDeleteDailyReview = `-- name: SoftDeleteDailyReview :one
+UPDATE dayorder.daily_reviews SET deleted_at = now(), version = version + 1, updated_at = now()
+WHERE user_id = $1 AND id = $2
+  AND version = $3 AND deleted_at IS NULL RETURNING id, user_id, review_date, wins, blockers, mood, energy, tomorrow_focus, ai_summary, version, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) SoftDeleteDailyReview(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderDailyReview, error) {
+	row := q.db.QueryRow(ctx, softDeleteDailyReview, userID, iD, expectedVersion)
+	var i DayorderDailyReview
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ReviewDate,
+		&i.Wins,
+		&i.Blockers,
+		&i.Mood,
+		&i.Energy,
+		&i.TomorrowFocus,
+		&i.AiSummary,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
 }
 
 const softDeleteGoal = `-- name: SoftDeleteGoal :one
@@ -792,6 +1883,57 @@ func (q *Queries) SoftDeleteGoalMilestones(ctx context.Context, userID pgtype.UU
 	return items, nil
 }
 
+const softDeleteNote = `-- name: SoftDeleteNote :one
+UPDATE dayorder.notes SET deleted_at = now(), version = version + 1, updated_at = now()
+WHERE user_id = $1 AND id = $2
+  AND version = $3 AND deleted_at IS NULL RETURNING id, user_id, title, body_markdown, category, archived_at, search_vector, version, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) SoftDeleteNote(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderNote, error) {
+	row := q.db.QueryRow(ctx, softDeleteNote, userID, iD, expectedVersion)
+	var i DayorderNote
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Title,
+		&i.BodyMarkdown,
+		&i.Category,
+		&i.ArchivedAt,
+		&i.SearchVector,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const softDeleteRecord = `-- name: SoftDeleteRecord :one
+UPDATE dayorder.records SET deleted_at = now(), version = version + 1, updated_at = now()
+WHERE user_id = $1 AND id = $2
+  AND version = $3 AND deleted_at IS NULL RETURNING id, user_id, raw_text, kind, occurred_at, mood, energy, archived_at, version, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) SoftDeleteRecord(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderRecord, error) {
+	row := q.db.QueryRow(ctx, softDeleteRecord, userID, iD, expectedVersion)
+	var i DayorderRecord
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.RawText,
+		&i.Kind,
+		&i.OccurredAt,
+		&i.Mood,
+		&i.Energy,
+		&i.ArchivedAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
 const softDeleteTask = `-- name: SoftDeleteTask :one
 UPDATE dayorder.tasks
 SET deleted_at = now(),
@@ -820,6 +1962,156 @@ func (q *Queries) SoftDeleteTask(ctx context.Context, userID pgtype.UUID, iD pgt
 		&i.GoalID,
 		&i.SourceRecordID,
 		&i.CompletedAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const softDeleteUnusedTags = `-- name: SoftDeleteUnusedTags :many
+UPDATE dayorder.tags tag SET deleted_at = now(), version = version + 1, updated_at = now()
+WHERE tag.user_id = $1 AND tag.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM dayorder.record_tags rt WHERE rt.user_id = tag.user_id AND rt.tag_id = tag.id)
+  AND NOT EXISTS (SELECT 1 FROM dayorder.note_tags nt WHERE nt.user_id = tag.user_id AND nt.tag_id = tag.id)
+RETURNING tag.id, tag.user_id, tag.name, tag.normalized_name, tag.version, tag.created_at, tag.updated_at, tag.deleted_at
+`
+
+func (q *Queries) SoftDeleteUnusedTags(ctx context.Context, userID pgtype.UUID) ([]*DayorderTag, error) {
+	rows, err := q.db.Query(ctx, softDeleteUnusedTags, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderTag{}
+	for rows.Next() {
+		var i DayorderTag
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.NormalizedName,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateCalendarEvent = `-- name: UpdateCalendarEvent :one
+UPDATE dayorder.calendar_events
+SET title = $1, start_at = $2, end_at = $3,
+    timezone = $4, location = $5, kind = $6,
+    source_calendar = $7, goal_id = $8,
+    version = version + 1, updated_at = now()
+WHERE user_id = $9 AND id = $10
+  AND version = $11 AND deleted_at IS NULL
+RETURNING id, user_id, title, start_at, end_at, timezone, location, kind, source_calendar, goal_id, version, created_at, updated_at, deleted_at
+`
+
+type UpdateCalendarEventParams struct {
+	Title           string             `db:"title" json:"title"`
+	StartAt         pgtype.Timestamptz `db:"start_at" json:"start_at"`
+	EndAt           pgtype.Timestamptz `db:"end_at" json:"end_at"`
+	Timezone        string             `db:"timezone" json:"timezone"`
+	Location        pgtype.Text        `db:"location" json:"location"`
+	Kind            string             `db:"kind" json:"kind"`
+	SourceCalendar  pgtype.Text        `db:"source_calendar" json:"source_calendar"`
+	GoalID          pgtype.UUID        `db:"goal_id" json:"goal_id"`
+	UserID          pgtype.UUID        `db:"user_id" json:"user_id"`
+	ID              pgtype.UUID        `db:"id" json:"id"`
+	ExpectedVersion int64              `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) UpdateCalendarEvent(ctx context.Context, arg UpdateCalendarEventParams) (*DayorderCalendarEvent, error) {
+	row := q.db.QueryRow(ctx, updateCalendarEvent,
+		arg.Title,
+		arg.StartAt,
+		arg.EndAt,
+		arg.Timezone,
+		arg.Location,
+		arg.Kind,
+		arg.SourceCalendar,
+		arg.GoalID,
+		arg.UserID,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i DayorderCalendarEvent
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Title,
+		&i.StartAt,
+		&i.EndAt,
+		&i.Timezone,
+		&i.Location,
+		&i.Kind,
+		&i.SourceCalendar,
+		&i.GoalID,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const updateDailyReview = `-- name: UpdateDailyReview :one
+UPDATE dayorder.daily_reviews
+SET review_date = $1, wins = $2, blockers = $3,
+    mood = $4, energy = $5, tomorrow_focus = $6,
+    ai_summary = $7, version = version + 1, updated_at = now()
+WHERE user_id = $8 AND id = $9
+  AND version = $10 AND deleted_at IS NULL RETURNING id, user_id, review_date, wins, blockers, mood, energy, tomorrow_focus, ai_summary, version, created_at, updated_at, deleted_at
+`
+
+type UpdateDailyReviewParams struct {
+	ReviewDate      pgtype.Date `db:"review_date" json:"review_date"`
+	Wins            string      `db:"wins" json:"wins"`
+	Blockers        string      `db:"blockers" json:"blockers"`
+	Mood            pgtype.Int2 `db:"mood" json:"mood"`
+	Energy          pgtype.Int2 `db:"energy" json:"energy"`
+	TomorrowFocus   string      `db:"tomorrow_focus" json:"tomorrow_focus"`
+	AiSummary       pgtype.Text `db:"ai_summary" json:"ai_summary"`
+	UserID          pgtype.UUID `db:"user_id" json:"user_id"`
+	ID              pgtype.UUID `db:"id" json:"id"`
+	ExpectedVersion int64       `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) UpdateDailyReview(ctx context.Context, arg UpdateDailyReviewParams) (*DayorderDailyReview, error) {
+	row := q.db.QueryRow(ctx, updateDailyReview,
+		arg.ReviewDate,
+		arg.Wins,
+		arg.Blockers,
+		arg.Mood,
+		arg.Energy,
+		arg.TomorrowFocus,
+		arg.AiSummary,
+		arg.UserID,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i DayorderDailyReview
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ReviewDate,
+		&i.Wins,
+		&i.Blockers,
+		&i.Mood,
+		&i.Energy,
+		&i.TomorrowFocus,
+		&i.AiSummary,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -1003,6 +2295,103 @@ func (q *Queries) UpdateGoalProgress(ctx context.Context, arg UpdateGoalProgress
 		&i.DueDate,
 		&i.Status,
 		&i.Health,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const updateNote = `-- name: UpdateNote :one
+UPDATE dayorder.notes
+SET title = $1, body_markdown = $2, category = $3,
+    archived_at = $4, version = version + 1, updated_at = now()
+WHERE user_id = $5 AND id = $6
+  AND version = $7 AND deleted_at IS NULL RETURNING id, user_id, title, body_markdown, category, archived_at, search_vector, version, created_at, updated_at, deleted_at
+`
+
+type UpdateNoteParams struct {
+	Title           string             `db:"title" json:"title"`
+	BodyMarkdown    string             `db:"body_markdown" json:"body_markdown"`
+	Category        string             `db:"category" json:"category"`
+	ArchivedAt      pgtype.Timestamptz `db:"archived_at" json:"archived_at"`
+	UserID          pgtype.UUID        `db:"user_id" json:"user_id"`
+	ID              pgtype.UUID        `db:"id" json:"id"`
+	ExpectedVersion int64              `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) UpdateNote(ctx context.Context, arg UpdateNoteParams) (*DayorderNote, error) {
+	row := q.db.QueryRow(ctx, updateNote,
+		arg.Title,
+		arg.BodyMarkdown,
+		arg.Category,
+		arg.ArchivedAt,
+		arg.UserID,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i DayorderNote
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Title,
+		&i.BodyMarkdown,
+		&i.Category,
+		&i.ArchivedAt,
+		&i.SearchVector,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const updateRecord = `-- name: UpdateRecord :one
+UPDATE dayorder.records
+SET raw_text = $1, kind = $2, occurred_at = $3,
+    mood = $4, energy = $5, archived_at = $6,
+    version = version + 1, updated_at = now()
+WHERE user_id = $7 AND id = $8
+  AND version = $9 AND deleted_at IS NULL
+RETURNING id, user_id, raw_text, kind, occurred_at, mood, energy, archived_at, version, created_at, updated_at, deleted_at
+`
+
+type UpdateRecordParams struct {
+	RawText         string             `db:"raw_text" json:"raw_text"`
+	Kind            string             `db:"kind" json:"kind"`
+	OccurredAt      pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
+	Mood            pgtype.Int2        `db:"mood" json:"mood"`
+	Energy          pgtype.Int2        `db:"energy" json:"energy"`
+	ArchivedAt      pgtype.Timestamptz `db:"archived_at" json:"archived_at"`
+	UserID          pgtype.UUID        `db:"user_id" json:"user_id"`
+	ID              pgtype.UUID        `db:"id" json:"id"`
+	ExpectedVersion int64              `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) UpdateRecord(ctx context.Context, arg UpdateRecordParams) (*DayorderRecord, error) {
+	row := q.db.QueryRow(ctx, updateRecord,
+		arg.RawText,
+		arg.Kind,
+		arg.OccurredAt,
+		arg.Mood,
+		arg.Energy,
+		arg.ArchivedAt,
+		arg.UserID,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i DayorderRecord
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.RawText,
+		&i.Kind,
+		&i.OccurredAt,
+		&i.Mood,
+		&i.Energy,
+		&i.ArchivedAt,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,

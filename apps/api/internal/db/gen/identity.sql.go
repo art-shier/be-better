@@ -40,6 +40,32 @@ func (q *Queries) ActivateUser(ctx context.Context, userID pgtype.UUID) (*Dayord
 	return &i, err
 }
 
+const advanceUserDeviceSyncCursor = `-- name: AdvanceUserDeviceSyncCursor :one
+UPDATE dayorder.user_devices
+SET last_sync_cursor = greatest(last_sync_cursor, $1),
+    last_seen_at = now()
+WHERE user_id = $2
+  AND id = $3
+  AND revoked_at IS NULL
+RETURNING id, user_id, device_name, platform, last_seen_at, last_sync_cursor, created_at, revoked_at
+`
+
+func (q *Queries) AdvanceUserDeviceSyncCursor(ctx context.Context, sequence int64, userID pgtype.UUID, iD pgtype.UUID) (*DayorderUserDevice, error) {
+	row := q.db.QueryRow(ctx, advanceUserDeviceSyncCursor, sequence, userID, iD)
+	var i DayorderUserDevice
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.DeviceName,
+		&i.Platform,
+		&i.LastSeenAt,
+		&i.LastSyncCursor,
+		&i.CreatedAt,
+		&i.RevokedAt,
+	)
+	return &i, err
+}
+
 const authenticateSession = `-- name: AuthenticateSession :one
 SELECT
     result.session_id::uuid AS session_id,
@@ -231,6 +257,34 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (*Dayord
 	return &i, err
 }
 
+const createUserDevice = `-- name: CreateUserDevice :one
+INSERT INTO dayorder.user_devices (id, user_id, device_name, platform)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING
+RETURNING id, user_id, device_name, platform, last_seen_at, last_sync_cursor, created_at, revoked_at
+`
+
+func (q *Queries) CreateUserDevice(ctx context.Context, iD pgtype.UUID, userID pgtype.UUID, deviceName string, platform string) (*DayorderUserDevice, error) {
+	row := q.db.QueryRow(ctx, createUserDevice,
+		iD,
+		userID,
+		deviceName,
+		platform,
+	)
+	var i DayorderUserDevice
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.DeviceName,
+		&i.Platform,
+		&i.LastSeenAt,
+		&i.LastSyncCursor,
+		&i.CreatedAt,
+		&i.RevokedAt,
+	)
+	return &i, err
+}
+
 const createUserSettings = `-- name: CreateUserSettings :one
 INSERT INTO dayorder.user_settings (user_id, schema_version, version, settings)
 VALUES ($1, 1, 1, '{}'::jsonb)
@@ -246,6 +300,29 @@ func (q *Queries) CreateUserSettings(ctx context.Context, userID pgtype.UUID) (*
 		&i.Version,
 		&i.Settings,
 		&i.UpdatedAt,
+	)
+	return &i, err
+}
+
+const getActiveUserDevice = `-- name: GetActiveUserDevice :one
+SELECT id, user_id, device_name, platform, last_seen_at, last_sync_cursor, created_at, revoked_at FROM dayorder.user_devices
+WHERE user_id = $1
+  AND id = $2
+  AND revoked_at IS NULL
+`
+
+func (q *Queries) GetActiveUserDevice(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderUserDevice, error) {
+	row := q.db.QueryRow(ctx, getActiveUserDevice, userID, iD)
+	var i DayorderUserDevice
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.DeviceName,
+		&i.Platform,
+		&i.LastSeenAt,
+		&i.LastSyncCursor,
+		&i.CreatedAt,
+		&i.RevokedAt,
 	)
 	return &i, err
 }
@@ -329,6 +406,41 @@ func (q *Queries) InvalidateAccountTokens(ctx context.Context, userID pgtype.UUI
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const listUserDevices = `-- name: ListUserDevices :many
+SELECT id, user_id, device_name, platform, last_seen_at, last_sync_cursor, created_at, revoked_at FROM dayorder.user_devices
+WHERE user_id = $1
+ORDER BY revoked_at NULLS FIRST, last_seen_at DESC, id
+`
+
+func (q *Queries) ListUserDevices(ctx context.Context, userID pgtype.UUID) ([]*DayorderUserDevice, error) {
+	rows, err := q.db.Query(ctx, listUserDevices, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderUserDevice{}
+	for rows.Next() {
+		var i DayorderUserDevice
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.DeviceName,
+			&i.Platform,
+			&i.LastSeenAt,
+			&i.LastSyncCursor,
+			&i.CreatedAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const loginThrottleStatus = `-- name: LoginThrottleStatus :one
@@ -451,6 +563,38 @@ func (q *Queries) RecordLoginFailure(ctx context.Context, dimension string, keyH
 	row := q.db.QueryRow(ctx, recordLoginFailure, dimension, keyHash)
 	var i RecordLoginFailureRow
 	err := row.Scan(&i.Failures, &i.BlockedUntil)
+	return &i, err
+}
+
+const refreshUserDevice = `-- name: RefreshUserDevice :one
+UPDATE dayorder.user_devices
+SET device_name = $1,
+    platform = $2,
+    last_seen_at = now()
+WHERE user_id = $3
+  AND id = $4
+  AND revoked_at IS NULL
+RETURNING id, user_id, device_name, platform, last_seen_at, last_sync_cursor, created_at, revoked_at
+`
+
+func (q *Queries) RefreshUserDevice(ctx context.Context, deviceName string, platform string, userID pgtype.UUID, iD pgtype.UUID) (*DayorderUserDevice, error) {
+	row := q.db.QueryRow(ctx, refreshUserDevice,
+		deviceName,
+		platform,
+		userID,
+		iD,
+	)
+	var i DayorderUserDevice
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.DeviceName,
+		&i.Platform,
+		&i.LastSeenAt,
+		&i.LastSyncCursor,
+		&i.CreatedAt,
+		&i.RevokedAt,
+	)
 	return &i, err
 }
 

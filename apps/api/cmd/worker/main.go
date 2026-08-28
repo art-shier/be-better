@@ -59,9 +59,20 @@ func main() {
 		logger.Error("create password reset email handler", "error", err)
 		os.Exit(1)
 	}
+	reminderRepository, err := postgresstore.NewReminderDeliveryRepository(pool)
+	if err != nil {
+		logger.Error("create reminder delivery repository", "error", err)
+		os.Exit(1)
+	}
+	reminderHandler, err := worker.NewReminderHandler(reminderRepository, sender)
+	if err != nil {
+		logger.Error("create reminder handler", "error", err)
+		os.Exit(1)
+	}
 	runner, err := worker.NewRunner(repository, map[string]worker.Handler{
 		"email.verification.requested":   verificationHandler,
 		"email.password_reset.requested": passwordResetHandler,
+		"reminder.delivery.requested":    reminderHandler,
 	})
 	if err != nil {
 		logger.Error("create worker runner", "error", err)
