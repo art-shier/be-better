@@ -15,7 +15,11 @@
     "test": "npm run test:web && npm run test:api",
     "test:web": "npm run test --workspace @dayorder/web",
     "test:api": "go test ./apps/api/...",
+    "test:integration": "go test -count=1 ./apps/api/internal/testdb ./apps/api/internal/database/...",
     "test:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/runtime-acceptance.ps1",
+    "db:up": "docker compose -f compose.dev.yaml up -d postgres",
+    "db:down": "docker compose -f compose.dev.yaml down",
+    "db:logs": "docker compose -f compose.dev.yaml logs -f postgres",
     "build": "npm run build:web && npm run build:api",
     "build:web": "npm run build --workspace @dayorder/web",
     "build:api": "go build ./apps/api/..."

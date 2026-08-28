@@ -14,6 +14,8 @@ scripts/    prototype 与真实运行验收脚本
 
 根目录通过 npm workspaces 管理前端，通过 `go.work` 管理 Go 模块。
 
+> PostgreSQL 企业级改造正在按已批准的[架构设计](docs/superpowers/specs/2026-08-28-postgresql-enterprise-architecture-design.md)和[实施计划](docs/superpowers/plans/2026-08-28-postgresql-enterprise-implementation.md)进行。当前默认运行时仍是 SQLite；`compose.dev.yaml`、`.env.example` 和新的 Go database/config 包只服务于尚未切换的 PostgreSQL 新链路。在正式切换阶段完成前，本文后续现有运行说明仍以 SQLite 基线为准。
+
 ## 使用模式
 
 - 游客无需登录即可使用今天、目标、任务、日程、记录和笔记；数据只写入当前浏览器。
