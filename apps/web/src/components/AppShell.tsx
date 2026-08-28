@@ -24,7 +24,6 @@ export function AppShell({ view, onNavigate, online, children }: { view: ViewNam
   const auth = useAuth();
   const [assistantOpen, setAssistantOpen] = useState(false);
   const inboxCount = data.records.filter((record) => record.kind === "inbox" && !record.archivedAt && !record.parsedEntityId).length;
-  const approvalCount = data.agentRuns.reduce((sum, run) => sum + (run.status === "waiting" ? run.changes.filter((change) => change.status === "pending").length : 0), 0);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -35,7 +34,7 @@ export function AppShell({ view, onNavigate, online, children }: { view: ViewNam
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [openCapture, openSearch]);
 
-  const badge = (id: ViewName) => id === "records" ? inboxCount : id === "agent" ? approvalCount : 0;
+  const badge = (id: ViewName) => id === "records" ? inboxCount : 0;
   const syncMessage = !auth.user
     ? "游客数据仅保存在当前浏览器"
     : !online

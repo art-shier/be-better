@@ -51,8 +51,8 @@ type SyncChangeDraft struct {
 }
 
 type AuditEntity struct {
-	EntityType string
-	EntityID   uuid.UUID
+	EntityType string    `json:"entityType"`
+	EntityID   uuid.UUID `json:"entityId"`
 }
 
 type AuditDraft struct {

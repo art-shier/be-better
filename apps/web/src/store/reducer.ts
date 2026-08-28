@@ -1,9 +1,7 @@
 import { addMinutes } from "date-fns";
 import { createId } from "../domain/ids";
-import { atOffset, toIso } from "../domain/dates";
+import { toIso } from "../domain/dates";
 import type {
-  AgentChange,
-  AgentRun,
   AppData,
   AuditEvent,
   CalendarEvent,
@@ -46,12 +44,6 @@ export type Action =
   | { type: "set-data-mode"; value: DataMode }
   | { type: "set-reminders"; value: boolean }
   | { type: "set-permission"; key: keyof AppData["settings"]["permissions"]; value: boolean }
-  | { type: "edit-agent-change"; runId: string; changeId: string; after: string }
-  | { type: "start-agent"; run: AgentRun }
-  | { type: "advance-agent"; id: string }
-  | { type: "stop-agent"; id: string }
-  | { type: "approve-agent"; id: string; changeIds: string[] }
-  | { type: "reject-agent"; id: string }
   | { type: "undo"; auditId: string };
 
 function audit(action: string, entityRefs: string[], actor: AuditEvent["actor"] = "user", undo?: UndoAction, before?: string, after?: string): AuditEvent {
@@ -60,10 +52,6 @@ function audit(action: string, entityRefs: string[], actor: AuditEvent["actor"] 
 
 function withAudit(state: AppData, event: AuditEvent, patch: Partial<AppData>): AppData {
   return { ...state, ...patch, audit: [event, ...state.audit].slice(0, 200) };
-}
-
-function updateRun(state: AppData, id: string, updater: (run: AgentRun) => AgentRun): AppData {
-  return { ...state, agentRuns: state.agentRuns.map((run) => (run.id === id ? updater(run) : run)) };
 }
 
 function applyUndo(state: AppData, undo: UndoAction): AppData {
@@ -112,59 +100,6 @@ function undoFor(actions: Array<UndoAction | undefined>): UndoAction | undefined
   const valid = actions.filter((item): item is UndoAction => Boolean(item));
   if (!valid.length) return undefined;
   return valid.length === 1 ? valid[0] : { type: "batch", actions: valid };
-}
-
-function changeWindow(after: string, fallbackMinutes: number): { start: Date; end: Date } {
-  const matches = [...after.matchAll(/(\d{1,2}):(\d{2})/g)];
-  const dayOffset = after.includes("明天") ? 1 : 0;
-  const first = matches[0];
-  const start = first ? atOffset(dayOffset, Number(first[1]), Number(first[2])) : atOffset(dayOffset, 9);
-  const second = matches[1];
-  const end = second ? atOffset(dayOffset, Number(second[1]), Number(second[2])) : addMinutes(start, fallbackMinutes);
-  return { start, end: end > start ? end : addMinutes(start, fallbackMinutes) };
-}
-
-function applyAgentChange(data: AppData, change: AgentChange): AppData {
-  if (change.type === "create-task") {
-    const quotedTitle = change.title.match(/[“「\"]([^”」\"]+)[”」\"]/)?.[1];
-    const taskTitle = quotedTitle ?? (change.title.replace(/^创建/, "").replace(/(?:专注)?任务$/, "").trim() || "Agent 建议任务");
-    const goalId = data.goals.some((goal) => goal.id === change.entityId) ? change.entityId : change.sourceRefs.find((ref) => ref.kind === "goal" && data.goals.some((goal) => goal.id === ref.id))?.id;
-    const existing = data.tasks.find((task) => task.title === taskTitle || task.title.includes(taskTitle) || taskTitle.includes(task.title));
-    if (existing) {
-      const before = existing;
-      const window = changeWindow(change.after, 70);
-      const updated: Task = { ...existing, status: "doing", estimateMinutes: Math.max(5, Math.round((window.end.getTime() - window.start.getTime()) / 60_000)), scheduledStart: toIso(window.start), scheduledEnd: toIso(window.end), goalId: goalId ?? existing.goalId };
-      return withAudit(data, audit(`Agent 更新“${existing.title}”`, [existing.id], "agent", { type: "restore-task", task: before }, JSON.stringify(before), JSON.stringify(updated)), { tasks: data.tasks.map((task) => task.id === updated.id ? updated : task) });
-    }
-    const window = changeWindow(change.after, 70);
-    const now = new Date().toISOString();
-    const task: Task = { id: createId("task"), title: taskTitle, status: "todo", priority: "important", estimateMinutes: Math.max(5, Math.round((window.end.getTime() - window.start.getTime()) / 60_000)), scheduledStart: toIso(window.start), scheduledEnd: toIso(window.end), goalId, version: 0, createdAt: now, updatedAt: now };
-    return withAudit(data, audit(`Agent 创建“${task.title}”`, [task.id], "agent", { type: "delete-task", taskId: task.id }, undefined, JSON.stringify(task)), { tasks: [task, ...data.tasks] });
-  }
-
-  if (change.type === "reschedule-task") {
-    const taskTarget = data.tasks.find((task) => task.id === change.entityId || change.sourceRefs.some((ref) => ref.kind === "task" && ref.id === task.id));
-    if (taskTarget) {
-      const window = changeWindow(change.after, taskTarget.estimateMinutes);
-      const updated: Task = { ...taskTarget, estimateMinutes: Math.max(5, Math.round((window.end.getTime() - window.start.getTime()) / 60_000)), scheduledStart: toIso(window.start), scheduledEnd: toIso(window.end) };
-      return withAudit(data, audit(`Agent 调整“${taskTarget.title}”时间`, [taskTarget.id], "agent", { type: "restore-task", task: taskTarget }, JSON.stringify(taskTarget), JSON.stringify(updated)), { tasks: data.tasks.map((task) => task.id === updated.id ? updated : task) });
-    }
-    const eventTarget = data.events.find((event) => event.id === change.entityId || change.sourceRefs.some((ref) => ref.kind === "event" && ref.id === event.id));
-    if (!eventTarget) return data;
-    const duration = new Date(eventTarget.endAt).getTime() - new Date(eventTarget.startAt).getTime();
-    const start = changeWindow(change.after, Math.round(duration / 60_000)).start;
-    const updated = { ...eventTarget, startAt: toIso(start), endAt: toIso(new Date(start.getTime() + duration)) };
-    return withAudit(data, audit(`Agent 调整“${eventTarget.title}”时间`, [eventTarget.id], "agent", { type: "restore-event", event: eventTarget }, JSON.stringify(eventTarget), JSON.stringify(updated)), { events: data.events.map((event) => event.id === eventTarget.id ? updated : event) });
-  }
-
-  if (change.type === "archive-record" && change.entityId) {
-    const target = data.records.find((record) => record.id === change.entityId);
-    if (!target) return data;
-    const updated = { ...target, archivedAt: new Date().toISOString() };
-    return withAudit(data, audit("Agent 归档记录", [target.id], "agent", { type: "restore-record", record: target }), { records: data.records.map((record) => record.id === target.id ? updated : record) });
-  }
-
-  return data;
 }
 
 function unlinkNotes(notes: Note[], entityId: string): { notes: Note[]; linked: Note[] } {
@@ -295,45 +230,7 @@ export function appReducer(state: AppData, action: Action): AppData {
     case "set-ai": return { ...state, settings: { ...state.settings, aiEnabled: action.value } };
     case "set-data-mode": return { ...state, settings: { ...state.settings, dataMode: action.value, localOnly: action.value === "local" } };
     case "set-reminders": return { ...state, settings: { ...state.settings, remindersEnabled: action.value } };
-    case "set-permission": {
-      const settings = { ...state.settings, permissions: { ...state.settings.permissions, [action.key]: action.value } };
-      if (action.value) return { ...state, settings };
-      const scopePattern = { goals: /目标|任务/, calendar: /日程/, records: /记录/, privateNotes: /笔记/ }[action.key];
-      const affected: string[] = [];
-      const agentRuns = state.agentRuns.map((run) => {
-        const active = ["ready", "reading", "analyzing", "waiting", "applying"].includes(run.status);
-        if (!active || !run.scope.some((item) => scopePattern.test(item))) return run;
-        affected.push(run.id);
-        return { ...run, status: "stopped" as const, finishedAt: new Date().toISOString(), summary: "读取权限已撤回，运行立即停止；没有执行新的写入。", steps: run.steps.map((step) => step.status === "running" ? { ...step, status: "pending" as const } : step) };
-      });
-      if (!affected.length) return { ...state, settings };
-      return withAudit(state, audit("撤回权限并停止 Agent", affected), { settings, agentRuns });
-    }
-    case "edit-agent-change": return updateRun(state, action.runId, (run) => run.status !== "waiting" ? run : { ...run, changes: run.changes.map((change) => change.id === action.changeId && change.status === "pending" ? { ...change, after: action.after } : change) });
-    case "start-agent": return withAudit({ ...state, agentRuns: [action.run, ...state.agentRuns] }, audit("发起 Agent 委托", [action.run.id]), {});
-    case "advance-agent": return updateRun(state, action.id, (run) => {
-      if (run.status === "reading") return { ...run, status: "analyzing", steps: run.steps.map((step, index) => index === 0 ? { ...step, status: "done" } : index === 1 ? { ...step, status: "running" } : step) };
-      if (run.status === "analyzing") {
-        const readOnly = run.actionMode === "read";
-        return { ...run, status: readOnly ? "completed" : "waiting", finishedAt: readOnly ? new Date().toISOString() : undefined, summary: readOnly ? "只读分析完成，没有修改数据。" : undefined, steps: run.steps.map((step, index) => index < 3 ? { ...step, status: "done" } : step) };
-      }
-      return run;
-    });
-    case "stop-agent": return updateRun(state, action.id, (run) => ({ ...run, status: "stopped", finishedAt: new Date().toISOString(), summary: "运行已停止，没有执行新的写入。", steps: run.steps.map((step) => step.status === "running" ? { ...step, status: "pending" } : step) }));
-    case "approve-agent": {
-      const run = state.agentRuns.find((item) => item.id === action.id);
-      if (!run || run.status !== "waiting") return state;
-      let next = state;
-      const acceptedIds = run.changes.filter((change) => change.status === "pending" && action.changeIds.includes(change.id)).map((change) => change.id);
-      run.changes.filter((change) => acceptedIds.includes(change.id)).forEach((change) => { next = applyAgentChange(next, change); });
-      const updatedRun: AgentRun = { ...run, status: "completed", finishedAt: new Date().toISOString(), summary: `已执行并核验 ${acceptedIds.length} 项变更。`, changes: run.changes.map((change) => ({ ...change, status: acceptedIds.includes(change.id) ? "accepted" : "rejected" })), steps: run.steps.map((step) => ({ ...step, status: "done" })) };
-      return withAudit({ ...next, agentRuns: next.agentRuns.map((item) => item.id === run.id ? updatedRun : item) }, audit("确认 Agent 变更", acceptedIds, "user"), {});
-    }
-    case "reject-agent": {
-      const run = state.agentRuns.find((item) => item.id === action.id);
-      if (!run || run.status !== "waiting") return state;
-      return withAudit(updateRun(state, action.id, (item) => ({ ...item, status: "completed", finishedAt: new Date().toISOString(), summary: "变更已全部拒绝，没有修改数据。", changes: item.changes.map((change) => ({ ...change, status: "rejected" })) })), audit("拒绝 Agent 变更", [action.id]), {});
-    }
+    case "set-permission": return { ...state, settings: { ...state.settings, permissions: { ...state.settings.permissions, [action.key]: action.value } } };
     case "undo": {
       const entry = state.audit.find((item) => item.id === action.auditId);
       if (!entry?.undo) return state;

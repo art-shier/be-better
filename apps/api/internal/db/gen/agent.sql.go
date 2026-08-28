@@ -11,6 +11,53 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const completeAgentRunIfResolved = `-- name: CompleteAgentRunIfResolved :one
+UPDATE dayorder.agent_runs AS run
+SET status = 'completed',
+    finished_at = $1,
+    summary = CASE
+        WHEN EXISTS (
+            SELECT 1 FROM dayorder.agent_changes AS applied
+            WHERE applied.user_id = run.user_id AND applied.run_id = run.id AND applied.status = 'applied'
+        ) THEN '所有已确认变更均已处理。'
+        ELSE '所有变更均已拒绝，没有修改业务数据。'
+    END,
+    version = version + 1,
+    updated_at = $1
+WHERE run.user_id = $2
+  AND run.id = $3
+  AND run.status = 'waiting'
+  AND NOT EXISTS (
+      SELECT 1 FROM dayorder.agent_changes AS pending
+      WHERE pending.user_id = run.user_id AND pending.run_id = run.id AND pending.status = 'pending'
+  )
+RETURNING run.id, run.user_id, run.intent, run.status, run.action_mode, run.scope, run.provider, run.model, run.started_at, run.finished_at, run.summary, run.error_code, run.error_message, run.version, run.created_at, run.updated_at
+`
+
+func (q *Queries) CompleteAgentRunIfResolved(ctx context.Context, resolvedAt pgtype.Timestamptz, userID pgtype.UUID, runID pgtype.UUID) (*DayorderAgentRun, error) {
+	row := q.db.QueryRow(ctx, completeAgentRunIfResolved, resolvedAt, userID, runID)
+	var i DayorderAgentRun
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Intent,
+		&i.Status,
+		&i.ActionMode,
+		&i.Scope,
+		&i.Provider,
+		&i.Model,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Summary,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return &i, err
+}
+
 const createAgentChange = `-- name: CreateAgentChange :one
 INSERT INTO dayorder.agent_changes (
     id, user_id, run_id, change_type, target_type, target_id, base_version,
@@ -124,6 +171,107 @@ func (q *Queries) CreateAgentRun(ctx context.Context, arg CreateAgentRunParams) 
 		&i.Summary,
 		&i.ErrorCode,
 		&i.ErrorMessage,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return &i, err
+}
+
+const createAgentSourceRef = `-- name: CreateAgentSourceRef :one
+INSERT INTO dayorder.agent_source_refs (
+    id, user_id, run_id, entity_type, entity_id, entity_version, label_snapshot
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7
+)
+RETURNING id, user_id, run_id, entity_type, entity_id, entity_version, label_snapshot, created_at
+`
+
+type CreateAgentSourceRefParams struct {
+	ID            pgtype.UUID `db:"id" json:"id"`
+	UserID        pgtype.UUID `db:"user_id" json:"user_id"`
+	RunID         pgtype.UUID `db:"run_id" json:"run_id"`
+	EntityType    string      `db:"entity_type" json:"entity_type"`
+	EntityID      pgtype.UUID `db:"entity_id" json:"entity_id"`
+	EntityVersion int64       `db:"entity_version" json:"entity_version"`
+	LabelSnapshot string      `db:"label_snapshot" json:"label_snapshot"`
+}
+
+func (q *Queries) CreateAgentSourceRef(ctx context.Context, arg CreateAgentSourceRefParams) (*DayorderAgentSourceRef, error) {
+	row := q.db.QueryRow(ctx, createAgentSourceRef,
+		arg.ID,
+		arg.UserID,
+		arg.RunID,
+		arg.EntityType,
+		arg.EntityID,
+		arg.EntityVersion,
+		arg.LabelSnapshot,
+	)
+	var i DayorderAgentSourceRef
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.RunID,
+		&i.EntityType,
+		&i.EntityID,
+		&i.EntityVersion,
+		&i.LabelSnapshot,
+		&i.CreatedAt,
+	)
+	return &i, err
+}
+
+const createAgentStep = `-- name: CreateAgentStep :one
+INSERT INTO dayorder.agent_steps (
+    id, user_id, run_id, sequence_no, title, detail, status, metadata,
+    started_at, finished_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7, $8,
+    $9, $10
+)
+RETURNING id, user_id, run_id, sequence_no, title, detail, status, metadata, started_at, finished_at, version, created_at, updated_at
+`
+
+type CreateAgentStepParams struct {
+	ID         pgtype.UUID        `db:"id" json:"id"`
+	UserID     pgtype.UUID        `db:"user_id" json:"user_id"`
+	RunID      pgtype.UUID        `db:"run_id" json:"run_id"`
+	SequenceNo int32              `db:"sequence_no" json:"sequence_no"`
+	Title      string             `db:"title" json:"title"`
+	Detail     string             `db:"detail" json:"detail"`
+	Status     string             `db:"status" json:"status"`
+	Metadata   []byte             `db:"metadata" json:"metadata"`
+	StartedAt  pgtype.Timestamptz `db:"started_at" json:"started_at"`
+	FinishedAt pgtype.Timestamptz `db:"finished_at" json:"finished_at"`
+}
+
+func (q *Queries) CreateAgentStep(ctx context.Context, arg CreateAgentStepParams) (*DayorderAgentStep, error) {
+	row := q.db.QueryRow(ctx, createAgentStep,
+		arg.ID,
+		arg.UserID,
+		arg.RunID,
+		arg.SequenceNo,
+		arg.Title,
+		arg.Detail,
+		arg.Status,
+		arg.Metadata,
+		arg.StartedAt,
+		arg.FinishedAt,
+	)
+	var i DayorderAgentStep
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.RunID,
+		&i.SequenceNo,
+		&i.Title,
+		&i.Detail,
+		&i.Status,
+		&i.Metadata,
+		&i.StartedAt,
+		&i.FinishedAt,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -246,6 +394,707 @@ func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventPa
 		&i.LastError,
 		&i.CreatedAt,
 		&i.ProcessedAt,
+	)
+	return &i, err
+}
+
+const failAgentRun = `-- name: FailAgentRun :one
+UPDATE dayorder.agent_runs
+SET status = 'failed',
+    error_code = $1,
+    error_message = $2,
+    finished_at = $3,
+    version = version + 1,
+    updated_at = $3
+WHERE user_id = $4
+  AND id = $5
+  AND status IN ('ready', 'reading', 'analyzing')
+RETURNING id, user_id, intent, status, action_mode, scope, provider, model, started_at, finished_at, summary, error_code, error_message, version, created_at, updated_at
+`
+
+type FailAgentRunParams struct {
+	ErrorCode    pgtype.Text        `db:"error_code" json:"error_code"`
+	ErrorMessage pgtype.Text        `db:"error_message" json:"error_message"`
+	FinishedAt   pgtype.Timestamptz `db:"finished_at" json:"finished_at"`
+	UserID       pgtype.UUID        `db:"user_id" json:"user_id"`
+	ID           pgtype.UUID        `db:"id" json:"id"`
+}
+
+func (q *Queries) FailAgentRun(ctx context.Context, arg FailAgentRunParams) (*DayorderAgentRun, error) {
+	row := q.db.QueryRow(ctx, failAgentRun,
+		arg.ErrorCode,
+		arg.ErrorMessage,
+		arg.FinishedAt,
+		arg.UserID,
+		arg.ID,
+	)
+	var i DayorderAgentRun
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Intent,
+		&i.Status,
+		&i.ActionMode,
+		&i.Scope,
+		&i.Provider,
+		&i.Model,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Summary,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return &i, err
+}
+
+const finishAgentRunAnalysis = `-- name: FinishAgentRunAnalysis :one
+UPDATE dayorder.agent_runs
+SET status = $1,
+    provider = $2,
+    model = $3,
+    summary = $4,
+    finished_at = CASE WHEN $1 = 'completed' THEN $5 ELSE NULL END,
+    error_code = NULL,
+    error_message = NULL,
+    version = version + 1,
+    updated_at = $5
+WHERE user_id = $6
+  AND id = $7
+  AND version = $8
+  AND status = 'analyzing'
+RETURNING id, user_id, intent, status, action_mode, scope, provider, model, started_at, finished_at, summary, error_code, error_message, version, created_at, updated_at
+`
+
+type FinishAgentRunAnalysisParams struct {
+	Status          string             `db:"status" json:"status"`
+	Provider        pgtype.Text        `db:"provider" json:"provider"`
+	Model           pgtype.Text        `db:"model" json:"model"`
+	Summary         pgtype.Text        `db:"summary" json:"summary"`
+	FinishedAt      pgtype.Timestamptz `db:"finished_at" json:"finished_at"`
+	UserID          pgtype.UUID        `db:"user_id" json:"user_id"`
+	ID              pgtype.UUID        `db:"id" json:"id"`
+	ExpectedVersion int64              `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) FinishAgentRunAnalysis(ctx context.Context, arg FinishAgentRunAnalysisParams) (*DayorderAgentRun, error) {
+	row := q.db.QueryRow(ctx, finishAgentRunAnalysis,
+		arg.Status,
+		arg.Provider,
+		arg.Model,
+		arg.Summary,
+		arg.FinishedAt,
+		arg.UserID,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i DayorderAgentRun
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Intent,
+		&i.Status,
+		&i.ActionMode,
+		&i.Scope,
+		&i.Provider,
+		&i.Model,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Summary,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return &i, err
+}
+
+const getAgentChange = `-- name: GetAgentChange :one
+SELECT id, user_id, run_id, change_type, target_type, target_id, base_version, patch, preview_before, preview_after, reason, status, accepted_at, applied_at, version, created_at, updated_at
+FROM dayorder.agent_changes
+WHERE user_id = $1 AND id = $2
+`
+
+func (q *Queries) GetAgentChange(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderAgentChange, error) {
+	row := q.db.QueryRow(ctx, getAgentChange, userID, iD)
+	var i DayorderAgentChange
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.RunID,
+		&i.ChangeType,
+		&i.TargetType,
+		&i.TargetID,
+		&i.BaseVersion,
+		&i.Patch,
+		&i.PreviewBefore,
+		&i.PreviewAfter,
+		&i.Reason,
+		&i.Status,
+		&i.AcceptedAt,
+		&i.AppliedAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return &i, err
+}
+
+const getAgentChangeForUpdate = `-- name: GetAgentChangeForUpdate :one
+SELECT id, user_id, run_id, change_type, target_type, target_id, base_version, patch, preview_before, preview_after, reason, status, accepted_at, applied_at, version, created_at, updated_at
+FROM dayorder.agent_changes
+WHERE user_id = $1 AND id = $2
+FOR UPDATE
+`
+
+func (q *Queries) GetAgentChangeForUpdate(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderAgentChange, error) {
+	row := q.db.QueryRow(ctx, getAgentChangeForUpdate, userID, iD)
+	var i DayorderAgentChange
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.RunID,
+		&i.ChangeType,
+		&i.TargetType,
+		&i.TargetID,
+		&i.BaseVersion,
+		&i.Patch,
+		&i.PreviewBefore,
+		&i.PreviewAfter,
+		&i.Reason,
+		&i.Status,
+		&i.AcceptedAt,
+		&i.AppliedAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return &i, err
+}
+
+const getAgentRun = `-- name: GetAgentRun :one
+SELECT id, user_id, intent, status, action_mode, scope, provider, model, started_at, finished_at, summary, error_code, error_message, version, created_at, updated_at
+FROM dayorder.agent_runs
+WHERE user_id = $1 AND id = $2
+`
+
+func (q *Queries) GetAgentRun(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderAgentRun, error) {
+	row := q.db.QueryRow(ctx, getAgentRun, userID, iD)
+	var i DayorderAgentRun
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Intent,
+		&i.Status,
+		&i.ActionMode,
+		&i.Scope,
+		&i.Provider,
+		&i.Model,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Summary,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return &i, err
+}
+
+const getAgentRunForUpdate = `-- name: GetAgentRunForUpdate :one
+SELECT id, user_id, intent, status, action_mode, scope, provider, model, started_at, finished_at, summary, error_code, error_message, version, created_at, updated_at
+FROM dayorder.agent_runs
+WHERE user_id = $1 AND id = $2
+FOR UPDATE
+`
+
+func (q *Queries) GetAgentRunForUpdate(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderAgentRun, error) {
+	row := q.db.QueryRow(ctx, getAgentRunForUpdate, userID, iD)
+	var i DayorderAgentRun
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Intent,
+		&i.Status,
+		&i.ActionMode,
+		&i.Scope,
+		&i.Provider,
+		&i.Model,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Summary,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return &i, err
+}
+
+const getAuditEvent = `-- name: GetAuditEvent :one
+SELECT id, user_id, actor_type, actor_id, action, request_id, before_data, after_data, metadata, created_at
+FROM dayorder.audit_events
+WHERE user_id = $1 AND id = $2
+`
+
+func (q *Queries) GetAuditEvent(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderAuditEvent, error) {
+	row := q.db.QueryRow(ctx, getAuditEvent, userID, iD)
+	var i DayorderAuditEvent
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Action,
+		&i.RequestID,
+		&i.BeforeData,
+		&i.AfterData,
+		&i.Metadata,
+		&i.CreatedAt,
+	)
+	return &i, err
+}
+
+const listAgentChanges = `-- name: ListAgentChanges :many
+SELECT id, user_id, run_id, change_type, target_type, target_id, base_version, patch, preview_before, preview_after, reason, status, accepted_at, applied_at, version, created_at, updated_at
+FROM dayorder.agent_changes
+WHERE user_id = $1 AND run_id = $2
+ORDER BY created_at, id
+`
+
+func (q *Queries) ListAgentChanges(ctx context.Context, userID pgtype.UUID, runID pgtype.UUID) ([]*DayorderAgentChange, error) {
+	rows, err := q.db.Query(ctx, listAgentChanges, userID, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderAgentChange{}
+	for rows.Next() {
+		var i DayorderAgentChange
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.RunID,
+			&i.ChangeType,
+			&i.TargetType,
+			&i.TargetID,
+			&i.BaseVersion,
+			&i.Patch,
+			&i.PreviewBefore,
+			&i.PreviewAfter,
+			&i.Reason,
+			&i.Status,
+			&i.AcceptedAt,
+			&i.AppliedAt,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentRuns = `-- name: ListAgentRuns :many
+SELECT id, user_id, intent, status, action_mode, scope, provider, model, started_at, finished_at, summary, error_code, error_message, version, created_at, updated_at
+FROM dayorder.agent_runs
+WHERE user_id = $1
+  AND (
+      $2::timestamptz IS NULL
+      OR created_at < $2::timestamptz
+      OR (created_at = $2::timestamptz AND id < $3::uuid)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $4
+`
+
+func (q *Queries) ListAgentRuns(ctx context.Context, userID pgtype.UUID, afterCreatedAt pgtype.Timestamptz, afterID pgtype.UUID, pageSize int32) ([]*DayorderAgentRun, error) {
+	rows, err := q.db.Query(ctx, listAgentRuns,
+		userID,
+		afterCreatedAt,
+		afterID,
+		pageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderAgentRun{}
+	for rows.Next() {
+		var i DayorderAgentRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Intent,
+			&i.Status,
+			&i.ActionMode,
+			&i.Scope,
+			&i.Provider,
+			&i.Model,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.Summary,
+			&i.ErrorCode,
+			&i.ErrorMessage,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentSourceRefs = `-- name: ListAgentSourceRefs :many
+SELECT id, user_id, run_id, entity_type, entity_id, entity_version, label_snapshot, created_at
+FROM dayorder.agent_source_refs
+WHERE user_id = $1 AND run_id = $2
+ORDER BY created_at, id
+`
+
+func (q *Queries) ListAgentSourceRefs(ctx context.Context, userID pgtype.UUID, runID pgtype.UUID) ([]*DayorderAgentSourceRef, error) {
+	rows, err := q.db.Query(ctx, listAgentSourceRefs, userID, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderAgentSourceRef{}
+	for rows.Next() {
+		var i DayorderAgentSourceRef
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.RunID,
+			&i.EntityType,
+			&i.EntityID,
+			&i.EntityVersion,
+			&i.LabelSnapshot,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentSteps = `-- name: ListAgentSteps :many
+SELECT id, user_id, run_id, sequence_no, title, detail, status, metadata, started_at, finished_at, version, created_at, updated_at
+FROM dayorder.agent_steps
+WHERE user_id = $1 AND run_id = $2
+ORDER BY sequence_no, id
+`
+
+func (q *Queries) ListAgentSteps(ctx context.Context, userID pgtype.UUID, runID pgtype.UUID) ([]*DayorderAgentStep, error) {
+	rows, err := q.db.Query(ctx, listAgentSteps, userID, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderAgentStep{}
+	for rows.Next() {
+		var i DayorderAgentStep
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.RunID,
+			&i.SequenceNo,
+			&i.Title,
+			&i.Detail,
+			&i.Status,
+			&i.Metadata,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditEventEntities = `-- name: ListAuditEventEntities :many
+SELECT audit_event_id, user_id, entity_type, entity_id
+FROM dayorder.audit_event_entities
+WHERE user_id = $1 AND audit_event_id = $2
+ORDER BY entity_type, entity_id
+`
+
+func (q *Queries) ListAuditEventEntities(ctx context.Context, userID pgtype.UUID, auditEventID pgtype.UUID) ([]*DayorderAuditEventEntity, error) {
+	rows, err := q.db.Query(ctx, listAuditEventEntities, userID, auditEventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderAuditEventEntity{}
+	for rows.Next() {
+		var i DayorderAuditEventEntity
+		if err := rows.Scan(
+			&i.AuditEventID,
+			&i.UserID,
+			&i.EntityType,
+			&i.EntityID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditEvents = `-- name: ListAuditEvents :many
+SELECT id, user_id, actor_type, actor_id, action, request_id, before_data, after_data, metadata, created_at
+FROM dayorder.audit_events
+WHERE user_id = $1
+  AND (
+      $2::timestamptz IS NULL
+      OR created_at < $2::timestamptz
+      OR (created_at = $2::timestamptz AND id < $3::uuid)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $4
+`
+
+func (q *Queries) ListAuditEvents(ctx context.Context, userID pgtype.UUID, afterCreatedAt pgtype.Timestamptz, afterID pgtype.UUID, pageSize int32) ([]*DayorderAuditEvent, error) {
+	rows, err := q.db.Query(ctx, listAuditEvents,
+		userID,
+		afterCreatedAt,
+		afterID,
+		pageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderAuditEvent{}
+	for rows.Next() {
+		var i DayorderAuditEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Action,
+			&i.RequestID,
+			&i.BeforeData,
+			&i.AfterData,
+			&i.Metadata,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markAgentChangeApplied = `-- name: MarkAgentChangeApplied :one
+UPDATE dayorder.agent_changes
+SET status = 'applied',
+    target_id = COALESCE(target_id, $1),
+    accepted_at = $2,
+    applied_at = $2,
+    version = version + 1,
+    updated_at = $2
+WHERE user_id = $3
+  AND id = $4
+  AND version = $5
+  AND status = 'pending'
+RETURNING id, user_id, run_id, change_type, target_type, target_id, base_version, patch, preview_before, preview_after, reason, status, accepted_at, applied_at, version, created_at, updated_at
+`
+
+type MarkAgentChangeAppliedParams struct {
+	AppliedTargetID pgtype.UUID        `db:"applied_target_id" json:"applied_target_id"`
+	ResolvedAt      pgtype.Timestamptz `db:"resolved_at" json:"resolved_at"`
+	UserID          pgtype.UUID        `db:"user_id" json:"user_id"`
+	ID              pgtype.UUID        `db:"id" json:"id"`
+	ExpectedVersion int64              `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) MarkAgentChangeApplied(ctx context.Context, arg MarkAgentChangeAppliedParams) (*DayorderAgentChange, error) {
+	row := q.db.QueryRow(ctx, markAgentChangeApplied,
+		arg.AppliedTargetID,
+		arg.ResolvedAt,
+		arg.UserID,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i DayorderAgentChange
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.RunID,
+		&i.ChangeType,
+		&i.TargetType,
+		&i.TargetID,
+		&i.BaseVersion,
+		&i.Patch,
+		&i.PreviewBefore,
+		&i.PreviewAfter,
+		&i.Reason,
+		&i.Status,
+		&i.AcceptedAt,
+		&i.AppliedAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return &i, err
+}
+
+const markAgentChangeRejected = `-- name: MarkAgentChangeRejected :one
+UPDATE dayorder.agent_changes
+SET status = 'rejected',
+    version = version + 1,
+    updated_at = $1
+WHERE user_id = $2
+  AND id = $3
+  AND version = $4
+  AND status = 'pending'
+RETURNING id, user_id, run_id, change_type, target_type, target_id, base_version, patch, preview_before, preview_after, reason, status, accepted_at, applied_at, version, created_at, updated_at
+`
+
+func (q *Queries) MarkAgentChangeRejected(ctx context.Context, resolvedAt pgtype.Timestamptz, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderAgentChange, error) {
+	row := q.db.QueryRow(ctx, markAgentChangeRejected,
+		resolvedAt,
+		userID,
+		iD,
+		expectedVersion,
+	)
+	var i DayorderAgentChange
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.RunID,
+		&i.ChangeType,
+		&i.TargetType,
+		&i.TargetID,
+		&i.BaseVersion,
+		&i.Patch,
+		&i.PreviewBefore,
+		&i.PreviewAfter,
+		&i.Reason,
+		&i.Status,
+		&i.AcceptedAt,
+		&i.AppliedAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return &i, err
+}
+
+const startAgentRunAnalysis = `-- name: StartAgentRunAnalysis :one
+UPDATE dayorder.agent_runs
+SET status = 'analyzing',
+    started_at = COALESCE(started_at, $1),
+    version = version + 1,
+    updated_at = $1
+WHERE user_id = $2
+  AND id = $3
+  AND version = $4
+  AND status = 'ready'
+RETURNING id, user_id, intent, status, action_mode, scope, provider, model, started_at, finished_at, summary, error_code, error_message, version, created_at, updated_at
+`
+
+func (q *Queries) StartAgentRunAnalysis(ctx context.Context, startedAt pgtype.Timestamptz, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderAgentRun, error) {
+	row := q.db.QueryRow(ctx, startAgentRunAnalysis,
+		startedAt,
+		userID,
+		iD,
+		expectedVersion,
+	)
+	var i DayorderAgentRun
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Intent,
+		&i.Status,
+		&i.ActionMode,
+		&i.Scope,
+		&i.Provider,
+		&i.Model,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Summary,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return &i, err
+}
+
+const stopAgentRun = `-- name: StopAgentRun :one
+UPDATE dayorder.agent_runs
+SET status = 'stopped',
+    finished_at = $1,
+    summary = '用户已停止运行，没有执行新的写入。',
+    version = version + 1,
+    updated_at = $1
+WHERE user_id = $2
+  AND id = $3
+  AND version = $4
+  AND status IN ('ready', 'reading', 'analyzing', 'waiting')
+RETURNING id, user_id, intent, status, action_mode, scope, provider, model, started_at, finished_at, summary, error_code, error_message, version, created_at, updated_at
+`
+
+func (q *Queries) StopAgentRun(ctx context.Context, stoppedAt pgtype.Timestamptz, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderAgentRun, error) {
+	row := q.db.QueryRow(ctx, stopAgentRun,
+		stoppedAt,
+		userID,
+		iD,
+		expectedVersion,
+	)
+	var i DayorderAgentRun
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Intent,
+		&i.Status,
+		&i.ActionMode,
+		&i.Scope,
+		&i.Provider,
+		&i.Model,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Summary,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return &i, err
 }

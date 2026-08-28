@@ -364,6 +364,8 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .change-after { display: grid; grid-template-columns: 48px minmax(0,1fr); align-items: center; gap: 8px; margin-top: 8px; color: var(--ink-3); font-size: 9px; }
 .change-after input { width: 100%; height: 36px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--surface-2); outline: 0; padding: 0 9px; font: 10px "SFMono-Regular", Consolas, monospace; }
 .change-after input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(82,117,138,.1); }
+.change-preview { display: grid !important; grid-template-columns: 48px minmax(0,1fr); gap: 8px; margin-top: 8px !important; border-radius: var(--r-control); background: var(--surface-2); padding: 9px; font: 10px "SFMono-Regular", Consolas, monospace !important; }
+.change-preview b { color: var(--ink-3); font: 800 9px Inter, sans-serif; }
 .agent-sources { display: grid; gap: 6px; margin-top: 14px; border: 1px dashed var(--line); padding: 10px; }
 .agent-sources span { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 9px; }
 .agent-sources b { display: grid; width: 18px; height: 18px; place-items: center; border-radius: 3px; background: var(--primary-soft); color: var(--primary); }

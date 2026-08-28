@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getCachedEntities, putCachedEntities } from "../offline/cache";
-import { deleteDayOrderDB, getSyncMetadata, putSyncMetadata } from "../offline/db";
+import { deleteDayOrderDB, getDayOrderDB, getSyncMetadata, putSyncMetadata } from "../offline/db";
 import { enqueueMutation, listMutations } from "../offline/mutations";
 import { pullChanges } from "./pull";
 
@@ -46,5 +46,26 @@ describe("incremental pull", () => {
 
     expect((await getCachedEntities<ReturnType<typeof task>>(accountId, "task"))[0].title).toBe("本地标题");
     expect((await listMutations(accountId, deviceId))[0]).toMatchObject({ status: "conflict", errorCode: "ENTITY_VERSION_CONFLICT" });
+  });
+
+  it("消费 Agent 通知但只把业务实体写入 IndexedDB", async () => {
+    const accountId = crypto.randomUUID();
+    const deviceId = crypto.randomUUID();
+    const taskId = crypto.randomUUID();
+    const api = vi.fn().mockResolvedValue({
+      changes: [
+        { sequence: 2, entityType: "agent_run", entityId: crypto.randomUUID(), operation: "update", entityVersion: 2, changedAt: "2026-08-28T01:00:00Z", data: { id: crypto.randomUUID(), version: 2 } },
+        { sequence: 3, entityType: "agent_change", entityId: crypto.randomUUID(), operation: "update", entityVersion: 2, changedAt: "2026-08-28T01:00:00Z", data: { id: crypto.randomUUID(), version: 2 } },
+        { sequence: 4, entityType: "task", entityId: taskId, operation: "create", entityVersion: 1, changedAt: "2026-08-28T01:00:00Z", data: task(taskId, "Agent 创建的任务", 1) },
+      ],
+      nextCursor: "after-agent",
+      hasMore: false,
+    });
+
+    await pullChanges(accountId, deviceId, "old", api);
+
+    expect(await getCachedEntities(accountId, "task")).toHaveLength(1);
+    expect(await (await getDayOrderDB()).countFromIndex("entities", "by-account", accountId)).toBe(1);
+    expect((await getSyncMetadata(accountId))?.cursor).toBe("after-agent");
   });
 });

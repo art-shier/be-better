@@ -26,6 +26,7 @@ export async function applySyncChangesPage(accountId: string, deviceId: string, 
 
   for (const change of page.changes) {
     const entityType = cachedType(change.entityType);
+    if (!entityType) continue;
     const pending = mutations.filter((mutation) => mutation.entityType === entityType && mutation.entityId === change.entityId && mutation.status !== "rejected");
     if (pending.length > 0) {
       for (const mutation of pending) {

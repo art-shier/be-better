@@ -21,7 +21,7 @@ export async function listDevices(): Promise<UserDevice[]> {
 }
 
 export interface SyncBootstrap { cursor: string }
-export type SyncEntityType = "goal" | "milestone" | "task" | "calendar_event" | "reminder" | "record" | "note" | "daily_review" | "tag" | "settings";
+export type SyncEntityType = "goal" | "milestone" | "task" | "calendar_event" | "reminder" | "record" | "note" | "daily_review" | "tag" | "settings" | "agent_run" | "agent_change";
 
 export interface SyncChange<T = unknown> {
   sequence: number;

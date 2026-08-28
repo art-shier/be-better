@@ -17,13 +17,18 @@ func TestLoadWorkerConfigRequiresProductionSMTPAndSecureTransport(t *testing.T) 
 		"DAYORDER_SMTP_USERNAME":    "user",
 		"DAYORDER_SMTP_PASSWORD":    "password",
 		"DAYORDER_WORKER_POLL_RATE": "2s",
+		"DAYORDER_AGENT_PROVIDER":   "http",
+		"DAYORDER_AGENT_HTTP_URL":   "https://agent.example/v1/analyze",
+		"DAYORDER_AGENT_HTTP_KEY":   "test-agent-api-key",
+		"DAYORDER_AGENT_MODEL":      "enterprise-agent-v1",
+		"DAYORDER_AUTH_HMAC_KEY":    "0123456789abcdef0123456789abcdef",
 	}
 	lookup := func(key string) (string, bool) { value, ok := base[key]; return value, ok }
 	config, err := LoadWorkerFrom(lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Database.MaxConns != 5 || config.PollInterval != 2*time.Second || config.Mail.Sink != "smtp" {
+	if config.Database.MaxConns != 5 || config.PollInterval != 2*time.Second || config.Mail.Sink != "smtp" || config.Agent.Provider != "http" {
 		t.Fatalf("worker config = %#v", config)
 	}
 
@@ -35,6 +40,11 @@ func TestLoadWorkerConfigRequiresProductionSMTPAndSecureTransport(t *testing.T) 
 	base["DAYORDER_MAIL_SINK"] = "log"
 	if _, err = LoadWorkerFrom(lookup); err == nil {
 		t.Fatal("production log mail sink unexpectedly accepted")
+	}
+	base["DAYORDER_MAIL_SINK"] = "smtp"
+	base["DAYORDER_AGENT_PROVIDER"] = "deterministic"
+	if _, err = LoadWorkerFrom(lookup); err == nil {
+		t.Fatal("production deterministic Agent provider unexpectedly accepted")
 	}
 }
 
@@ -48,7 +58,7 @@ func TestLoadWorkerConfigAllowsExplicitDevelopmentMetadataSink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Mail.Sink != "log" || config.Database.MaxConns != 5 {
+	if config.Mail.Sink != "log" || config.Database.MaxConns != 5 || config.Agent.Provider != "deterministic" {
 		t.Fatalf("worker config = %#v", config)
 	}
 }

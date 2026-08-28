@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/http";
 import { parseCapture } from "../domain/capture";
 import { createSeedData } from "../domain/seed";
-import type { AgentRun, AppData } from "../domain/types";
+import type { AppData } from "../domain/types";
 import { getCachedEntities, replaceAccountEntities, type CachedEntityBatch } from "../offline/cache";
 import { deleteDayOrderDB } from "../offline/db";
 import { listMutations } from "../offline/mutations";
@@ -66,58 +66,6 @@ describe("appReducer", () => {
 
     const restored = appReducer(accepted, { type: "undo", auditId: accepted.audit[0].id });
     expect(restored.records.find((record) => record.id === source.id)?.parsedEntityId).toBeUndefined();
-  });
-
-  it("Agent 审批只能执行一次", () => {
-    const seed = createSeedData();
-    const run: AgentRun = {
-      id: "run_test",
-      intent: "安排产品方案",
-      status: "waiting",
-      actionMode: "confirm",
-      scope: ["目标与任务"],
-      steps: [],
-      changes: [{ id: "change_test", type: "create-task", entityId: "goal_product", title: "创建“产品方案核心流程”专注任务", after: "明天 08:30—09:20 · 50 分钟", reason: "测试", sourceRefs: [{ id: "goal_product", kind: "goal", label: "完成个人产品方案" }], status: "pending" }],
-      startedAt: new Date().toISOString(),
-    };
-    const state = { ...seed, agentRuns: [run, ...seed.agentRuns] };
-    const approved = appReducer(state, { type: "approve-agent", id: run.id, changeIds: ["change_test"] });
-    const approvedAgain = appReducer(approved, { type: "approve-agent", id: run.id, changeIds: ["change_test"] });
-
-    expect(approved.agentRuns[0].status).toBe("completed");
-    expect(approvedAgain).toBe(approved);
-    const task = approved.tasks.find((item) => item.title.includes("产品方案核心流程"))!;
-    expect(new Date(task.scheduledStart!).getHours()).toBe(8);
-    expect(task.estimateMinutes).toBe(50);
-  });
-
-  it("Agent 使用当前来源 ID 创建任务，不写入演示目标", () => {
-    const seed = createSeedData();
-    const customGoal = { ...seed.goals[0], id: "goal_custom", title: "完成个人作品集" };
-    const run: AgentRun = {
-      id: "run_custom",
-      intent: "为作品集安排起步动作",
-      status: "waiting",
-      actionMode: "confirm",
-      scope: ["目标与任务"],
-      steps: [],
-      changes: [{ id: "change_custom", type: "create-task", entityId: customGoal.id, title: "创建“推进：完成个人作品集”任务", after: "明天 10:00—10:45 · 45 分钟", reason: "测试真实来源", sourceRefs: [{ id: customGoal.id, kind: "goal", label: customGoal.title }], status: "pending" }],
-      startedAt: new Date().toISOString(),
-    };
-    const state = { ...seed, goals: [customGoal], tasks: [], agentRuns: [run] };
-    const approved = appReducer(state, { type: "approve-agent", id: run.id, changeIds: ["change_custom"] });
-    expect(approved.tasks[0].title).toBe("推进：完成个人作品集");
-    expect(approved.tasks[0].goalId).toBe(customGoal.id);
-    expect(approved.tasks[0].goalId).not.toBe("goal_product");
-  });
-
-  it("撤回运行所需权限会立即停止 Agent", () => {
-    const seed = createSeedData();
-    const run: AgentRun = { id: "run_reading", intent: "读取日程", status: "reading", actionMode: "read", scope: ["未来 30 天日程"], steps: [{ id: "step", title: "读取", detail: "日程", status: "running" }], changes: [], startedAt: new Date().toISOString() };
-    const stopped = appReducer({ ...seed, agentRuns: [run] }, { type: "set-permission", key: "calendar", value: false });
-    expect(stopped.agentRuns[0].status).toBe("stopped");
-    expect(stopped.agentRuns[0].summary).toContain("权限已撤回");
-    expect(stopped.settings.permissions.calendar).toBe(false);
   });
 
   it("删除目标会解除关联且撤销后完整恢复", () => {
@@ -200,6 +148,28 @@ describe("AppStoreProvider", () => {
     render(<AppStoreProvider identity={accountIdentity} syncEnabled={false}><Probe /></AppStoreProvider>);
     expect(await screen.findByText("离线缓存目标")).toBeInTheDocument();
     expect(screen.getByText("local-only")).toBeInTheDocument();
+  });
+
+  it("直接服务端命令复用已注册设备并生成独立幂等键", async () => {
+    const cached = createSeedData();
+    const deviceId = await seedAccount(accountIdentity.userId, cached);
+
+    function Probe() {
+      const store = useAppStore();
+      return <button type="button" onClick={async () => {
+        const first = await store.createServerMutationContext();
+        const second = await store.createServerMutationContext();
+        document.body.dataset.serverMutation = `${first.deviceId}:${first.mutationId}:${second.mutationId}`;
+      }}>准备服务端命令</button>;
+    }
+
+    render(<AppStoreProvider identity={accountIdentity} syncEnabled={false}><Probe /></AppStoreProvider>);
+    await screen.findByRole("button", { name: "准备服务端命令" });
+    fireEvent.click(screen.getByRole("button", { name: "准备服务端命令" }));
+
+    await waitFor(() => expect(document.body.dataset.serverMutation).toContain(deviceId));
+    const [, firstMutationId, secondMutationId] = document.body.dataset.serverMutation!.split(":");
+    expect(firstMutationId).not.toBe(secondMutationId);
   });
 
   it("dispatch 同时更新内存并原子持久化实体与 Mutation", async () => {

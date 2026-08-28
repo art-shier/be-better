@@ -1,7 +1,7 @@
 import type { SyncEntityType } from "../api/sync";
 import type { CachedEntityType, OfflineMutation } from "../offline/db";
 
-const syncToCache: Record<SyncEntityType, CachedEntityType> = {
+const syncToCache: Partial<Record<SyncEntityType, CachedEntityType>> = {
   goal: "goal",
   milestone: "goal_milestone",
   task: "task",
@@ -27,7 +27,7 @@ const cacheToSync: Record<CachedEntityType, SyncEntityType> = {
   user_settings: "settings",
 };
 
-export function cachedType(entityType: SyncEntityType): CachedEntityType {
+export function cachedType(entityType: SyncEntityType): CachedEntityType | undefined {
   return syncToCache[entityType];
 }
 

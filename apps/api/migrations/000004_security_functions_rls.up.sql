@@ -307,6 +307,34 @@ TO dayorder_api;
 GRANT INSERT ON dayorder.outbox_events TO dayorder_api;
 GRANT USAGE, SELECT ON SEQUENCE dayorder.sync_changes_sequence_seq TO dayorder_api;
 
+GRANT SELECT ON
+    dayorder.user_settings,
+    dayorder.goals,
+    dayorder.tasks,
+    dayorder.calendar_events,
+    dayorder.records,
+    dayorder.notes,
+    dayorder.agent_runs,
+    dayorder.agent_steps,
+    dayorder.agent_changes,
+    dayorder.agent_source_refs
+TO dayorder_worker;
+
+GRANT INSERT, UPDATE ON
+    dayorder.agent_runs,
+    dayorder.agent_steps,
+    dayorder.agent_changes,
+    dayorder.agent_source_refs
+TO dayorder_worker;
+
+GRANT INSERT ON
+    dayorder.audit_events,
+    dayorder.audit_event_entities,
+    dayorder.sync_changes
+TO dayorder_worker;
+
+GRANT USAGE, SELECT ON SEQUENCE dayorder.sync_changes_sequence_seq TO dayorder_worker;
+
 GRANT EXECUTE ON FUNCTION dayorder.current_user_id() TO dayorder_api, dayorder_worker;
 GRANT EXECUTE ON FUNCTION dayorder.set_user_context(UUID) TO dayorder_api, dayorder_worker;
 GRANT EXECUTE ON FUNCTION dayorder.authenticate_session(BYTEA) TO dayorder_api;

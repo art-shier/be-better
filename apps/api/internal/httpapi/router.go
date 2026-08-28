@@ -96,6 +96,24 @@ type SyncApplication interface {
 	DeviceChanges(context.Context, uuid.UUID, uuid.UUID, string, int) (service.SyncPage, error)
 }
 
+type AgentApplication interface {
+	Create(context.Context, service.MutationContext, service.StartAgentInput) (model.AgentRun, error)
+	Get(context.Context, uuid.UUID, uuid.UUID) (model.AgentRun, error)
+	List(context.Context, uuid.UUID, string, int) (service.AgentRunPage, error)
+	Accept(context.Context, service.MutationContext, uuid.UUID, int64) (model.AgentApplyResult, error)
+	Reject(context.Context, service.MutationContext, uuid.UUID, int64) (model.AgentApplyResult, error)
+	Stop(context.Context, service.MutationContext, uuid.UUID, int64) (model.AgentRun, error)
+}
+
+type AuditApplication interface {
+	Get(context.Context, uuid.UUID, uuid.UUID) (model.AuditEvent, error)
+	List(context.Context, uuid.UUID, string, int) (service.AuditPage, error)
+}
+
+type UndoApplication interface {
+	Undo(context.Context, service.MutationContext, uuid.UUID, int64) (model.UndoResult, error)
+}
+
 type RouterOptions struct {
 	Accounts       AccountApplication
 	Sessions       SessionApplication
@@ -106,6 +124,9 @@ type RouterOptions struct {
 	Settings       SettingsApplication
 	Devices        DeviceApplication
 	Sync           SyncApplication
+	Agents         AgentApplication
+	Audits         AuditApplication
+	Undos          UndoApplication
 	AllowedOrigins []string
 	Logger         *slog.Logger
 	Ready          func(context.Context) error
@@ -121,6 +142,9 @@ type Router struct {
 	settings       SettingsApplication
 	devices        DeviceApplication
 	sync           SyncApplication
+	agents         AgentApplication
+	audits         AuditApplication
+	undos          UndoApplication
 	allowedOrigins map[string]struct{}
 	logger         *slog.Logger
 	ready          func(context.Context) error
@@ -136,7 +160,7 @@ func NewRouter(options RouterOptions) (http.Handler, error) {
 	}
 	router := &Router{
 		accounts: options.Accounts, sessions: options.Sessions,
-		goals: options.Goals, tasks: options.Tasks, calendar: options.Calendar, content: options.Content, settings: options.Settings, devices: options.Devices, sync: options.Sync,
+		goals: options.Goals, tasks: options.Tasks, calendar: options.Calendar, content: options.Content, settings: options.Settings, devices: options.Devices, sync: options.Sync, agents: options.Agents, audits: options.Audits, undos: options.Undos,
 		allowedOrigins: make(map[string]struct{}), logger: logger, ready: options.Ready,
 	}
 	for _, origin := range options.AllowedOrigins {
@@ -213,6 +237,21 @@ func NewRouter(options RouterOptions) (http.Handler, error) {
 	if router.settings != nil {
 		mux.HandleFunc("GET /api/v1/users/me/settings", router.getSettings)
 		mux.HandleFunc("PATCH /api/v1/users/me/settings", router.updateSettings)
+	}
+	if router.agents != nil {
+		mux.HandleFunc("GET /api/v1/agent-runs", router.listAgentRuns)
+		mux.HandleFunc("POST /api/v1/agent-runs", router.createAgentRun)
+		mux.HandleFunc("GET /api/v1/agent-runs/{runId}", router.getAgentRun)
+		mux.HandleFunc("POST /api/v1/agent-runs/{runId}/stop", router.stopAgentRun)
+		mux.HandleFunc("POST /api/v1/agent-changes/{changeId}/accept", router.acceptAgentChange)
+		mux.HandleFunc("POST /api/v1/agent-changes/{changeId}/reject", router.rejectAgentChange)
+	}
+	if router.audits != nil {
+		mux.HandleFunc("GET /api/v1/audit-events", router.listAuditEvents)
+		mux.HandleFunc("GET /api/v1/audit-events/{auditEventId}", router.getAuditEvent)
+	}
+	if router.undos != nil {
+		mux.HandleFunc("POST /api/v1/audit-events/{auditEventId}/undo", router.undoAuditEvent)
 	}
 	return router.middleware(mux), nil
 }

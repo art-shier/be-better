@@ -11,9 +11,29 @@ import type { AppData } from "./domain/types";
 import { replaceAccountEntities, type CachedEntityBatch } from "./offline/cache";
 import { deleteDayOrderDB } from "./offline/db";
 import { prepareInitialMutations } from "./store/commands";
+import { acceptAgentChange, createAgentRun, getAgentRun, listAgentRuns, rejectAgentChange, stopAgentRun, type ServerAgentRun } from "./api/agent";
+import { listAuditEvents, undoAuditEvent } from "./api/audit";
+
+vi.mock("./api/agent", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./api/agent")>(),
+  acceptAgentChange: vi.fn(), createAgentRun: vi.fn(), getAgentRun: vi.fn(), listAgentRuns: vi.fn(), rejectAgentChange: vi.fn(), stopAgentRun: vi.fn(),
+}));
+vi.mock("./api/audit", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./api/audit")>(),
+  listAuditEvents: vi.fn(), undoAuditEvent: vi.fn(),
+}));
 
 const testUser = { id: "user_test", email: "test@example.com", displayName: "测试用户" };
 const testSession = { user: testUser, expiresAt: "2026-09-26T08:00:00Z" };
+
+function serverRun(overrides: Partial<ServerAgentRun> = {}): ServerAgentRun {
+  return {
+    id: crypto.randomUUID(), intent: "安排作品集的下一步", status: "waiting", actionMode: "confirm",
+    scope: { domains: ["goals", "tasks"], entityIds: [] }, version: 2,
+    createdAt: "2026-08-27T02:00:00Z", updatedAt: "2026-08-27T02:01:00Z", startedAt: "2026-08-27T02:00:10Z",
+    steps: [], changes: [], sourceRefs: [], ...overrides,
+  };
+}
 
 async function seedAccount(accountId: string, data: AppData): Promise<void> {
   const grouped = new Map<CachedEntityBatch["entityType"], CachedEntityBatch["values"]>();
@@ -41,6 +61,14 @@ function Harness() {
 
 describe("关键页面交互", () => {
   beforeEach(async () => {
+    vi.mocked(listAgentRuns).mockReset().mockResolvedValue({ runs: [], hasMore: false });
+    vi.mocked(listAuditEvents).mockReset().mockResolvedValue({ events: [], hasMore: false });
+    vi.mocked(createAgentRun).mockReset();
+    vi.mocked(getAgentRun).mockReset();
+    vi.mocked(acceptAgentChange).mockReset();
+    vi.mocked(rejectAgentChange).mockReset();
+    vi.mocked(stopAgentRun).mockReset();
+    vi.mocked(undoAuditEvent).mockReset();
     vi.setSystemTime(new Date("2026-08-27T10:00:00+08:00"));
     window.location.hash = "today";
     localStorage.setItem("dayorder.app.v1", JSON.stringify(createSeedData()));
@@ -103,6 +131,17 @@ describe("关键页面交互", () => {
     const goal = { ...seed.goals[0], id: "goal_portfolio", title: "完成个人作品集", why: "用于下一次求职展示" };
     const task = { ...seed.tasks[0], id: "task_portfolio", title: "制作作品集首页", goalId: goal.id, scheduledStart: undefined, scheduledEnd: undefined };
     await seedAccount(testUser.id, { ...seed, goals: [goal], tasks: [task], events: [], records: [], notes: [], agentRuns: [], audit: [] });
+    const run = serverRun({
+      sourceRefs: [{ id: crypto.randomUUID(), runId: "run_portfolio", entityType: "task", entityId: task.id, entityVersion: task.version, labelSnapshot: task.title, createdAt: "2026-08-27T02:01:00Z" }],
+      changes: [{
+        id: crypto.randomUUID(), runId: "run_portfolio", changeType: "reschedule-task", targetType: "task", targetId: task.id,
+        baseVersion: task.version, patch: [], previewBefore: { scheduledStart: null, scheduledEnd: null },
+        previewAfter: { scheduledStart: "2026-08-28T01:00:00Z", scheduledEnd: "2026-08-28T01:45:00Z" },
+        reason: "当前优先级最高", status: "pending", version: 1, createdAt: "2026-08-27T02:01:00Z", updatedAt: "2026-08-27T02:01:00Z",
+      }],
+    });
+    vi.mocked(createAgentRun).mockResolvedValue(run);
+    vi.mocked(getAgentRun).mockResolvedValue(run);
     const user = userEvent.setup();
     render(<AccountHarness />);
 
@@ -111,8 +150,63 @@ describe("关键页面交互", () => {
     await user.type(screen.getByLabelText("希望得到什么结果"), "安排作品集的下一步");
     await user.click(screen.getByRole("button", { name: /生成执行步骤/ }));
 
-    await waitFor(() => expect(screen.getByText("安排“制作作品集首页”")).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByText("调整“制作作品集首页”的安排")).toBeInTheDocument());
+    expect(createAgentRun).toHaveBeenCalledWith(expect.objectContaining({
+      intent: "安排作品集的下一步",
+      actionMode: "confirm",
+      scope: expect.objectContaining({ domains: expect.arrayContaining(["goals", "tasks"]) }),
+    }), expect.objectContaining({ deviceId: expect.any(String), mutationId: expect.any(String) }));
     expect(screen.queryByText(/产品方案核心流程/)).not.toBeInTheDocument();
+  });
+
+  it("Agent 只接受勾选变更并明确拒绝未勾选项", async () => {
+    const seed = createSeedData();
+    await seedAccount(testUser.id, seed);
+    const firstId = crypto.randomUUID();
+    const secondId = crypto.randomUUID();
+    const pending = serverRun({
+      changes: [firstId, secondId].map((id, index) => ({
+        id, runId: "run_resolve", changeType: "create-task", targetType: "task", patch: [],
+        previewAfter: { title: index === 0 ? "优先任务" : "次要任务", estimateMinutes: 30 }, reason: "测试",
+        status: "pending" as const, version: 1, createdAt: "2026-08-27T02:01:00Z", updatedAt: "2026-08-27T02:01:00Z",
+      })),
+    });
+    const completed = serverRun({ ...pending, status: "completed", version: 3, summary: "已处理全部变更。", changes: pending.changes.map((change, index) => ({ ...change, status: index === 0 ? "applied" : "rejected", version: 2 })) });
+    vi.mocked(createAgentRun).mockResolvedValue(pending);
+    vi.mocked(getAgentRun).mockResolvedValueOnce(pending).mockResolvedValueOnce(completed);
+    vi.mocked(acceptAgentChange).mockResolvedValue({ change: { ...pending.changes[0], status: "applied", version: 2 }, run: pending });
+    vi.mocked(rejectAgentChange).mockResolvedValue({ change: { ...pending.changes[1], status: "rejected", version: 2 }, run: completed });
+    const user = userEvent.setup();
+    render(<AccountHarness />);
+
+    await user.click((await screen.findAllByRole("button", { name: /^Agent/ }))[0]);
+    await user.click(screen.getAllByRole("button", { name: "发起委托" })[0]);
+    await user.type(screen.getByLabelText("希望得到什么结果"), "生成两个任务建议");
+    await user.click(screen.getByRole("button", { name: /生成执行步骤/ }));
+    await screen.findByText("创建任务“优先任务”");
+    await user.click(screen.getByRole("checkbox", { name: "选择创建任务“次要任务”" }));
+    await user.click(screen.getByRole("button", { name: "确认并执行 1 项" }));
+
+    await waitFor(() => expect(acceptAgentChange).toHaveBeenCalledWith(firstId, 1, expect.objectContaining({ deviceId: expect.any(String), mutationId: expect.any(String) })));
+    expect(rejectAgentChange).toHaveBeenCalledWith(secondId, 1, expect.objectContaining({ deviceId: expect.any(String), mutationId: expect.any(String) }));
+    expect((await screen.findAllByText("已处理全部变更。")).length).toBeGreaterThan(0);
+  });
+
+  it("快捷面板通过服务端只读 Run 返回回答", async () => {
+    const seed = createSeedData();
+    await seedAccount(testUser.id, seed);
+    vi.mocked(createAgentRun).mockResolvedValue(serverRun({
+      actionMode: "read", status: "completed", summary: "下午优先完成短任务。",
+      sourceRefs: [{ id: crypto.randomUUID(), runId: "run_read", entityType: "task", entityId: seed.tasks[0].id, entityVersion: seed.tasks[0].version, labelSnapshot: seed.tasks[0].title, createdAt: "2026-08-27T02:01:00Z" }],
+    }));
+    const user = userEvent.setup();
+    render(<AccountHarness />);
+
+    await user.click(await screen.findByRole("button", { name: "打开 Agent 快捷面板" }));
+    await user.click(screen.getByRole("button", { name: "下午怎么安排更合理？" }));
+
+    expect(await screen.findByText(/下午优先完成短任务/)).toBeInTheDocument();
+    expect(createAgentRun).toHaveBeenCalledWith(expect.objectContaining({ actionMode: "read", intent: "下午怎么安排更合理？" }), expect.any(Object));
   });
 
   it("游客点击 Agent 保留当前页面并打开登录门禁", async () => {

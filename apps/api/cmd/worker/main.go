@@ -7,10 +7,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"dayorder.local/api/internal/agentprovider"
 	"dayorder.local/api/internal/config"
 	"dayorder.local/api/internal/database"
 	daymail "dayorder.local/api/internal/mail"
 	postgresstore "dayorder.local/api/internal/postgres"
+	"dayorder.local/api/internal/service"
 	"dayorder.local/api/internal/worker"
 )
 
@@ -69,16 +71,55 @@ func main() {
 		logger.Error("create reminder handler", "error", err)
 		os.Exit(1)
 	}
+	transactor, err := database.NewPoolTransactor(pool)
+	if err != nil {
+		logger.Error("create worker transaction coordinator", "error", err)
+		os.Exit(1)
+	}
+	syncService, err := service.NewSyncService(postgresstore.NewSyncRepository(), transactor, configuration.AuthHMACKey)
+	if err != nil {
+		logger.Error("create worker sync recorder", "error", err)
+		os.Exit(1)
+	}
+	auditService, err := service.NewAuditService(postgresstore.NewAuditRepository())
+	if err != nil {
+		logger.Error("create worker audit recorder", "error", err)
+		os.Exit(1)
+	}
+	var provider service.AgentProvider
+	if configuration.Agent.Provider == "http" {
+		provider, err = agentprovider.NewHTTPProvider(
+			configuration.Agent.HTTPURL, configuration.Agent.HTTPKey,
+			configuration.Agent.Model, configuration.Agent.Timeout,
+		)
+	} else {
+		provider = service.NewDeterministicAgentProvider(nil)
+	}
+	if err != nil {
+		logger.Error("create agent provider", "error", err)
+		os.Exit(1)
+	}
+	agentProcessor, err := service.NewAgentProcessor(postgresstore.NewAgentRepository(), transactor, syncService, auditService, provider)
+	if err != nil {
+		logger.Error("create agent processor", "error", err)
+		os.Exit(1)
+	}
+	agentHandler, err := worker.NewAgentHandler(agentProcessor)
+	if err != nil {
+		logger.Error("create agent worker handler", "error", err)
+		os.Exit(1)
+	}
 	runner, err := worker.NewRunner(repository, map[string]worker.Handler{
 		"email.verification.requested":   verificationHandler,
 		"email.password_reset.requested": passwordResetHandler,
 		"reminder.delivery.requested":    reminderHandler,
+		"agent.run.requested":            agentHandler,
 	})
 	if err != nil {
 		logger.Error("create worker runner", "error", err)
 		os.Exit(1)
 	}
-	logger.Info("dayorder worker started", "mailSink", configuration.Mail.Sink)
+	logger.Info("dayorder worker started", "mailSink", configuration.Mail.Sink, "agentProvider", configuration.Agent.Provider, "agentModel", configuration.Agent.Model)
 	if err = runner.Run(ctx, configuration.PollInterval); err != nil {
 		logger.Error("worker stopped after an error", "error", err)
 		os.Exit(1)

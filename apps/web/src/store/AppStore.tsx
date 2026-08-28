@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { ApiError } from "../api/http";
+import type { ResourceMutationContext } from "../api/resources";
 import { createEmptyData, createSeedData } from "../domain/seed";
 import type { AppData } from "../domain/types";
 import { getSyncMetadata, putSyncMetadata, type SyncMetadata } from "../offline/db";
@@ -55,6 +56,8 @@ interface StoreContextValue {
   dispatch: Dispatch<Action>;
   syncStatus: SyncStatus;
   lastSyncedAt: string | null;
+  createServerMutationContext(): Promise<ResourceMutationContext>;
+  syncNow(): Promise<boolean>;
   reset(): void;
   importData(value: string): { ok: boolean; message: string };
   exportData(): string;
@@ -278,6 +281,19 @@ export function AppStoreProvider({
     if (remoteSyncEnabled) void write.then(() => synchronizeRef.current(), () => undefined);
   }, [accountId, getOrCreateDeviceId, remoteSyncEnabled, replaceData, resolved]);
 
+  const createServerMutationContext = useCallback(async (): Promise<ResourceMutationContext> => {
+    if (!accountId) throw new Error("服务端命令需要登录账户");
+    let metadata = await resolved.getMetadata(accountId);
+    if (!metadata?.deviceId && remoteSyncEnabled) {
+      await synchronizeRef.current();
+      metadata = await resolved.getMetadata(accountId);
+    }
+    if (!metadata?.deviceId) throw new Error("当前设备尚未完成服务端注册，请联网同步后重试");
+    return { deviceId: metadata.deviceId, mutationId: crypto.randomUUID() };
+  }, [accountId, remoteSyncEnabled, resolved]);
+
+  const syncNow = useCallback(async (): Promise<boolean> => Boolean(await synchronizeRef.current()), []);
+
   const reset = useCallback(() => dispatch({ type: "replace", data: createSeedData() }), [dispatch]);
   const importData = useCallback((value: string) => {
     try {
@@ -290,7 +306,7 @@ export function AppStoreProvider({
     }
   }, [dispatch]);
   const exportData = useCallback(() => JSON.stringify(data, null, 2), [data]);
-  const value = useMemo<StoreContextValue>(() => ({ data, dispatch, syncStatus, lastSyncedAt, reset, importData, exportData }), [data, dispatch, exportData, importData, lastSyncedAt, reset, syncStatus]);
+  const value = useMemo<StoreContextValue>(() => ({ data, dispatch, syncStatus, lastSyncedAt, createServerMutationContext, syncNow, reset, importData, exportData }), [createServerMutationContext, data, dispatch, exportData, importData, lastSyncedAt, reset, syncNow, syncStatus]);
 
   if (accountMode && !hydrated) return <div className="app-loading"><span className="brand-mark">序</span><p>正在恢复本机数据…</p></div>;
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
