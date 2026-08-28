@@ -16,6 +16,18 @@ scripts/    prototype 与真实运行验收脚本
 
 > PostgreSQL 企业级改造正在按已批准的[架构设计](docs/superpowers/specs/2026-08-28-postgresql-enterprise-architecture-design.md)和[实施计划](docs/superpowers/plans/2026-08-28-postgresql-enterprise-implementation.md)进行。当前默认运行时仍是 SQLite；`compose.dev.yaml`、`.env.example` 和新的 Go database/config 包只服务于尚未切换的 PostgreSQL 新链路。在正式切换阶段完成前，本文后续现有运行说明仍以 SQLite 基线为准。
 
+PostgreSQL 新链路可从空库初始化：
+
+```powershell
+Copy-Item .env.example .env
+npm run db:up
+npm run db:bootstrap # 仅旧开发卷或需要轮换本地角色密码时运行
+npm run db:migrate
+npm run db:check
+```
+
+新建开发卷会通过 Compose 自动创建相互隔离的 `dayorder_migrator`、`dayorder_api` 和 `dayorder_worker` 角色。Migration 只使用 `MIGRATION_DATABASE_URL`；API 与 Worker 分别使用受限连接，不拥有 DDL 权限。真实 PostgreSQL 集成测试需要 Docker，缺少 Docker 时会明确跳过而不会退回 SQLite。
+
 ## 使用模式
 
 - 游客无需登录即可使用今天、目标、任务、日程、记录和笔记；数据只写入当前浏览器。

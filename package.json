@@ -18,8 +18,13 @@
     "test:integration": "go test -count=1 ./apps/api/internal/testdb ./apps/api/internal/database/...",
     "test:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/runtime-acceptance.ps1",
     "db:up": "docker compose -f compose.dev.yaml up -d postgres",
+    "db:bootstrap": "docker compose -f compose.dev.yaml exec -T postgres sh /opt/dayorder/bootstrap-roles.sh",
     "db:down": "docker compose -f compose.dev.yaml down",
     "db:logs": "docker compose -f compose.dev.yaml logs -f postgres",
+    "db:migrate": "go run ./apps/api/cmd/migrate",
+    "db:check": "go run ./apps/api/cmd/migrate -check",
+    "db:generate": "go tool sqlc generate -f apps/api/sqlc.yaml",
+    "db:generate:check": "npm run db:generate && git diff --exit-code -- apps/api/internal/db/gen",
     "build": "npm run build:web && npm run build:api",
     "build:web": "npm run build --workspace @dayorder/web",
     "build:api": "go build ./apps/api/..."
