@@ -15,7 +15,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 )
 
-const LatestVersion uint = 6
+const LatestVersion uint = 7
 
 var (
 	ErrDatabaseURLRequired = errors.New("migration database URL is required")

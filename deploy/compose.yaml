@@ -1,0 +1,354 @@
+name: dayorder
+
+x-build-args: &build-args
+  VERSION: ${DAYORDER_VERSION:-dev}
+  REVISION: ${DAYORDER_IMAGE_REVISION:-unknown}
+  CREATED: ${DAYORDER_IMAGE_CREATED:-unknown}
+
+x-runtime-security: &runtime-security
+  read_only: true
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+
+services:
+  caddy:
+    <<: *runtime-security
+    image: dayorder-web:${DAYORDER_VERSION:-dev}
+    build:
+      context: ..
+      target: web
+      args: *build-args
+    restart: unless-stopped
+    environment:
+      DAYORDER_DOMAIN: ${DAYORDER_DOMAIN:?DAYORDER_DOMAIN is required}
+      DAYORDER_ACME_EMAIL: ${DAYORDER_ACME_EMAIL:?DAYORDER_ACME_EMAIL is required}
+    ports:
+      - "80:8080"
+      - "443:8443"
+      - "443:8443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge
+      - monitoring
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    stop_grace_period: 30s
+
+  api:
+    <<: *runtime-security
+    image: dayorder-api:${DAYORDER_VERSION:-dev}
+    build:
+      context: ..
+      target: api
+      args: *build-args
+    restart: unless-stopped
+    environment:
+      DAYORDER_ENV: production
+      DAYORDER_ADDR: 0.0.0.0:8080
+      DAYORDER_METRICS_ADDR: 0.0.0.0:9090
+      DAYORDER_PUBLIC_URL: https://${DAYORDER_DOMAIN:?DAYORDER_DOMAIN is required}
+      DAYORDER_ALLOWED_ORIGINS: https://${DAYORDER_DOMAIN:?DAYORDER_DOMAIN is required}
+      DATABASE_URL_FILE: /run/secrets/api_database_url
+      DAYORDER_AUTH_HMAC_KEY_FILE: /run/secrets/auth_hmac_key
+      DAYORDER_DB_MAX_CONNS: ${DAYORDER_DB_MAX_CONNS:-20}
+      DAYORDER_DB_MIN_CONNS: ${DAYORDER_DB_MIN_CONNS:-2}
+      DAYORDER_DB_MAX_CONN_LIFETIME: ${DAYORDER_DB_MAX_CONN_LIFETIME:-30m}
+      DAYORDER_DB_MAX_CONN_IDLE_TIME: ${DAYORDER_DB_MAX_CONN_IDLE_TIME:-5m}
+      DAYORDER_DB_STATEMENT_TIMEOUT: ${DAYORDER_DB_STATEMENT_TIMEOUT:-5s}
+      DAYORDER_DB_LOCK_TIMEOUT: ${DAYORDER_DB_LOCK_TIMEOUT:-2s}
+      DAYORDER_DB_IDLE_TX_TIMEOUT: ${DAYORDER_DB_IDLE_TX_TIMEOUT:-10s}
+      DAYORDER_DB_HEALTH_TIMEOUT: ${DAYORDER_DB_HEALTH_TIMEOUT:-3s}
+    secrets:
+      - api_database_url
+      - auth_hmac_key
+    networks:
+      - edge
+      - data
+      - monitoring
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    stop_grace_period: 30s
+
+  worker:
+    <<: *runtime-security
+    image: dayorder-worker:${DAYORDER_VERSION:-dev}
+    build:
+      context: ..
+      target: worker
+      args: *build-args
+    restart: unless-stopped
+    environment:
+      DAYORDER_ENV: production
+      DAYORDER_PUBLIC_URL: https://${DAYORDER_DOMAIN:?DAYORDER_DOMAIN is required}
+      DAYORDER_WORKER_METRICS_ADDR: 0.0.0.0:9091
+      WORKER_DATABASE_URL_FILE: /run/secrets/worker_database_url
+      DAYORDER_AUTH_HMAC_KEY_FILE: /run/secrets/auth_hmac_key
+      DAYORDER_WORKER_DB_MAX_CONNS: ${DAYORDER_WORKER_DB_MAX_CONNS:-5}
+      DAYORDER_WORKER_DB_MIN_CONNS: ${DAYORDER_WORKER_DB_MIN_CONNS:-1}
+      DAYORDER_WORKER_POLL_RATE: ${DAYORDER_WORKER_POLL_RATE:-1s}
+      DAYORDER_MAIL_SINK: smtp
+      DAYORDER_SMTP_ADDRESS: ${DAYORDER_SMTP_ADDRESS:?DAYORDER_SMTP_ADDRESS is required}
+      DAYORDER_SMTP_FROM: ${DAYORDER_SMTP_FROM:?DAYORDER_SMTP_FROM is required}
+      DAYORDER_SMTP_USERNAME: ${DAYORDER_SMTP_USERNAME:-}
+      DAYORDER_SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+      DAYORDER_SMTP_TLS_MODE: ${DAYORDER_SMTP_TLS_MODE:-starttls}
+      DAYORDER_SMTP_TIMEOUT: ${DAYORDER_SMTP_TIMEOUT:-15s}
+      DAYORDER_AGENT_PROVIDER: http
+      DAYORDER_AGENT_HTTP_URL: ${DAYORDER_AGENT_HTTP_URL:?DAYORDER_AGENT_HTTP_URL is required}
+      DAYORDER_AGENT_HTTP_KEY_FILE: /run/secrets/agent_http_key
+      DAYORDER_AGENT_MODEL: ${DAYORDER_AGENT_MODEL:?DAYORDER_AGENT_MODEL is required}
+      DAYORDER_AGENT_TIMEOUT: ${DAYORDER_AGENT_TIMEOUT:-30s}
+      DAYORDER_DB_MAX_CONN_LIFETIME: ${DAYORDER_DB_MAX_CONN_LIFETIME:-30m}
+      DAYORDER_DB_MAX_CONN_IDLE_TIME: ${DAYORDER_DB_MAX_CONN_IDLE_TIME:-5m}
+      DAYORDER_DB_STATEMENT_TIMEOUT: ${DAYORDER_WORKER_DB_STATEMENT_TIMEOUT:-30s}
+      DAYORDER_DB_LOCK_TIMEOUT: ${DAYORDER_DB_LOCK_TIMEOUT:-2s}
+      DAYORDER_DB_IDLE_TX_TIMEOUT: ${DAYORDER_DB_IDLE_TX_TIMEOUT:-10s}
+      DAYORDER_DB_HEALTH_TIMEOUT: ${DAYORDER_DB_HEALTH_TIMEOUT:-3s}
+    secrets:
+      - worker_database_url
+      - auth_hmac_key
+      - smtp_password
+      - agent_http_key
+    networks:
+      - data
+      - egress
+      - monitoring
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9091/metrics"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    stop_grace_period: 60s
+
+  migrate:
+    <<: *runtime-security
+    image: dayorder-migrate:${DAYORDER_VERSION:-dev}
+    build:
+      context: ..
+      target: migrate
+      args: *build-args
+    restart: "no"
+    environment:
+      MIGRATION_DATABASE_URL_FILE: /run/secrets/migration_database_url
+    secrets:
+      - migration_database_url
+    networks:
+      - data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    <<: *runtime-security
+    image: dayorder-postgres:${DAYORDER_VERSION:-dev}
+    build:
+      context: ..
+      target: postgres
+      args: *build-args
+    restart: unless-stopped
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/run/postgresql:size=16m,mode=0770,uid=70,gid=70
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dayorder}
+      POSTGRES_USER: ${POSTGRES_USER:-dayorder_admin}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=peer --data-checksums
+      DAYORDER_MIGRATOR_DB_PASSWORD_FILE: /run/secrets/migrator_db_password
+      DAYORDER_API_DB_PASSWORD_FILE: /run/secrets/api_db_password
+      DAYORDER_WORKER_DB_PASSWORD_FILE: /run/secrets/worker_db_password
+      DAYORDER_BACKUP_DB_PASSWORD_FILE: /run/secrets/backup_db_password
+      DAYORDER_MONITOR_DB_PASSWORD_FILE: /run/secrets/monitor_db_password
+      PGBACKREST_REPO1_CIPHER_PASS_FILE: /run/secrets/pgbackrest_cipher_pass
+      TZ: UTC
+      PGTZ: UTC
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+    secrets:
+      - postgres_admin_password
+      - migrator_db_password
+      - api_db_password
+      - worker_db_password
+      - backup_db_password
+      - monitor_db_password
+      - pgbackrest_cipher_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - pgbackrest_repository:/var/lib/pgbackrest
+      - pgbackrest_spool:/var/spool/pgbackrest
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./pgbackrest/pgbackrest.conf.example:/etc/pgbackrest/pgbackrest.conf:ro
+      - ./scripts/bootstrap-roles.sql:/opt/dayorder/bootstrap-roles.sql:ro
+      - ./scripts/bootstrap-roles.sh:/docker-entrypoint-initdb.d/010-bootstrap-roles.sh:ro
+      - ./scripts/init-pgbackrest.sh:/docker-entrypoint-initdb.d/020-init-pgbackrest.sh:ro
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    stop_grace_period: 90s
+
+  prometheus:
+    <<: *runtime-security
+    image: prom/prometheus:v3.6.0@sha256:76947e7ef22f8a698fc638f706685909be425dbe09bd7a2cd7aca849f79b5f64
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - monitoring
+    depends_on:
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/bin/promtool", "check", "ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  node-exporter:
+    <<: *runtime-security
+    image: prom/node-exporter:v1.9.1@sha256:d00a542e409ee618a4edc67da14dd48c5da66726bbd5537ab2af9c1dfc442c8a
+    restart: unless-stopped
+    command:
+      - --collector.disable-defaults
+      - --collector.textfile
+      - --collector.textfile.directory=/textfile
+    volumes:
+      - ./metrics:/textfile:ro
+    networks:
+      - monitoring
+
+  postgres-restore:
+    <<: *runtime-security
+    profiles: ["restore"]
+    image: dayorder-postgres:${DAYORDER_VERSION:-dev}
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/run/postgresql:size=16m,mode=0770,uid=70,gid=70
+      - /var/spool/pgbackrest:size=64m,mode=0770,uid=70,gid=70
+    build:
+      context: ..
+      target: postgres
+      args: *build-args
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      POSTGRES_DB: ${POSTGRES_DB:-dayorder}
+      POSTGRES_USER: ${POSTGRES_USER:-dayorder_admin}
+      PGBACKREST_REPO1_CIPHER_PASS_FILE: /run/secrets/pgbackrest_cipher_pass
+      TZ: UTC
+      PGTZ: UTC
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - archive_mode=off
+    secrets:
+      - postgres_admin_password
+      - pgbackrest_cipher_pass
+    volumes:
+      - postgres_restore:/var/lib/postgresql/data
+      - pgbackrest_repository:/var/lib/pgbackrest:ro
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./pgbackrest/pgbackrest.conf.example:/etc/pgbackrest/pgbackrest.conf:ro
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "dayorder_admin", "-d", "dayorder"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+networks:
+  edge:
+  egress:
+  data:
+    internal: true
+  monitoring:
+    internal: true
+
+volumes:
+  postgres_data:
+  postgres_restore:
+    name: dayorder-postgres-restore
+  pgbackrest_repository:
+  pgbackrest_spool:
+  caddy_data:
+  caddy_config:
+  prometheus_data:
+
+secrets:
+  postgres_admin_password:
+    file: ${DAYORDER_SECRETS_DIR:-./secrets}/postgres_admin_password
+  migrator_db_password:
+    file: ${DAYORDER_SECRETS_DIR:-./secrets}/migrator_db_password
+  api_db_password:
+    file: ${DAYORDER_SECRETS_DIR:-./secrets}/api_db_password
+  worker_db_password:
+    file: ${DAYORDER_SECRETS_DIR:-./secrets}/worker_db_password
+  backup_db_password:
+    file: ${DAYORDER_SECRETS_DIR:-./secrets}/backup_db_password
+  monitor_db_password:
+    file: ${DAYORDER_SECRETS_DIR:-./secrets}/monitor_db_password
+  migration_database_url:
+    file: ${DAYORDER_SECRETS_DIR:-./secrets}/migration_database_url
+  api_database_url:
+    file: ${DAYORDER_SECRETS_DIR:-./secrets}/api_database_url
+  worker_database_url:
+    file: ${DAYORDER_SECRETS_DIR:-./secrets}/worker_database_url
+  auth_hmac_key:
+    file: ${DAYORDER_SECRETS_DIR:-./secrets}/auth_hmac_key
+  smtp_password:
+    file: ${DAYORDER_SECRETS_DIR:-./secrets}/smtp_password
+  agent_http_key:
+    file: ${DAYORDER_SECRETS_DIR:-./secrets}/agent_http_key
+  pgbackrest_cipher_pass:
+    file: ${DAYORDER_SECRETS_DIR:-./secrets}/pgbackrest_cipher_pass

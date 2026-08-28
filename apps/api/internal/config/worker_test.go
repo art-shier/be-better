@@ -61,4 +61,17 @@ func TestLoadWorkerConfigAllowsExplicitDevelopmentMetadataSink(t *testing.T) {
 	if config.Mail.Sink != "log" || config.Database.MaxConns != 5 || config.Agent.Provider != "deterministic" {
 		t.Fatalf("worker config = %#v", config)
 	}
+	if config.MetricsAddress != "127.0.0.1:9091" {
+		t.Fatalf("worker metrics address = %q", config.MetricsAddress)
+	}
+}
+
+func TestLoadWorkerConfigRejectsInvalidMetricsAddress(t *testing.T) {
+	values := map[string]string{
+		"WORKER_DATABASE_URL":          "postgres://worker:secret@localhost/dayorder",
+		"DAYORDER_WORKER_METRICS_ADDR": "missing-port",
+	}
+	if _, err := LoadWorkerFrom(mapLookup(values)); err == nil {
+		t.Fatal("invalid worker metrics address unexpectedly accepted")
+	}
 }

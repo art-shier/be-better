@@ -35,6 +35,9 @@ func (router *Router) handleServiceError(response http.ResponseWriter, request *
 	case errors.Is(err, service.ErrInvalidCursor), errors.Is(err, service.ErrInvalidSyncCursor):
 		router.writeError(response, request, http.StatusBadRequest, "INVALID_CURSOR", "游标无效", false, nil)
 	case errors.Is(err, service.ErrSyncResetRequired):
+		if router.metrics != nil {
+			router.metrics.ObserveSyncCursorReset()
+		}
 		router.writeError(response, request, http.StatusConflict, "SYNC_RESET_REQUIRED", "同步游标已过期，需要重建本地缓存", false, nil)
 	case errors.Is(err, service.ErrValidation):
 		router.writeError(response, request, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "请求数据不符合要求", false, nil)

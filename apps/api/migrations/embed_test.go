@@ -87,6 +87,7 @@ func TestEmbeddedMigrationsContainApprovedSchemaAndSecurityBoundaries(t *testing
 		"dayorder.current_user_id()",
 		"security definer",
 		"for update skip locked",
+		"dayorder.outbox_metrics()",
 		"to dayorder_api",
 		"to dayorder_worker",
 		"foreign key (user_id, goal_id)",

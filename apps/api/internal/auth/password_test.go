@@ -1,6 +1,38 @@
 package auth
 
-import "testing"
+import (
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestPasswordObserverSeesHashAndVerifyDuration(t *testing.T) {
+	var lock sync.Mutex
+	operations := make([]string, 0, 2)
+	restore := SetPasswordObserver(func(operation string, elapsed time.Duration) {
+		lock.Lock()
+		defer lock.Unlock()
+		if elapsed < 0 {
+			t.Errorf("negative password duration: %s", elapsed)
+		}
+		operations = append(operations, operation)
+	})
+	t.Cleanup(restore)
+
+	hash, err := HashPassword("correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := VerifyPassword(hash, "correct horse battery staple"); err != nil || !ok {
+		t.Fatalf("verify = %v, %v", ok, err)
+	}
+
+	lock.Lock()
+	defer lock.Unlock()
+	if len(operations) != 2 || operations[0] != "hash" || operations[1] != "verify" {
+		t.Fatalf("password operations = %#v", operations)
+	}
+}
 
 func TestPasswordAndTokenPrimitives(t *testing.T) {
 	hash, err := HashPassword("correct horse battery staple")

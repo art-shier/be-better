@@ -109,6 +109,9 @@ func (router *Router) loginAccount(response http.ResponseWriter, request *http.R
 	if err != nil {
 		var rateLimit *service.RateLimitError
 		if errors.As(err, &rateLimit) {
+			if router.metrics != nil {
+				router.metrics.ObserveLoginRateLimited()
+			}
 			retrySeconds := max(int(time.Until(rateLimit.RetryAt).Seconds()), 1)
 			response.Header().Set("Retry-After", formatInteger(retrySeconds))
 			router.writeError(response, request, http.StatusTooManyRequests, "LOGIN_RATE_LIMITED", "尝试次数过多，请稍后再试", true, nil)

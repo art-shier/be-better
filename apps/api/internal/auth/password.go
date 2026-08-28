@@ -8,9 +8,41 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
+
+var passwordObserver struct {
+	sync.RWMutex
+	observe func(string, time.Duration)
+}
+
+// SetPasswordObserver installs process-wide password timing instrumentation.
+// It returns a function that restores the previous observer, which keeps tests
+// isolated and lets binaries wire metrics without coupling this package to a
+// specific monitoring implementation.
+func SetPasswordObserver(observer func(string, time.Duration)) func() {
+	passwordObserver.Lock()
+	previous := passwordObserver.observe
+	passwordObserver.observe = observer
+	passwordObserver.Unlock()
+	return func() {
+		passwordObserver.Lock()
+		passwordObserver.observe = previous
+		passwordObserver.Unlock()
+	}
+}
+
+func observePasswordOperation(operation string, started time.Time) {
+	passwordObserver.RLock()
+	observer := passwordObserver.observe
+	passwordObserver.RUnlock()
+	if observer != nil {
+		observer(operation, time.Since(started))
+	}
+}
 
 const (
 	argonMemory      = 64 * 1024
@@ -22,6 +54,8 @@ const (
 )
 
 func HashPassword(password string) (string, error) {
+	started := time.Now()
+	defer observePasswordOperation("hash", started)
 	salt := make([]byte, argonSaltLength)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("generate password salt: %w", err)
@@ -31,6 +65,8 @@ func HashPassword(password string) (string, error) {
 }
 
 func VerifyPassword(encoded, password string) (bool, error) {
+	started := time.Now()
+	defer observePasswordOperation("verify", started)
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 || parts[1] != "argon2id" {
 		return false, errors.New("unsupported password hash")

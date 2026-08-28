@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -16,14 +17,73 @@ import (
 
 type requestIDKey struct{}
 
+type responseStatusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (writer *responseStatusWriter) WriteHeader(status int) {
+	if writer.status != 0 {
+		return
+	}
+	writer.status = status
+	writer.ResponseWriter.WriteHeader(status)
+}
+
+func (writer *responseStatusWriter) Write(payload []byte) (int, error) {
+	if writer.status == 0 {
+		writer.WriteHeader(http.StatusOK)
+	}
+	return writer.ResponseWriter.Write(payload)
+}
+
+func (writer *responseStatusWriter) ReadFrom(reader io.Reader) (int64, error) {
+	if writer.status == 0 {
+		writer.WriteHeader(http.StatusOK)
+	}
+	if destination, ok := writer.ResponseWriter.(io.ReaderFrom); ok {
+		return destination.ReadFrom(reader)
+	}
+	return io.Copy(writer.ResponseWriter, reader)
+}
+
+func (writer *responseStatusWriter) Flush() {
+	if writer.status == 0 {
+		writer.WriteHeader(http.StatusOK)
+	}
+	if flusher, ok := writer.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 func (router *Router) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		started := time.Now()
+		statusWriter := &responseStatusWriter{ResponseWriter: response}
+		response = statusWriter
 		identifier := strings.TrimSpace(request.Header.Get("X-Request-ID"))
 		if _, err := uuid.Parse(identifier); err != nil {
 			identifier = uuid.NewString()
 		}
 		request = request.WithContext(context.WithValue(request.Context(), requestIDKey{}, identifier))
+		defer func() {
+			status := statusWriter.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			route := request.Pattern
+			if route == "" {
+				route = "unmatched"
+			}
+			elapsed := time.Since(started)
+			router.logger.Info(
+				"http request", "requestId", identifier, "method", request.Method,
+				"route", route, "status", status, "duration", elapsed,
+			)
+			if router.metrics != nil {
+				router.metrics.ObserveHTTPRequest(route, request.Method, status, elapsed)
+			}
+		}()
 		response.Header().Set("X-Request-ID", identifier)
 		response.Header().Set("Cache-Control", "no-store")
 		response.Header().Set("X-Content-Type-Options", "nosniff")
@@ -50,10 +110,6 @@ func (router *Router) middleware(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(response, request)
-		router.logger.Info(
-			"http request", "requestId", identifier, "method", request.Method,
-			"path", request.URL.Path, "duration", time.Since(started),
-		)
 	})
 }
 

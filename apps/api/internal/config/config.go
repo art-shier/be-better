@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -35,6 +36,7 @@ type DatabaseConfig struct {
 type Config struct {
 	Environment    Environment
 	Address        string
+	MetricsAddress string
 	PublicURL      string
 	AllowedOrigins []string
 	AuthHMACKey    []byte
@@ -137,14 +139,36 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 		return Config{}, errors.New("DAYORDER_AUTH_HMAC_KEY must contain at least 32 bytes")
 	}
 
+	address := strings.TrimSpace(valueOr(lookup, "DAYORDER_ADDR", "127.0.0.1:8080"))
+	if err = validateListenAddress(address); err != nil {
+		return Config{}, fmt.Errorf("DAYORDER_ADDR: %w", err)
+	}
+	metricsAddress := strings.TrimSpace(valueOr(lookup, "DAYORDER_METRICS_ADDR", "127.0.0.1:9090"))
+	if err = validateListenAddress(metricsAddress); err != nil {
+		return Config{}, fmt.Errorf("DAYORDER_METRICS_ADDR: %w", err)
+	}
+
 	return Config{
 		Environment:    environment,
-		Address:        strings.TrimSpace(valueOr(lookup, "DAYORDER_ADDR", "127.0.0.1:8080")),
+		Address:        address,
+		MetricsAddress: metricsAddress,
 		PublicURL:      strings.TrimSuffix(parsedPublicURL.String(), "/"),
 		AllowedOrigins: allowedOrigins,
 		AuthHMACKey:    []byte(hmacKey),
 		Database:       database,
 	}, nil
+}
+
+func validateListenAddress(value string) error {
+	_, port, err := net.SplitHostPort(value)
+	if err != nil || port == "" {
+		return errors.New("must be a host:port listen address")
+	}
+	parsed, err := strconv.ParseUint(port, 10, 16)
+	if err != nil || parsed == 0 {
+		return errors.New("must contain a port between 1 and 65535")
+	}
+	return nil
 }
 
 func valueOr(lookup LookupFunc, key, fallback string) string {

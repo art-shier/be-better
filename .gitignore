@@ -12,6 +12,9 @@ coverage/
 .postgres-data/
 .pgbackrest/
 backups/
+deploy/secrets/
+deploy/metrics/*.prom
+deploy/restore-reports/
 tmp/
 *.log
 .env

@@ -17,6 +17,7 @@
     "test:web": "npm run test --workspace @dayorder/web",
     "test:api": "go test ./apps/api/...",
     "test:integration": "go test -count=1 ./apps/api/internal/testdb ./apps/api/internal/database/...",
+	"test:deploy": "node scripts/validate-deploy.mjs",
     "test:runtime": "npm run test:runtime:postgres",
     "test:runtime:postgres": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/runtime-postgres-acceptance.ps1",
     "db:up": "docker compose -f compose.dev.yaml up -d postgres",

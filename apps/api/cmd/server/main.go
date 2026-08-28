@@ -11,16 +11,18 @@ import (
 	"syscall"
 	"time"
 
+	"dayorder.local/api/internal/auth"
 	"dayorder.local/api/internal/config"
 	"dayorder.local/api/internal/database"
 	"dayorder.local/api/internal/httpapi"
 	dbmigrations "dayorder.local/api/internal/migrations"
+	"dayorder.local/api/internal/observability"
 	postgresstore "dayorder.local/api/internal/postgres"
 	"dayorder.local/api/internal/service"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := observability.NewLogger(os.Stdout, "api", slog.LevelInfo)
 	configuration, err := config.Load()
 	if err != nil {
 		logger.Error("invalid server configuration", "error", err)
@@ -34,6 +36,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+	metrics := observability.NewMetrics("api", pool, nil)
+	restorePasswordObserver := auth.SetPasswordObserver(metrics.ObservePasswordOperation)
+	defer restorePasswordObserver()
 	repository, err := postgresstore.NewAccountRepository(pool)
 	if err != nil {
 		logger.Error("create account repository", "error", err)
@@ -127,7 +132,7 @@ func main() {
 	}
 	handler, err := httpapi.NewRouter(httpapi.RouterOptions{
 		Accounts: accounts, Sessions: sessions, Goals: goals, Tasks: tasks, Calendar: calendar,
-		Content: content, Settings: settings, Devices: devices, Sync: syncService, Agents: agents, Audits: audits, Undos: undos, AllowedOrigins: configuration.AllowedOrigins, Logger: logger,
+		Content: content, Settings: settings, Devices: devices, Sync: syncService, Agents: agents, Audits: audits, Undos: undos, AllowedOrigins: configuration.AllowedOrigins, Logger: logger, Metrics: metrics,
 		Ready: func(ctx context.Context) error {
 			if err := database.Ping(ctx, pool, configuration.Database.HealthTimeout); err != nil {
 				return err
@@ -152,10 +157,22 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second,
 		WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second,
 	}
+	metricsServer := &http.Server{
+		Addr: configuration.MetricsAddress, Handler: metrics.Handler(),
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
+		WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second,
+	}
 	go func() {
 		logger.Info("DayOrder PostgreSQL API started", "addr", configuration.Address)
 		if serveErr := server.ListenAndServe(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 			logger.Error("serve PostgreSQL API", "error", serveErr)
+			os.Exit(1)
+		}
+	}()
+	go func() {
+		logger.Info("DayOrder API metrics started", "addr", configuration.MetricsAddress)
+		if serveErr := metricsServer.ListenAndServe(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			logger.Error("serve API metrics", "error", serveErr)
 			os.Exit(1)
 		}
 	}()
@@ -166,5 +183,8 @@ func main() {
 	defer cancel()
 	if err = server.Shutdown(ctx); err != nil {
 		logger.Error("graceful API shutdown", "error", err)
+	}
+	if err = metricsServer.Shutdown(ctx); err != nil {
+		logger.Error("graceful API metrics shutdown", "error", err)
 	}
 }

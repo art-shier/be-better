@@ -61,4 +61,13 @@ func TestDatabaseRolesHaveMinimumPrivileges(t *testing.T) {
 	if claimed != 0 {
 		t.Fatalf("claimed events from empty outbox = %d, want 0", claimed)
 	}
+
+	var backlog, dead int64
+	var oldestAge float64
+	if err := workerPool.QueryRow(ctx, "SELECT backlog, oldest_age_seconds, dead_total FROM dayorder.outbox_metrics()").Scan(&backlog, &oldestAge, &dead); err != nil {
+		t.Fatalf("worker cannot read aggregate outbox metrics: %v", err)
+	}
+	if backlog != 0 || oldestAge != 0 || dead != 0 {
+		t.Fatalf("empty outbox metrics = backlog %d age %v dead %d", backlog, oldestAge, dead)
+	}
 }

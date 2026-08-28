@@ -104,6 +104,9 @@ func (router *Router) syncMutations(response http.ResponseWriter, request *http.
 		result := syncMutationResult{MutationID: item.MutationID}
 		if err := validateSyncMutationItem(item, previousSequence); err != nil {
 			result.Status = "rejected"
+			if router.metrics != nil {
+				router.metrics.ObserveSyncMutation(result.Status)
+			}
 			result.Error = &apiErrorBody{Code: "VALIDATION_FAILED", Message: "Mutation 数据不符合要求", Retryable: false, RequestID: requestID(request)}
 			results = append(results, result)
 			continue
@@ -136,6 +139,9 @@ func (router *Router) syncMutations(response http.ResponseWriter, request *http.
 		} else {
 			result.Status = "applied"
 			result.Data = data
+		}
+		if router.metrics != nil {
+			router.metrics.ObserveSyncMutation(result.Status)
 		}
 		results = append(results, result)
 	}

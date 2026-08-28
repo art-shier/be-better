@@ -1,0 +1,41 @@
+{
+	admin :2019
+	http_port 8080
+	https_port 8443
+	email {$DAYORDER_ACME_EMAIL}
+	metrics
+}
+
+:8081 {
+	respond /health "ok" 200
+	respond 404
+}
+
+http://{$DAYORDER_DOMAIN} {
+	redir https://{host}{uri} permanent
+}
+
+https://{$DAYORDER_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; connect-src 'self'; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		-Server
+	}
+
+	@api path /api/* /health/*
+	handle @api {
+		reverse_proxy api:8080
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -11,6 +11,8 @@ services:
       DAYORDER_MIGRATOR_DB_PASSWORD: ${DAYORDER_MIGRATOR_DB_PASSWORD:-dayorder-migrator-development-only}
       DAYORDER_API_DB_PASSWORD: ${DAYORDER_API_DB_PASSWORD:-dayorder-api-development-only}
       DAYORDER_WORKER_DB_PASSWORD: ${DAYORDER_WORKER_DB_PASSWORD:-dayorder-worker-development-only}
+      DAYORDER_BACKUP_DB_PASSWORD: ${DAYORDER_BACKUP_DB_PASSWORD:-dayorder-backup-development-only}
+      DAYORDER_MONITOR_DB_PASSWORD: ${DAYORDER_MONITOR_DB_PASSWORD:-dayorder-monitor-development-only}
       TZ: UTC
       PGTZ: UTC
     ports:

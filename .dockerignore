@@ -1,0 +1,15 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+node_modules
+apps/web/node_modules
+apps/web/dist
+apps/api/data
+deploy/secrets
+deploy/metrics/*.prom
+coverage
+*.log
+Dockerfile*
+!Dockerfile

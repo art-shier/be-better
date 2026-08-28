@@ -1,0 +1,165 @@
+groups:
+  - name: dayorder-availability
+    rules:
+      - alert: DayOrderTargetDown
+        expr: up{job=~"dayorder-.+"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DayOrder target {{ $labels.job }} is unavailable"
+          runbook: "docs/runbooks/alerts.md#dayordertargetdown"
+
+      - alert: DayOrderAPIHighErrorRate
+        expr: |
+          sum(rate(dayorder_http_requests_total{service="api",status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(dayorder_http_requests_total{service="api"}[5m])), 0.001)
+          > 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DayOrder API 5xx rate exceeds 5%"
+          runbook: "docs/runbooks/alerts.md#dayorderapihigherrorrate"
+
+      - alert: DayOrderAPIHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(dayorder_http_request_duration_seconds_bucket{service="api"}[10m]))
+          ) > 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DayOrder API p95 latency exceeds one second"
+          runbook: "docs/runbooks/alerts.md#dayorderapihighlatency"
+
+  - name: dayorder-database
+    rules:
+      - alert: DayOrderDatabasePoolSaturated
+        expr: |
+          dayorder_pgxpool_acquired_connections
+          /
+          clamp_min(dayorder_pgxpool_max_connections, 1)
+          > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DayOrder {{ $labels.service }} PostgreSQL pool is saturated"
+          runbook: "docs/runbooks/alerts.md#dayorderdatabasepoolsaturated"
+
+      - alert: DayOrderDatabasePoolWaiting
+        expr: rate(dayorder_pgxpool_wait_total[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DayOrder is waiting for PostgreSQL connections"
+          runbook: "docs/runbooks/alerts.md#dayorderdatabasepoolwaiting"
+
+  - name: dayorder-worker
+    rules:
+      - alert: DayOrderOutboxBacklog
+        expr: dayorder_outbox_backlog > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DayOrder Outbox backlog exceeds 100 events"
+          runbook: "docs/runbooks/alerts.md#dayorderoutboxbacklog"
+
+      - alert: DayOrderOutboxStalled
+        expr: dayorder_outbox_oldest_age_seconds > 300
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Oldest pending DayOrder Outbox event exceeds five minutes"
+          runbook: "docs/runbooks/alerts.md#dayorderoutboxstalled"
+
+      - alert: DayOrderOutboxTerminalFailure
+        expr: dayorder_outbox_dead_events > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DayOrder has terminally failed Outbox events"
+          runbook: "docs/runbooks/alerts.md#dayorderoutboxterminalfailure"
+
+      - alert: DayOrderOutboxMetricsUnavailable
+        expr: dayorder_outbox_scrape_success == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Worker cannot read Outbox aggregate metrics"
+          runbook: "docs/runbooks/alerts.md#dayorderoutboxmetricsunavailable"
+
+  - name: dayorder-sync-auth
+    rules:
+      - alert: DayOrderSyncConflictSpike
+        expr: rate(dayorder_sync_mutations_total{status="conflict"}[10m]) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DayOrder synchronization conflicts are elevated"
+          runbook: "docs/runbooks/alerts.md#dayordersyncconflictspike"
+
+      - alert: DayOrderSyncCursorResetSpike
+        expr: increase(dayorder_sync_cursor_resets_total[30m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Many clients are rebuilding their local cache"
+          runbook: "docs/runbooks/alerts.md#dayordersynccursorresetspike"
+
+      - alert: DayOrderLoginThrottleSpike
+        expr: increase(dayorder_login_rate_limited_total[10m]) > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Login throttling is elevated"
+          runbook: "docs/runbooks/alerts.md#dayorderloginthrottlespike"
+
+  - name: dayorder-backup
+    rules:
+      - alert: DayOrderBackupMetricMissing
+        expr: absent(dayorder_backup_last_success_timestamp_seconds)
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DayOrder backup verification metric is missing"
+          runbook: "docs/runbooks/alerts.md#dayorderbackupmetricmissing"
+
+      - alert: DayOrderBackupStale
+        expr: time() - dayorder_backup_last_success_timestamp_seconds > 90000
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No verified DayOrder backup in the last 25 hours"
+          runbook: "docs/runbooks/alerts.md#dayorderbackupstale"
+
+      - alert: DayOrderRestoreDrillOverdue
+        expr: time() - dayorder_restore_drill_last_success_timestamp_seconds > 2678400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "DayOrder restore drill is older than 31 days"
+          runbook: "docs/runbooks/alerts.md#dayorderrestoredrilloverdue"
+
+      - alert: DayOrderRestoreRTOExceeded
+        expr: dayorder_restore_drill_duration_seconds > 3600
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Latest DayOrder restore drill exceeded the 60-minute RTO"
+          runbook: "docs/runbooks/alerts.md#dayorderrestorertoexceeded"

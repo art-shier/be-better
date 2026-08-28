@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,6 +63,32 @@ type stubSessionApplication struct {
 	changeErr           error
 	lastLogin           service.LoginInput
 	logoutAuthenticated model.AuthenticatedSession
+}
+
+type recordedHTTPRequest struct {
+	route  string
+	method string
+	status int
+}
+
+type recordingRouterMetrics struct {
+	requests      []recordedHTTPRequest
+	loginLimited  int
+	syncResets    int
+	syncMutations map[string]int
+}
+
+func (metrics *recordingRouterMetrics) ObserveHTTPRequest(route, method string, status int, _ time.Duration) {
+	metrics.requests = append(metrics.requests, recordedHTTPRequest{route: route, method: method, status: status})
+}
+
+func (metrics *recordingRouterMetrics) ObserveLoginRateLimited() { metrics.loginLimited++ }
+func (metrics *recordingRouterMetrics) ObserveSyncCursorReset()  { metrics.syncResets++ }
+func (metrics *recordingRouterMetrics) ObserveSyncMutation(status string) {
+	if metrics.syncMutations == nil {
+		metrics.syncMutations = make(map[string]int)
+	}
+	metrics.syncMutations[status]++
 }
 
 func (application *stubSessionApplication) Login(_ context.Context, input service.LoginInput) (service.SessionResult, error) {
@@ -166,6 +193,44 @@ func TestPostgresRouterRejectsOriginBeforeApplicationAndReturnsErrorEnvelope(t *
 	}
 	if envelope.Error.Code != "ORIGIN_NOT_ALLOWED" || envelope.Error.RequestID == "" {
 		t.Fatalf("error envelope = %#v", envelope)
+	}
+}
+
+func TestRequestLogAndMetricsUseRouteStatusWithoutSensitiveInput(t *testing.T) {
+	var logs bytes.Buffer
+	metrics := &recordingRouterMetrics{}
+	handler, err := NewRouter(RouterOptions{
+		Accounts: &stubAccountApplication{registerResult: model.Account{ID: uuid.New(), Email: "safe@example.com"}},
+		Sessions: &stubSessionApplication{}, Metrics: metrics,
+		Logger: slog.New(slog.NewJSONHandler(&logs, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretBody := `{"email":"private@example.com","displayName":"Private note body","password":"secret-password"}`
+	request := httptest.NewRequest(http.MethodPost, "https://dayorder.example/api/v1/auth/register?token=secret-query-token", bytes.NewBufferString(secretBody))
+	request.Header.Set("Cookie", "dayorder_session=secret-session-token")
+	request.Header.Set("Authorization", "Bearer secret-authorization-token")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+	}
+	logged := logs.String()
+	for _, secret := range []string{"private@example.com", "Private note body", "secret-password", "secret-query-token", "secret-session-token", "secret-authorization-token"} {
+		if strings.Contains(logged, secret) {
+			t.Fatalf("request log leaked %q: %s", secret, logged)
+		}
+	}
+	for _, expected := range []string{`"route":"POST /api/v1/auth/register"`, `"status":201`, `"requestId"`} {
+		if !strings.Contains(logged, expected) {
+			t.Fatalf("request log missing %s: %s", expected, logged)
+		}
+	}
+	if len(metrics.requests) != 1 || metrics.requests[0] != (recordedHTTPRequest{route: "POST /api/v1/auth/register", method: http.MethodPost, status: http.StatusCreated}) {
+		t.Fatalf("request metrics = %#v", metrics.requests)
 	}
 }
 

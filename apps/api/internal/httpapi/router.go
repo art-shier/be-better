@@ -129,7 +129,15 @@ type RouterOptions struct {
 	Undos          UndoApplication
 	AllowedOrigins []string
 	Logger         *slog.Logger
+	Metrics        RouterMetrics
 	Ready          func(context.Context) error
+}
+
+type RouterMetrics interface {
+	ObserveHTTPRequest(string, string, int, time.Duration)
+	ObserveLoginRateLimited()
+	ObserveSyncCursorReset()
+	ObserveSyncMutation(string)
 }
 
 type Router struct {
@@ -147,6 +155,7 @@ type Router struct {
 	undos          UndoApplication
 	allowedOrigins map[string]struct{}
 	logger         *slog.Logger
+	metrics        RouterMetrics
 	ready          func(context.Context) error
 }
 
@@ -161,7 +170,7 @@ func NewRouter(options RouterOptions) (http.Handler, error) {
 	router := &Router{
 		accounts: options.Accounts, sessions: options.Sessions,
 		goals: options.Goals, tasks: options.Tasks, calendar: options.Calendar, content: options.Content, settings: options.Settings, devices: options.Devices, sync: options.Sync, agents: options.Agents, audits: options.Audits, undos: options.Undos,
-		allowedOrigins: make(map[string]struct{}), logger: logger, ready: options.Ready,
+		allowedOrigins: make(map[string]struct{}), logger: logger, metrics: options.Metrics, ready: options.Ready,
 	}
 	for _, origin := range options.AllowedOrigins {
 		if origin = strings.TrimSuffix(strings.TrimSpace(origin), "/"); origin != "" {

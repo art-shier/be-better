@@ -33,6 +33,9 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 	if cfg.Address != "127.0.0.1:8080" {
 		t.Fatalf("address = %q", cfg.Address)
 	}
+	if cfg.MetricsAddress != "127.0.0.1:9090" {
+		t.Fatalf("metrics address = %q", cfg.MetricsAddress)
+	}
 	if cfg.Database.MaxConns != 20 || cfg.Database.MinConns != 2 {
 		t.Fatalf("pool defaults = %d/%d", cfg.Database.MinConns, cfg.Database.MaxConns)
 	}
@@ -52,6 +55,7 @@ func TestLoadRejectsInvalidPoolSettings(t *testing.T) {
 		{"DATABASE_URL": "postgres://localhost/dayorder", "DAYORDER_DB_MAX_CONNS": "0"},
 		{"DATABASE_URL": "postgres://localhost/dayorder", "DAYORDER_DB_MAX_CONNS": "5", "DAYORDER_DB_MIN_CONNS": "6"},
 		{"DATABASE_URL": "postgres://localhost/dayorder", "DAYORDER_DB_STATEMENT_TIMEOUT": "not-a-duration"},
+		{"DATABASE_URL": "postgres://localhost/dayorder", "DAYORDER_METRICS_ADDR": "not-an-address"},
 	}
 	for _, values := range tests {
 		if _, err := LoadFrom(mapLookup(values)); err == nil {

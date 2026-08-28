@@ -2,22 +2,27 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"dayorder.local/api/internal/agentprovider"
+	"dayorder.local/api/internal/auth"
 	"dayorder.local/api/internal/config"
 	"dayorder.local/api/internal/database"
 	daymail "dayorder.local/api/internal/mail"
+	"dayorder.local/api/internal/observability"
 	postgresstore "dayorder.local/api/internal/postgres"
 	"dayorder.local/api/internal/service"
 	"dayorder.local/api/internal/worker"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := observability.NewLogger(os.Stdout, "worker", slog.LevelInfo)
 	configuration, err := config.LoadWorker()
 	if err != nil {
 		logger.Error("invalid worker configuration", "error", err)
@@ -31,6 +36,28 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+	metrics := observability.NewMetrics("worker", pool, pool)
+	restorePasswordObserver := auth.SetPasswordObserver(metrics.ObservePasswordOperation)
+	defer restorePasswordObserver()
+	metricsServer := &http.Server{
+		Addr: configuration.MetricsAddress, Handler: metrics.Handler(),
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
+		WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second,
+	}
+	go func() {
+		logger.Info("DayOrder worker metrics started", "addr", configuration.MetricsAddress)
+		if serveErr := metricsServer.ListenAndServe(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			logger.Error("serve worker metrics", "error", serveErr)
+			stop()
+		}
+	}()
+	defer func() {
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if shutdownErr := metricsServer.Shutdown(shutdownContext); shutdownErr != nil {
+			logger.Error("graceful worker metrics shutdown", "error", shutdownErr)
+		}
+	}()
 	repository, err := postgresstore.NewOutboxRepository(pool)
 	if err != nil {
 		logger.Error("create outbox repository", "error", err)

@@ -28,13 +28,14 @@ type WorkerAgentConfig struct {
 }
 
 type WorkerConfig struct {
-	Environment  Environment
-	PublicURL    string
-	AuthHMACKey  []byte
-	Database     DatabaseConfig
-	PollInterval time.Duration
-	Mail         WorkerMailConfig
-	Agent        WorkerAgentConfig
+	Environment    Environment
+	PublicURL      string
+	MetricsAddress string
+	AuthHMACKey    []byte
+	Database       DatabaseConfig
+	PollInterval   time.Duration
+	Mail           WorkerMailConfig
+	Agent          WorkerAgentConfig
 }
 
 func LoadWorker() (WorkerConfig, error) { return LoadWorkerFrom(os.LookupEnv) }
@@ -89,6 +90,10 @@ func LoadWorkerFrom(lookup LookupFunc) (WorkerConfig, error) {
 	pollInterval, err := parseDuration(lookup, "DAYORDER_WORKER_POLL_RATE", time.Second)
 	if err != nil || pollInterval < 100*time.Millisecond || pollInterval > time.Minute {
 		return WorkerConfig{}, errors.New("DAYORDER_WORKER_POLL_RATE must be between 100ms and 1m")
+	}
+	metricsAddress := strings.TrimSpace(valueOr(lookup, "DAYORDER_WORKER_METRICS_ADDR", "127.0.0.1:9091"))
+	if err = validateListenAddress(metricsAddress); err != nil {
+		return WorkerConfig{}, fmt.Errorf("DAYORDER_WORKER_METRICS_ADDR: %w", err)
 	}
 	mailConfig := WorkerMailConfig{
 		Sink:    strings.ToLower(valueOr(lookup, "DAYORDER_MAIL_SINK", "log")),
@@ -150,7 +155,7 @@ func LoadWorkerFrom(lookup LookupFunc) (WorkerConfig, error) {
 		}
 	}
 	return WorkerConfig{
-		Environment: environment, PublicURL: strings.TrimSuffix(parsedPublicURL.String(), "/"),
+		Environment: environment, PublicURL: strings.TrimSuffix(parsedPublicURL.String(), "/"), MetricsAddress: metricsAddress,
 		AuthHMACKey: []byte(hmacKey), Database: database, PollInterval: pollInterval, Mail: mailConfig, Agent: agentConfig,
 	}, nil
 }
