@@ -25,6 +25,13 @@ type CommandRequest struct {
 	RequestBody []byte
 }
 
+type MutationContext struct {
+	UserID     uuid.UUID
+	DeviceID   uuid.UUID
+	MutationID uuid.UUID
+	RequestID  uuid.UUID
+}
+
 type CommandResult struct {
 	Status  int
 	Body    []byte

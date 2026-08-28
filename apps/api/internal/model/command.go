@@ -37,6 +37,11 @@ type SyncChange struct {
 	ChangedAt     time.Time `json:"changedAt"`
 }
 
+type ResourcePosition struct {
+	UpdatedAt time.Time
+	ID        uuid.UUID
+}
+
 type SyncChangeDraft struct {
 	EntityType    string
 	EntityID      uuid.UUID

@@ -135,6 +135,53 @@ func (q *Queries) CreateGoal(ctx context.Context, arg CreateGoalParams) (*Dayord
 	return &i, err
 }
 
+const createGoalMilestone = `-- name: CreateGoalMilestone :one
+INSERT INTO dayorder.goal_milestones (
+    id, user_id, goal_id, title, due_at, completed_at, sort_order
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7
+)
+RETURNING id, user_id, goal_id, title, due_at, completed_at, sort_order, version, created_at, updated_at, deleted_at
+`
+
+type CreateGoalMilestoneParams struct {
+	ID          pgtype.UUID        `db:"id" json:"id"`
+	UserID      pgtype.UUID        `db:"user_id" json:"user_id"`
+	GoalID      pgtype.UUID        `db:"goal_id" json:"goal_id"`
+	Title       string             `db:"title" json:"title"`
+	DueAt       pgtype.Timestamptz `db:"due_at" json:"due_at"`
+	CompletedAt pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
+	SortOrder   int32              `db:"sort_order" json:"sort_order"`
+}
+
+func (q *Queries) CreateGoalMilestone(ctx context.Context, arg CreateGoalMilestoneParams) (*DayorderGoalMilestone, error) {
+	row := q.db.QueryRow(ctx, createGoalMilestone,
+		arg.ID,
+		arg.UserID,
+		arg.GoalID,
+		arg.Title,
+		arg.DueAt,
+		arg.CompletedAt,
+		arg.SortOrder,
+	)
+	var i DayorderGoalMilestone
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.GoalID,
+		&i.Title,
+		&i.DueAt,
+		&i.CompletedAt,
+		&i.SortOrder,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
 const createNote = `-- name: CreateNote :one
 INSERT INTO dayorder.notes (
     id, user_id, title, body_markdown, category
@@ -290,6 +337,52 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (*Dayord
 	return &i, err
 }
 
+const detachGoalTasks = `-- name: DetachGoalTasks :many
+UPDATE dayorder.tasks
+SET goal_id = NULL, version = version + 1, updated_at = now()
+WHERE user_id = $1
+  AND goal_id = $2
+  AND deleted_at IS NULL
+RETURNING id, user_id, title, status, priority, estimate_minutes, due_at, scheduled_start, scheduled_end, goal_id, source_record_id, completed_at, version, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) DetachGoalTasks(ctx context.Context, userID pgtype.UUID, goalID pgtype.UUID) ([]*DayorderTask, error) {
+	rows, err := q.db.Query(ctx, detachGoalTasks, userID, goalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderTask{}
+	for rows.Next() {
+		var i DayorderTask
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Title,
+			&i.Status,
+			&i.Priority,
+			&i.EstimateMinutes,
+			&i.DueAt,
+			&i.ScheduledStart,
+			&i.ScheduledEnd,
+			&i.GoalID,
+			&i.SourceRecordID,
+			&i.CompletedAt,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getGoal = `-- name: GetGoal :one
 SELECT id, user_id, title, why, area, metric_type, target_value, current_value, unit, start_date, due_date, status, health, version, created_at, updated_at, deleted_at
 FROM dayorder.goals
@@ -315,6 +408,33 @@ func (q *Queries) GetGoal(ctx context.Context, userID pgtype.UUID, iD pgtype.UUI
 		&i.DueDate,
 		&i.Status,
 		&i.Health,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const getGoalMilestone = `-- name: GetGoalMilestone :one
+SELECT id, user_id, goal_id, title, due_at, completed_at, sort_order, version, created_at, updated_at, deleted_at
+FROM dayorder.goal_milestones
+WHERE user_id = $1
+  AND id = $2
+  AND deleted_at IS NULL
+`
+
+func (q *Queries) GetGoalMilestone(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderGoalMilestone, error) {
+	row := q.db.QueryRow(ctx, getGoalMilestone, userID, iD)
+	var i DayorderGoalMilestone
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.GoalID,
+		&i.Title,
+		&i.DueAt,
+		&i.CompletedAt,
+		&i.SortOrder,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -353,6 +473,47 @@ func (q *Queries) GetTask(ctx context.Context, userID pgtype.UUID, iD pgtype.UUI
 		&i.DeletedAt,
 	)
 	return &i, err
+}
+
+const listGoalMilestones = `-- name: ListGoalMilestones :many
+SELECT id, user_id, goal_id, title, due_at, completed_at, sort_order, version, created_at, updated_at, deleted_at
+FROM dayorder.goal_milestones
+WHERE user_id = $1
+  AND goal_id = $2
+  AND deleted_at IS NULL
+ORDER BY sort_order, created_at, id
+`
+
+func (q *Queries) ListGoalMilestones(ctx context.Context, userID pgtype.UUID, goalID pgtype.UUID) ([]*DayorderGoalMilestone, error) {
+	rows, err := q.db.Query(ctx, listGoalMilestones, userID, goalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderGoalMilestone{}
+	for rows.Next() {
+		var i DayorderGoalMilestone
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.GoalID,
+			&i.Title,
+			&i.DueAt,
+			&i.CompletedAt,
+			&i.SortOrder,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listGoals = `-- name: ListGoals :many
@@ -421,12 +582,34 @@ FROM dayorder.tasks
 WHERE user_id = $1
   AND deleted_at IS NULL
   AND ($2::varchar IS NULL OR status = $2)
+  AND (
+      $3::timestamptz IS NULL
+      OR updated_at < $3::timestamptz
+      OR (
+          updated_at = $3::timestamptz
+          AND id < $4::uuid
+      )
+  )
 ORDER BY updated_at DESC, id DESC
-LIMIT $3
+LIMIT $5
 `
 
-func (q *Queries) ListTasks(ctx context.Context, userID pgtype.UUID, status pgtype.Text, pageSize int32) ([]*DayorderTask, error) {
-	rows, err := q.db.Query(ctx, listTasks, userID, status, pageSize)
+type ListTasksParams struct {
+	UserID         pgtype.UUID        `db:"user_id" json:"user_id"`
+	Status         pgtype.Text        `db:"status" json:"status"`
+	AfterUpdatedAt pgtype.Timestamptz `db:"after_updated_at" json:"after_updated_at"`
+	AfterID        pgtype.UUID        `db:"after_id" json:"after_id"`
+	PageSize       int32              `db:"page_size" json:"page_size"`
+}
+
+func (q *Queries) ListTasks(ctx context.Context, arg ListTasksParams) ([]*DayorderTask, error) {
+	rows, err := q.db.Query(ctx, listTasks,
+		arg.UserID,
+		arg.Status,
+		arg.AfterUpdatedAt,
+		arg.AfterID,
+		arg.PageSize,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -504,6 +687,111 @@ func (q *Queries) SearchNotes(ctx context.Context, userID pgtype.UUID, query str
 	return items, nil
 }
 
+const softDeleteGoal = `-- name: SoftDeleteGoal :one
+UPDATE dayorder.goals
+SET deleted_at = now(), version = version + 1, updated_at = now()
+WHERE user_id = $1
+  AND id = $2
+  AND version = $3
+  AND deleted_at IS NULL
+RETURNING id, user_id, title, why, area, metric_type, target_value, current_value, unit, start_date, due_date, status, health, version, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) SoftDeleteGoal(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderGoal, error) {
+	row := q.db.QueryRow(ctx, softDeleteGoal, userID, iD, expectedVersion)
+	var i DayorderGoal
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Title,
+		&i.Why,
+		&i.Area,
+		&i.MetricType,
+		&i.TargetValue,
+		&i.CurrentValue,
+		&i.Unit,
+		&i.StartDate,
+		&i.DueDate,
+		&i.Status,
+		&i.Health,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const softDeleteGoalMilestone = `-- name: SoftDeleteGoalMilestone :one
+UPDATE dayorder.goal_milestones
+SET deleted_at = now(), version = version + 1, updated_at = now()
+WHERE user_id = $1
+  AND id = $2
+  AND version = $3
+  AND deleted_at IS NULL
+RETURNING id, user_id, goal_id, title, due_at, completed_at, sort_order, version, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) SoftDeleteGoalMilestone(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderGoalMilestone, error) {
+	row := q.db.QueryRow(ctx, softDeleteGoalMilestone, userID, iD, expectedVersion)
+	var i DayorderGoalMilestone
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.GoalID,
+		&i.Title,
+		&i.DueAt,
+		&i.CompletedAt,
+		&i.SortOrder,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const softDeleteGoalMilestones = `-- name: SoftDeleteGoalMilestones :many
+UPDATE dayorder.goal_milestones
+SET deleted_at = now(), version = version + 1, updated_at = now()
+WHERE user_id = $1
+  AND goal_id = $2
+  AND deleted_at IS NULL
+RETURNING id, user_id, goal_id, title, due_at, completed_at, sort_order, version, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) SoftDeleteGoalMilestones(ctx context.Context, userID pgtype.UUID, goalID pgtype.UUID) ([]*DayorderGoalMilestone, error) {
+	rows, err := q.db.Query(ctx, softDeleteGoalMilestones, userID, goalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*DayorderGoalMilestone{}
+	for rows.Next() {
+		var i DayorderGoalMilestone
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.GoalID,
+			&i.Title,
+			&i.DueAt,
+			&i.CompletedAt,
+			&i.SortOrder,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const softDeleteTask = `-- name: SoftDeleteTask :one
 UPDATE dayorder.tasks
 SET deleted_at = now(),
@@ -532,6 +820,137 @@ func (q *Queries) SoftDeleteTask(ctx context.Context, userID pgtype.UUID, iD pgt
 		&i.GoalID,
 		&i.SourceRecordID,
 		&i.CompletedAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const updateGoal = `-- name: UpdateGoal :one
+UPDATE dayorder.goals
+SET title = $1,
+    why = $2,
+    area = $3,
+    metric_type = $4,
+    target_value = $5,
+    current_value = $6,
+    unit = $7,
+    start_date = $8,
+    due_date = $9,
+    status = $10,
+    health = $11,
+    version = version + 1,
+    updated_at = now()
+WHERE user_id = $12
+  AND id = $13
+  AND version = $14
+  AND deleted_at IS NULL
+RETURNING id, user_id, title, why, area, metric_type, target_value, current_value, unit, start_date, due_date, status, health, version, created_at, updated_at, deleted_at
+`
+
+type UpdateGoalParams struct {
+	Title           string         `db:"title" json:"title"`
+	Why             string         `db:"why" json:"why"`
+	Area            string         `db:"area" json:"area"`
+	MetricType      string         `db:"metric_type" json:"metric_type"`
+	TargetValue     pgtype.Numeric `db:"target_value" json:"target_value"`
+	CurrentValue    pgtype.Numeric `db:"current_value" json:"current_value"`
+	Unit            string         `db:"unit" json:"unit"`
+	StartDate       pgtype.Date    `db:"start_date" json:"start_date"`
+	DueDate         pgtype.Date    `db:"due_date" json:"due_date"`
+	Status          string         `db:"status" json:"status"`
+	Health          string         `db:"health" json:"health"`
+	UserID          pgtype.UUID    `db:"user_id" json:"user_id"`
+	ID              pgtype.UUID    `db:"id" json:"id"`
+	ExpectedVersion int64          `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) UpdateGoal(ctx context.Context, arg UpdateGoalParams) (*DayorderGoal, error) {
+	row := q.db.QueryRow(ctx, updateGoal,
+		arg.Title,
+		arg.Why,
+		arg.Area,
+		arg.MetricType,
+		arg.TargetValue,
+		arg.CurrentValue,
+		arg.Unit,
+		arg.StartDate,
+		arg.DueDate,
+		arg.Status,
+		arg.Health,
+		arg.UserID,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i DayorderGoal
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Title,
+		&i.Why,
+		&i.Area,
+		&i.MetricType,
+		&i.TargetValue,
+		&i.CurrentValue,
+		&i.Unit,
+		&i.StartDate,
+		&i.DueDate,
+		&i.Status,
+		&i.Health,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const updateGoalMilestone = `-- name: UpdateGoalMilestone :one
+UPDATE dayorder.goal_milestones
+SET title = $1,
+    due_at = $2,
+    completed_at = $3,
+    sort_order = $4,
+    version = version + 1,
+    updated_at = now()
+WHERE user_id = $5
+  AND id = $6
+  AND version = $7
+  AND deleted_at IS NULL
+RETURNING id, user_id, goal_id, title, due_at, completed_at, sort_order, version, created_at, updated_at, deleted_at
+`
+
+type UpdateGoalMilestoneParams struct {
+	Title           string             `db:"title" json:"title"`
+	DueAt           pgtype.Timestamptz `db:"due_at" json:"due_at"`
+	CompletedAt     pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
+	SortOrder       int32              `db:"sort_order" json:"sort_order"`
+	UserID          pgtype.UUID        `db:"user_id" json:"user_id"`
+	ID              pgtype.UUID        `db:"id" json:"id"`
+	ExpectedVersion int64              `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) UpdateGoalMilestone(ctx context.Context, arg UpdateGoalMilestoneParams) (*DayorderGoalMilestone, error) {
+	row := q.db.QueryRow(ctx, updateGoalMilestone,
+		arg.Title,
+		arg.DueAt,
+		arg.CompletedAt,
+		arg.SortOrder,
+		arg.UserID,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i DayorderGoalMilestone
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.GoalID,
+		&i.Title,
+		&i.DueAt,
+		&i.CompletedAt,
+		&i.SortOrder,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -584,6 +1003,81 @@ func (q *Queries) UpdateGoalProgress(ctx context.Context, arg UpdateGoalProgress
 		&i.DueDate,
 		&i.Status,
 		&i.Health,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const updateTask = `-- name: UpdateTask :one
+UPDATE dayorder.tasks
+SET title = $1,
+    status = $2,
+    priority = $3,
+    estimate_minutes = $4,
+    due_at = $5,
+    scheduled_start = $6,
+    scheduled_end = $7,
+    goal_id = $8,
+    source_record_id = $9,
+    completed_at = $10,
+    version = version + 1,
+    updated_at = now()
+WHERE user_id = $11
+  AND id = $12
+  AND version = $13
+  AND deleted_at IS NULL
+RETURNING id, user_id, title, status, priority, estimate_minutes, due_at, scheduled_start, scheduled_end, goal_id, source_record_id, completed_at, version, created_at, updated_at, deleted_at
+`
+
+type UpdateTaskParams struct {
+	Title           string             `db:"title" json:"title"`
+	Status          string             `db:"status" json:"status"`
+	Priority        string             `db:"priority" json:"priority"`
+	EstimateMinutes int32              `db:"estimate_minutes" json:"estimate_minutes"`
+	DueAt           pgtype.Timestamptz `db:"due_at" json:"due_at"`
+	ScheduledStart  pgtype.Timestamptz `db:"scheduled_start" json:"scheduled_start"`
+	ScheduledEnd    pgtype.Timestamptz `db:"scheduled_end" json:"scheduled_end"`
+	GoalID          pgtype.UUID        `db:"goal_id" json:"goal_id"`
+	SourceRecordID  pgtype.UUID        `db:"source_record_id" json:"source_record_id"`
+	CompletedAt     pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
+	UserID          pgtype.UUID        `db:"user_id" json:"user_id"`
+	ID              pgtype.UUID        `db:"id" json:"id"`
+	ExpectedVersion int64              `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) UpdateTask(ctx context.Context, arg UpdateTaskParams) (*DayorderTask, error) {
+	row := q.db.QueryRow(ctx, updateTask,
+		arg.Title,
+		arg.Status,
+		arg.Priority,
+		arg.EstimateMinutes,
+		arg.DueAt,
+		arg.ScheduledStart,
+		arg.ScheduledEnd,
+		arg.GoalID,
+		arg.SourceRecordID,
+		arg.CompletedAt,
+		arg.UserID,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i DayorderTask
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Title,
+		&i.Status,
+		&i.Priority,
+		&i.EstimateMinutes,
+		&i.DueAt,
+		&i.ScheduledStart,
+		&i.ScheduledEnd,
+		&i.GoalID,
+		&i.SourceRecordID,
+		&i.CompletedAt,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
