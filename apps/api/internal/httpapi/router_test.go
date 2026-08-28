@@ -52,6 +52,10 @@ func (application *stubAccountApplication) UpdateEmail(context.Context, model.Ac
 type stubSessionApplication struct {
 	loginResult         service.SessionResult
 	loginErr            error
+	verifiedResult      service.SessionResult
+	verifiedErr         error
+	verifiedAccount     model.Account
+	verifiedUserAgent   string
 	authenticated       model.AuthenticatedSession
 	authenticateErr     error
 	changeResult        service.SessionResult
@@ -63,6 +67,11 @@ type stubSessionApplication struct {
 func (application *stubSessionApplication) Login(_ context.Context, input service.LoginInput) (service.SessionResult, error) {
 	application.lastLogin = input
 	return application.loginResult, application.loginErr
+}
+func (application *stubSessionApplication) CreateVerifiedSession(_ context.Context, account model.Account, userAgent string) (service.SessionResult, error) {
+	application.verifiedAccount = account
+	application.verifiedUserAgent = userAgent
+	return application.verifiedResult, application.verifiedErr
 }
 func (application *stubSessionApplication) Authenticate(context.Context, string) (model.AuthenticatedSession, error) {
 	return application.authenticated, application.authenticateErr
@@ -102,6 +111,42 @@ func TestPostgresRouterLoginSetsHardenedHTTPSCookieAndRequestID(t *testing.T) {
 	}
 	if sessions.lastLogin.IP != "203.0.113.5" {
 		t.Fatalf("login client IP = %q", sessions.lastLogin.IP)
+	}
+}
+
+func TestPostgresRouterEmailVerificationCreatesSession(t *testing.T) {
+	account := model.Account{ID: uuid.New(), Email: "user@example.com", Status: model.AccountActive}
+	expires := time.Now().UTC().Add(24 * time.Hour)
+	sessions := &stubSessionApplication{verifiedResult: service.SessionResult{
+		Account: account, Session: model.Session{ExpiresAt: expires}, Token: "verified-session-token",
+	}}
+	handler := newTestRouter(t, &stubAccountApplication{verifyResult: account}, sessions, nil)
+	request := httptest.NewRequest(http.MethodPost, "https://dayorder.example/api/v1/auth/verify-email", bytes.NewBufferString(`{"token":"verification-token"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("User-Agent", "DayOrder Test Browser")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+	}
+	if sessions.verifiedAccount.ID != account.ID || sessions.verifiedUserAgent != "DayOrder Test Browser" {
+		t.Fatalf("verified session input = account %s user-agent %q", sessions.verifiedAccount.ID, sessions.verifiedUserAgent)
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Value != "verified-session-token" || !cookies[0].Secure || !cookies[0].HttpOnly {
+		t.Fatalf("session cookies = %#v", cookies)
+	}
+	var body struct {
+		User      model.Account `json:"user"`
+		ExpiresAt time.Time     `json:"expiresAt"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.User.ID != account.ID || !body.ExpiresAt.Equal(expires) {
+		t.Fatalf("verification response = %#v", body)
 	}
 }
 

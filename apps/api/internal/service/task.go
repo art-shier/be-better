@@ -39,6 +39,7 @@ type TaskPage struct {
 }
 
 type TaskInput struct {
+	ID              *uuid.UUID `json:"id,omitempty"`
 	Title           string     `json:"title"`
 	Status          string     `json:"status"`
 	Priority        string     `json:"priority"`
@@ -58,13 +59,17 @@ func NewTaskService(store TaskStore, transactor UserTransactor, commands *Comman
 }
 
 func (service *TaskService) Create(ctx context.Context, mutation MutationContext, input TaskInput) (model.Task, error) {
-	task := model.Task{ID: service.newUUID()}
+	taskID := service.newUUID()
+	if input.ID != nil {
+		taskID = *input.ID
+	}
+	task := model.Task{ID: taskID}
 	service.applyTaskInput(&task, input)
 	if err := validateTask(task); err != nil {
 		return model.Task{}, err
 	}
 	payload, _ := json.Marshal(input)
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "task.create", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "task.create", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		created, createErr := service.store.CreateTask(ctx, tx, mutation.UserID, task)
 		if createErr != nil {
 			return CommandResult{}, createErr
@@ -145,7 +150,7 @@ func (service *TaskService) Update(ctx context.Context, mutation MutationContext
 		Expected int64     `json:"expectedVersion"`
 		Input    TaskInput `json:"input"`
 	}{taskID, expectedVersion, input})
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "task.update", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "task.update", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		before, readErr := service.store.GetTask(ctx, tx, mutation.UserID, taskID)
 		if readErr != nil {
 			return CommandResult{}, readErr
@@ -170,7 +175,7 @@ func (service *TaskService) Delete(ctx context.Context, mutation MutationContext
 		return fmt.Errorf("%w: task ID and expected version are required", ErrValidation)
 	}
 	payload, _ := json.Marshal(map[string]any{"id": taskID, "expectedVersion": expectedVersion})
-	_, err := service.commands.Execute(ctx, resourceCommand(mutation, "task.delete", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	_, err := executeResourceCommand(ctx, service.commands, mutation, "task.delete", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		before, readErr := service.store.GetTask(ctx, tx, mutation.UserID, taskID)
 		if readErr != nil {
 			return CommandResult{}, readErr

@@ -17,7 +17,8 @@ export function ReviewDialog({ open, onClose }: { open: boolean; onClose(): void
   const completed = useMemo(() => data.tasks.filter((task) => task.status === "done" && task.completedAt && dateKey(task.completedAt) === dateKey(new Date())), [data.tasks]);
 
   const save = () => {
-    dispatch({ type: "save-review", review: { id: existing?.id ?? createId("review"), date: dateKey(new Date()), wins, blockers, tomorrowFocus, mood, energy: data.settings.energy, aiSummary: `事实：今天完成 ${completed.length} 项任务。建议：明天先推进“${tomorrowFocus || "最重要的一件事"}”。` } });
+    const now = new Date().toISOString();
+    dispatch({ type: "save-review", review: { id: existing?.id ?? createId("review"), date: dateKey(new Date()), wins, blockers, tomorrowFocus, mood, energy: data.settings.energy, aiSummary: `事实：今天完成 ${completed.length} 项任务。建议：明天先推进“${tomorrowFocus || "最重要的一件事"}”。`, version: existing?.version ?? 0, createdAt: existing?.createdAt ?? now, updatedAt: now } });
     onClose();
     toast("今日复盘已保存");
   };

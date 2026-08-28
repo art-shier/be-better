@@ -258,6 +258,11 @@ WHERE user_id = sqlc.arg(user_id)
   AND deleted_at IS NULL
   AND (sqlc.narg(window_start)::timestamptz IS NULL OR end_at >= sqlc.narg(window_start))
   AND (sqlc.narg(window_end)::timestamptz IS NULL OR start_at <= sqlc.narg(window_end))
+  AND (
+      sqlc.narg(after_start_at)::timestamptz IS NULL
+      OR start_at > sqlc.narg(after_start_at)::timestamptz
+      OR (start_at = sqlc.narg(after_start_at)::timestamptz AND id > sqlc.narg(after_id)::uuid)
+  )
 ORDER BY start_at, id
 LIMIT sqlc.arg(page_size);
 
@@ -308,6 +313,13 @@ RETURNING *;
 UPDATE dayorder.calendar_event_reminders
 SET deleted_at = now(), status = 'cancelled', version = version + 1, updated_at = now()
 WHERE user_id = sqlc.arg(user_id) AND event_id = sqlc.arg(event_id) AND deleted_at IS NULL
+RETURNING *;
+
+-- name: SoftDeleteCalendarReminder :one
+UPDATE dayorder.calendar_event_reminders
+SET deleted_at = now(), status = 'cancelled', version = version + 1, updated_at = now()
+WHERE user_id = sqlc.arg(user_id) AND event_id = sqlc.arg(event_id)
+  AND id = sqlc.arg(reminder_id) AND deleted_at IS NULL
 RETURNING *;
 
 -- name: GetReminderDelivery :one
@@ -435,6 +447,11 @@ WHERE user_id = sqlc.arg(user_id) AND id = sqlc.arg(id) AND deleted_at IS NULL;
 -- name: ListDailyReviews :many
 SELECT * FROM dayorder.daily_reviews
 WHERE user_id = sqlc.arg(user_id) AND deleted_at IS NULL
+  AND (
+      sqlc.narg(after_review_date)::date IS NULL
+      OR review_date < sqlc.narg(after_review_date)::date
+      OR (review_date = sqlc.narg(after_review_date)::date AND id < sqlc.narg(after_id)::uuid)
+  )
 ORDER BY review_date DESC, id DESC LIMIT sqlc.arg(page_size);
 
 -- name: UpdateDailyReview :one

@@ -29,7 +29,7 @@ type ContentStore interface {
 	DeleteNote(context.Context, database.Tx, uuid.UUID, uuid.UUID, int64) (model.Note, error)
 	CreateReview(context.Context, database.Tx, uuid.UUID, model.DailyReview) (model.DailyReview, error)
 	GetReview(context.Context, database.Tx, uuid.UUID, uuid.UUID) (model.DailyReview, error)
-	ListReviews(context.Context, database.Tx, uuid.UUID, int) ([]model.DailyReview, error)
+	ListReviews(context.Context, database.Tx, uuid.UUID, *model.ResourcePosition, int) ([]model.DailyReview, error)
 	UpdateReview(context.Context, database.Tx, uuid.UUID, model.DailyReview, int64) (model.DailyReview, error)
 	DeleteReview(context.Context, database.Tx, uuid.UUID, uuid.UUID, int64) (model.DailyReview, error)
 	EnsureTag(context.Context, database.Tx, uuid.UUID, uuid.UUID, string, string) (model.Tag, bool, error)
@@ -38,6 +38,9 @@ type ContentStore interface {
 	ReplaceNoteTags(context.Context, database.Tx, uuid.UUID, uuid.UUID, []model.Tag) error
 	ListRecordTags(context.Context, database.Tx, uuid.UUID, uuid.UUID) ([]model.Tag, error)
 	ListNoteTags(context.Context, database.Tx, uuid.UUID, uuid.UUID) ([]model.Tag, error)
+	ResolveEntityType(context.Context, database.Tx, uuid.UUID, uuid.UUID) (string, error)
+	ReplaceNoteLinks(context.Context, database.Tx, uuid.UUID, uuid.UUID, []model.EntityLink) error
+	ListNoteLinks(context.Context, database.Tx, uuid.UUID, uuid.UUID) ([]model.EntityLink, error)
 	CleanupTags(context.Context, database.Tx, uuid.UUID) ([]model.Tag, error)
 }
 
@@ -49,6 +52,7 @@ type ContentService struct {
 	newUUID    func() uuid.UUID
 }
 type RecordInput struct {
+	ID         *uuid.UUID `json:"id,omitempty"`
 	RawText    string     `json:"rawText"`
 	Kind       string     `json:"kind"`
 	OccurredAt time.Time  `json:"occurredAt"`
@@ -58,20 +62,23 @@ type RecordInput struct {
 	Tags       []string   `json:"tags"`
 }
 type NoteInput struct {
-	Title        string     `json:"title"`
-	BodyMarkdown string     `json:"bodyMarkdown"`
-	Category     string     `json:"category"`
-	ArchivedAt   *time.Time `json:"archivedAt"`
-	Tags         []string   `json:"tags"`
+	ID              *uuid.UUID  `json:"id,omitempty"`
+	Title           string      `json:"title"`
+	BodyMarkdown    string      `json:"bodyMarkdown"`
+	Category        string      `json:"category"`
+	ArchivedAt      *time.Time  `json:"archivedAt"`
+	Tags            []string    `json:"tags"`
+	LinkedEntityIDs []uuid.UUID `json:"linkedEntityIds"`
 }
 type ReviewInput struct {
-	ReviewDate    string  `json:"reviewDate"`
-	Wins          string  `json:"wins"`
-	Blockers      string  `json:"blockers"`
-	Mood          *int    `json:"mood"`
-	Energy        *int    `json:"energy"`
-	TomorrowFocus string  `json:"tomorrowFocus"`
-	AISummary     *string `json:"aiSummary"`
+	ID            *uuid.UUID `json:"id,omitempty"`
+	ReviewDate    string     `json:"reviewDate"`
+	Wins          string     `json:"wins"`
+	Blockers      string     `json:"blockers"`
+	Mood          *int       `json:"mood"`
+	Energy        *int       `json:"energy"`
+	TomorrowFocus string     `json:"tomorrowFocus"`
+	AISummary     *string    `json:"aiSummary"`
 }
 type RecordPage struct {
 	Records    []model.Record `json:"records"`
@@ -83,6 +90,11 @@ type NotePage struct {
 	NextCursor string       `json:"nextCursor,omitempty"`
 	HasMore    bool         `json:"hasMore"`
 }
+type ReviewPage struct {
+	Reviews    []model.DailyReview `json:"reviews"`
+	NextCursor string              `json:"nextCursor,omitempty"`
+	HasMore    bool                `json:"hasMore"`
+}
 
 func NewContentService(store ContentStore, transactor UserTransactor, commands *CommandService, cursors *ResourceCursorCodec) (*ContentService, error) {
 	if store == nil || transactor == nil || commands == nil || cursors == nil {
@@ -92,7 +104,11 @@ func NewContentService(store ContentStore, transactor UserTransactor, commands *
 }
 
 func (service *ContentService) CreateRecord(ctx context.Context, mutation MutationContext, input RecordInput) (model.Record, error) {
-	value := recordFromInput(service.newUUID(), input)
+	identifier := service.newUUID()
+	if input.ID != nil {
+		identifier = *input.ID
+	}
+	value := recordFromInput(identifier, input)
 	if err := validateRecord(value); err != nil {
 		return model.Record{}, err
 	}
@@ -101,7 +117,7 @@ func (service *ContentService) CreateRecord(ctx context.Context, mutation Mutati
 		return model.Record{}, err
 	}
 	payload, _ := json.Marshal(input)
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "record.create", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "record.create", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		created, e := service.store.CreateRecord(ctx, tx, mutation.UserID, value)
 		if e != nil {
 			return CommandResult{}, e
@@ -184,7 +200,7 @@ func (service *ContentService) UpdateRecord(ctx context.Context, mutation Mutati
 		return model.Record{}, err
 	}
 	payload, _ := json.Marshal(map[string]any{"id": id, "expectedVersion": expected, "input": input})
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "record.update", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "record.update", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		before, e := service.store.GetRecord(ctx, tx, mutation.UserID, id)
 		if e != nil {
 			return CommandResult{}, e
@@ -235,7 +251,11 @@ func (service *ContentService) DeleteRecord(ctx context.Context, mutation Mutati
 }
 
 func (service *ContentService) CreateNote(ctx context.Context, mutation MutationContext, input NoteInput) (model.Note, error) {
-	value := noteFromInput(service.newUUID(), input)
+	identifier := service.newUUID()
+	if input.ID != nil {
+		identifier = *input.ID
+	}
+	value := noteFromInput(identifier, input)
 	if err := validateNote(value); err != nil {
 		return model.Note{}, err
 	}
@@ -243,8 +263,12 @@ func (service *ContentService) CreateNote(ctx context.Context, mutation Mutation
 	if err != nil {
 		return model.Note{}, err
 	}
+	linkedIDs, err := normalizeLinkedEntityIDs(identifier, input.LinkedEntityIDs)
+	if err != nil {
+		return model.Note{}, err
+	}
 	payload, _ := json.Marshal(input)
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "note.create", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "note.create", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		created, e := service.store.CreateNote(ctx, tx, mutation.UserID, value)
 		if e != nil {
 			return CommandResult{}, e
@@ -257,6 +281,10 @@ func (service *ContentService) CreateNote(ctx context.Context, mutation Mutation
 			return CommandResult{}, e
 		}
 		created.Tags = tags
+		created.LinkedEntityIDs, e = service.replaceNoteLinks(ctx, tx, mutation.UserID, created.ID, linkedIDs)
+		if e != nil {
+			return CommandResult{}, e
+		}
 		return CommandResult{Status: 201, Body: resourceJSON(created), Changes: append([]model.SyncChangeDraft{{EntityType: "note", EntityID: created.ID, Operation: "create", EntityVersion: created.Version}}, tagChanges...), Audits: []model.AuditDraft{{Action: "note.create", AfterData: resourceJSON(created), Entities: []model.AuditEntity{{EntityType: "note", EntityID: created.ID}}}}}, nil
 	})
 	return decodeNote(response, err)
@@ -270,6 +298,10 @@ func (service *ContentService) GetNote(ctx context.Context, userID, id uuid.UUID
 			return e
 		}
 		value.Tags, e = service.store.ListNoteTags(ctx, tx, userID, id)
+		if e != nil {
+			return e
+		}
+		value.LinkedEntityIDs, e = service.listNoteLinkedEntityIDs(ctx, tx, userID, id)
 		return e
 	})
 	return value, err
@@ -298,6 +330,10 @@ func (service *ContentService) ListNotes(ctx context.Context, userID uuid.UUID, 
 		}
 		for index := range values {
 			values[index].Tags, e = service.store.ListNoteTags(ctx, tx, userID, values[index].ID)
+			if e != nil {
+				return e
+			}
+			values[index].LinkedEntityIDs, e = service.listNoteLinkedEntityIDs(ctx, tx, userID, values[index].ID)
 			if e != nil {
 				return e
 			}
@@ -330,13 +366,21 @@ func (service *ContentService) UpdateNote(ctx context.Context, mutation Mutation
 	if err != nil {
 		return model.Note{}, err
 	}
+	linkedIDs, err := normalizeLinkedEntityIDs(id, input.LinkedEntityIDs)
+	if err != nil {
+		return model.Note{}, err
+	}
 	payload, _ := json.Marshal(map[string]any{"id": id, "expectedVersion": expected, "input": input})
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "note.update", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "note.update", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		before, e := service.store.GetNote(ctx, tx, mutation.UserID, id)
 		if e != nil {
 			return CommandResult{}, e
 		}
 		before.Tags, e = service.store.ListNoteTags(ctx, tx, mutation.UserID, id)
+		if e != nil {
+			return CommandResult{}, e
+		}
+		before.LinkedEntityIDs, e = service.listNoteLinkedEntityIDs(ctx, tx, mutation.UserID, id)
 		if e != nil {
 			return CommandResult{}, e
 		}
@@ -359,6 +403,10 @@ func (service *ContentService) UpdateNote(ctx context.Context, mutation Mutation
 			tagChanges = append(tagChanges, model.SyncChangeDraft{EntityType: "tag", EntityID: tag.ID, Operation: "delete", EntityVersion: tag.Version})
 		}
 		updated.Tags = tags
+		updated.LinkedEntityIDs, e = service.replaceNoteLinks(ctx, tx, mutation.UserID, id, linkedIDs)
+		if e != nil {
+			return CommandResult{}, e
+		}
 		return CommandResult{Status: 200, Body: resourceJSON(updated), Changes: append([]model.SyncChangeDraft{{EntityType: "note", EntityID: id, Operation: "update", EntityVersion: updated.Version}}, tagChanges...), Audits: []model.AuditDraft{{Action: "note.update", BeforeData: resourceJSON(before), AfterData: resourceJSON(updated), Entities: []model.AuditEntity{{EntityType: "note", EntityID: id}}}}}, nil
 	})
 	return decodeNote(response, err)
@@ -373,21 +421,32 @@ func (service *ContentService) DeleteNote(ctx context.Context, mutation Mutation
 		if e != nil {
 			return nil, nil, 0, e
 		}
+		before.LinkedEntityIDs, e = service.listNoteLinkedEntityIDs(ctx, tx, mutation.UserID, id)
+		if e != nil {
+			return nil, nil, 0, e
+		}
 		deleted, e := service.store.DeleteNote(ctx, tx, mutation.UserID, id, expected)
 		if e == nil {
 			e = service.store.ReplaceNoteTags(ctx, tx, mutation.UserID, id, nil)
+		}
+		if e == nil {
+			e = service.store.ReplaceNoteLinks(ctx, tx, mutation.UserID, id, nil)
 		}
 		return before, deleted, deleted.Version, e
 	})
 }
 
 func (service *ContentService) CreateReview(ctx context.Context, mutation MutationContext, input ReviewInput) (model.DailyReview, error) {
-	value := reviewFromInput(service.newUUID(), input)
+	identifier := service.newUUID()
+	if input.ID != nil {
+		identifier = *input.ID
+	}
+	value := reviewFromInput(identifier, input)
 	if err := validateReview(value); err != nil {
 		return model.DailyReview{}, err
 	}
 	payload, _ := json.Marshal(input)
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "daily_review.create", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "daily_review.create", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		created, e := service.store.CreateReview(ctx, tx, mutation.UserID, value)
 		if e != nil {
 			return CommandResult{}, e
@@ -407,17 +466,37 @@ func (service *ContentService) GetReview(ctx context.Context, userID, id uuid.UU
 	return value, err
 }
 
-func (service *ContentService) ListReviews(ctx context.Context, userID uuid.UUID, limit int) ([]model.DailyReview, error) {
+func (service *ContentService) ListReviews(ctx context.Context, userID uuid.UUID, cursor string, limit int) (ReviewPage, error) {
 	if limit < 1 || limit > maxResourcePageSize {
-		return nil, fmt.Errorf("%w: invalid page size", ErrValidation)
+		return ReviewPage{}, fmt.Errorf("%w: invalid page size", ErrValidation)
+	}
+	after, err := service.decodePosition(userID, "daily-reviews", cursor)
+	if err != nil {
+		return ReviewPage{}, err
 	}
 	var values []model.DailyReview
-	err := service.transactor.WithUser(ctx, userID, func(ctx context.Context, tx database.Tx) error {
+	err = service.transactor.WithUser(ctx, userID, func(ctx context.Context, tx database.Tx) error {
 		var e error
-		values, e = service.store.ListReviews(ctx, tx, userID, limit)
+		values, e = service.store.ListReviews(ctx, tx, userID, after, limit+1)
 		return e
 	})
-	return values, err
+	if err != nil {
+		return ReviewPage{}, err
+	}
+	hasMore := len(values) > limit
+	if hasMore {
+		values = values[:limit]
+	}
+	next := ""
+	if hasMore {
+		last := values[len(values)-1]
+		position, parseErr := time.Parse(time.DateOnly, last.ReviewDate)
+		if parseErr != nil {
+			return ReviewPage{}, fmt.Errorf("decode daily review position: %w", parseErr)
+		}
+		next, err = service.cursors.Encode(userID, "daily-reviews", model.ResourcePosition{UpdatedAt: position, ID: last.ID})
+	}
+	return ReviewPage{Reviews: values, NextCursor: next, HasMore: hasMore}, err
 }
 func (service *ContentService) UpdateReview(ctx context.Context, mutation MutationContext, id uuid.UUID, expected int64, input ReviewInput) (model.DailyReview, error) {
 	value := reviewFromInput(id, input)
@@ -428,7 +507,7 @@ func (service *ContentService) UpdateReview(ctx context.Context, mutation Mutati
 		return model.DailyReview{}, err
 	}
 	payload, _ := json.Marshal(map[string]any{"id": id, "expectedVersion": expected, "input": input})
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "daily_review.update", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "daily_review.update", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		before, e := service.store.GetReview(ctx, tx, mutation.UserID, id)
 		if e != nil {
 			return CommandResult{}, e
@@ -466,7 +545,7 @@ func (service *ContentService) deleteContent(ctx context.Context, mutation Mutat
 		return fmt.Errorf("%w: resource ID and version are required", ErrValidation)
 	}
 	payload, _ := json.Marshal(map[string]any{"id": id, "expectedVersion": expected})
-	_, err := service.commands.Execute(ctx, resourceCommand(mutation, entityType+".delete", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	_, err := executeResourceCommand(ctx, service.commands, mutation, entityType+".delete", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		before, deleted, version, e := remove(ctx, tx)
 		if e != nil {
 			return CommandResult{}, e
@@ -564,6 +643,51 @@ func normalizeTagNames(values []string) ([]string, error) {
 		}
 	}
 	return normalized, nil
+}
+func normalizeLinkedEntityIDs(sourceID uuid.UUID, values []uuid.UUID) ([]uuid.UUID, error) {
+	if len(values) > 50 {
+		return nil, fmt.Errorf("%w: too many linked entities", ErrValidation)
+	}
+	seen := map[uuid.UUID]bool{}
+	normalized := make([]uuid.UUID, 0, len(values))
+	for _, value := range values {
+		if value == uuid.Nil || value == sourceID {
+			return nil, fmt.Errorf("%w: invalid linked entity", ErrValidation)
+		}
+		if !seen[value] {
+			seen[value] = true
+			normalized = append(normalized, value)
+		}
+	}
+	return normalized, nil
+}
+func (service *ContentService) listNoteLinkedEntityIDs(ctx context.Context, tx database.Tx, userID, noteID uuid.UUID) ([]uuid.UUID, error) {
+	links, err := service.store.ListNoteLinks(ctx, tx, userID, noteID)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]uuid.UUID, 0, len(links))
+	for _, link := range links {
+		values = append(values, link.TargetID)
+	}
+	return values, nil
+}
+func (service *ContentService) replaceNoteLinks(ctx context.Context, tx database.Tx, userID, noteID uuid.UUID, targetIDs []uuid.UUID) ([]uuid.UUID, error) {
+	links := make([]model.EntityLink, 0, len(targetIDs))
+	for _, targetID := range targetIDs {
+		targetType, err := service.store.ResolveEntityType(ctx, tx, userID, targetID)
+		if errors.Is(err, model.ErrNotFound) {
+			return nil, fmt.Errorf("%w: linked entity does not exist", ErrValidation)
+		}
+		if err != nil {
+			return nil, err
+		}
+		links = append(links, model.EntityLink{ID: service.newUUID(), SourceType: "note", SourceID: noteID, TargetType: targetType, TargetID: targetID, RelationType: "references"})
+	}
+	if err := service.store.ReplaceNoteLinks(ctx, tx, userID, noteID, links); err != nil {
+		return nil, err
+	}
+	return targetIDs, nil
 }
 func decodeRecord(response CommandResponse, err error) (model.Record, error) {
 	if err != nil {

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -27,6 +28,7 @@ type stubGoalApplication struct {
 	getErr         error
 	updateErr      error
 	deleteErr      error
+	mutations      []service.MutationContext
 }
 
 type stubDeviceApplication struct {
@@ -62,8 +64,13 @@ func (app *stubDeviceApplication) List(context.Context, uuid.UUID) ([]model.User
 	return []model.UserDevice{app.registration.Device}, nil
 }
 
-func (app *stubGoalApplication) Create(_ context.Context, _ service.MutationContext, input service.CreateGoalInput) (model.Goal, error) {
+func (app *stubGoalApplication) Create(_ context.Context, mutation service.MutationContext, input service.CreateGoalInput) (model.Goal, error) {
 	app.createCalls++
+	app.mutations = append(app.mutations, mutation)
+	if mutation.Duplicate != nil && input.Title == "Replay" {
+		*mutation.Duplicate = true
+		return model.Goal{ID: uuid.New(), Title: input.Title, Version: 1}, nil
+	}
 	app.goal = model.Goal{ID: uuid.New(), Title: input.Title, Area: input.Area, Version: 1}
 	return app.goal, nil
 }
@@ -73,7 +80,8 @@ func (app *stubGoalApplication) Get(context.Context, uuid.UUID, uuid.UUID) (mode
 func (*stubGoalApplication) List(context.Context, uuid.UUID, string, int) (service.GoalPage, error) {
 	return service.GoalPage{}, nil
 }
-func (app *stubGoalApplication) Update(_ context.Context, _ service.MutationContext, _ uuid.UUID, version int64, input service.UpdateGoalInput) (model.Goal, error) {
+func (app *stubGoalApplication) Update(_ context.Context, mutation service.MutationContext, _ uuid.UUID, version int64, input service.UpdateGoalInput) (model.Goal, error) {
+	app.mutations = append(app.mutations, mutation)
 	if app.updateErr != nil {
 		return model.Goal{}, app.updateErr
 	}
@@ -204,6 +212,67 @@ func TestSyncRoutesRequireRegisteredDeviceIdentity(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || syncApp.cursor != "bootstrap-cursor" || !strings.Contains(response.Body.String(), "next-cursor") {
 		t.Fatalf("changes status=%d cursor=%q body=%s", response.Code, syncApp.cursor, response.Body.String())
+	}
+}
+
+func TestSyncMutationsProcessesEachItemAndReportsDuplicateConflictAndRejection(t *testing.T) {
+	userID := uuid.New()
+	deviceID := uuid.New()
+	createID := uuid.New()
+	updateID := uuid.New()
+	sessions := &stubSessionApplication{authenticated: model.AuthenticatedSession{Account: model.Account{ID: userID, Status: model.AccountActive}}}
+	goals := &stubGoalApplication{goal: model.Goal{ID: updateID, Title: "Current", Area: "Work", MetricType: "project", TargetValue: 1, StartDate: "2026-08-28", Status: "active", Health: "normal", Version: 3}}
+	handler, err := NewRouter(RouterOptions{
+		Accounts: &stubAccountApplication{}, Sessions: sessions, Goals: goals, Sync: &stubSyncApplication{},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstMutationID := uuid.New()
+	secondMutationID := uuid.New()
+	thirdMutationID := uuid.New()
+	payload := map[string]any{"mutations": []map[string]any{
+		{"mutationId": firstMutationID, "sequence": 1, "entityType": "goal", "entityId": createID, "operation": "create", "baseVersion": 0, "payload": map[string]any{"title": "Replay"}},
+		{"mutationId": secondMutationID, "sequence": 2, "entityType": "goal", "entityId": updateID, "operation": "update", "baseVersion": 2, "payload": map[string]any{"title": "Stale"}},
+		{"mutationId": thirdMutationID, "sequence": 3, "entityType": "unknown", "entityId": uuid.New(), "operation": "create", "baseVersion": 0, "payload": map[string]any{}},
+	}}
+	body, _ := json.Marshal(payload)
+	goals.updateErr = model.ErrConflict
+	request := httptest.NewRequest(http.MethodPost, "http://dayorder.example/api/v1/sync/mutations", bytes.NewReader(body))
+	request.AddCookie(&http.Cookie{Name: sessionCookie, Value: "token"})
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Device-ID", deviceID.String())
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var result struct {
+		Results []struct {
+			MutationID uuid.UUID       `json:"mutationId"`
+			Status     string          `json:"status"`
+			Data       json.RawMessage `json:"data"`
+			Error      *apiErrorBody   `json:"error"`
+		} `json:"results"`
+	}
+	if err = json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Results) != 3 || result.Results[0].Status != "duplicate" || result.Results[1].Status != "conflict" || result.Results[2].Status != "rejected" {
+		t.Fatalf("mutation results=%#v", result.Results)
+	}
+	if result.Results[1].Error == nil || result.Results[1].Error.Code != "ENTITY_VERSION_CONFLICT" {
+		t.Fatalf("conflict result=%#v", result.Results[1])
+	}
+	var current model.Goal
+	if err = json.Unmarshal(result.Results[1].Data, &current); err != nil || current.ID != updateID || current.Title != "Current" || current.Version != 3 {
+		t.Fatalf("conflict data=%s decoded=%#v error=%v", result.Results[1].Data, current, err)
+	}
+	if len(goals.mutations) != 2 || goals.mutations[0].DeviceID != deviceID || goals.mutations[0].MutationID != firstMutationID {
+		t.Fatalf("mutation contexts=%#v", goals.mutations)
 	}
 }
 func (*stubGoalApplication) DeleteMilestone(context.Context, service.MutationContext, uuid.UUID, int64) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"dayorder.local/api/internal/database"
 	db "dayorder.local/api/internal/db/gen"
@@ -127,8 +128,14 @@ func (*ContentRepository) GetReview(ctx context.Context, tx database.Tx, userID,
 	}
 	return reviewFromRow(row), nil
 }
-func (*ContentRepository) ListReviews(ctx context.Context, tx database.Tx, userID uuid.UUID, limit int) ([]model.DailyReview, error) {
-	rows, err := db.New(tx).ListDailyReviews(ctx, pgUUID(userID), int32(limit))
+func (*ContentRepository) ListReviews(ctx context.Context, tx database.Tx, userID uuid.UUID, after *model.ResourcePosition, limit int) ([]model.DailyReview, error) {
+	var afterDate *string
+	var afterID *uuid.UUID
+	if after != nil {
+		formatted := after.UpdatedAt.UTC().Format(time.DateOnly)
+		afterDate, afterID = &formatted, &after.ID
+	}
+	rows, err := db.New(tx).ListDailyReviews(ctx, pgUUID(userID), pgOptionalDate(afterDate), pgOptionalUUID(afterID), int32(limit))
 	if err != nil {
 		return nil, fmt.Errorf("list daily reviews: %w", err)
 	}
@@ -217,6 +224,79 @@ func (*ContentRepository) ListNoteTags(ctx context.Context, tx database.Tx, user
 		return nil, err
 	}
 	return tagsFromRows(rows), nil
+}
+func (*ContentRepository) ResolveEntityType(ctx context.Context, tx database.Tx, userID, id uuid.UUID) (string, error) {
+	q := db.New(tx)
+	lookups := []struct {
+		entityType string
+		get        func() error
+	}{
+		{entityType: "goal", get: func() error { _, err := q.GetGoal(ctx, pgUUID(userID), pgUUID(id)); return err }},
+		{entityType: "milestone", get: func() error { _, err := q.GetGoalMilestone(ctx, pgUUID(userID), pgUUID(id)); return err }},
+		{entityType: "task", get: func() error { _, err := q.GetTask(ctx, pgUUID(userID), pgUUID(id)); return err }},
+		{entityType: "calendar_event", get: func() error { _, err := q.GetCalendarEvent(ctx, pgUUID(userID), pgUUID(id)); return err }},
+		{entityType: "record", get: func() error { _, err := q.GetRecord(ctx, pgUUID(userID), pgUUID(id)); return err }},
+		{entityType: "note", get: func() error { _, err := q.GetNote(ctx, pgUUID(userID), pgUUID(id)); return err }},
+		{entityType: "daily_review", get: func() error { _, err := q.GetDailyReview(ctx, pgUUID(userID), pgUUID(id)); return err }},
+	}
+	for _, lookup := range lookups {
+		err := lookup.get()
+		if err == nil {
+			return lookup.entityType, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("resolve linked entity: %w", err)
+		}
+	}
+	return "", model.ErrNotFound
+}
+func (*ContentRepository) ReplaceNoteLinks(ctx context.Context, tx database.Tx, userID, noteID uuid.UUID, links []model.EntityLink) error {
+	q := db.New(tx)
+	existing, err := q.ListEntityLinks(ctx, pgUUID(userID), "note", pgUUID(noteID))
+	if err != nil {
+		return fmt.Errorf("list note links: %w", err)
+	}
+	type relationKey struct {
+		targetType, targetID, relationType string
+	}
+	desired := make(map[relationKey]model.EntityLink, len(links))
+	for _, link := range links {
+		desired[relationKey{targetType: link.TargetType, targetID: link.TargetID.String(), relationType: link.RelationType}] = link
+	}
+	for _, row := range existing {
+		key := relationKey{targetType: row.TargetType, targetID: uuid.UUID(row.TargetID.Bytes).String(), relationType: row.RelationType}
+		if _, keep := desired[key]; keep {
+			delete(desired, key)
+			continue
+		}
+		if _, err = q.DeleteEntityLink(ctx, pgUUID(userID), row.ID); err != nil {
+			return fmt.Errorf("delete note link: %w", err)
+		}
+	}
+	for _, link := range desired {
+		_, err = q.CreateEntityLink(ctx, db.CreateEntityLinkParams{
+			ID: pgUUID(link.ID), UserID: pgUUID(userID), SourceType: "note", SourceID: pgUUID(noteID),
+			TargetType: link.TargetType, TargetID: pgUUID(link.TargetID), RelationType: link.RelationType,
+		})
+		if err != nil {
+			return mapDatabaseError("create note link", err)
+		}
+	}
+	return nil
+}
+func (*ContentRepository) ListNoteLinks(ctx context.Context, tx database.Tx, userID, noteID uuid.UUID) ([]model.EntityLink, error) {
+	rows, err := db.New(tx).ListEntityLinks(ctx, pgUUID(userID), "note", pgUUID(noteID))
+	if err != nil {
+		return nil, fmt.Errorf("list note links: %w", err)
+	}
+	values := make([]model.EntityLink, 0, len(rows))
+	for _, row := range rows {
+		values = append(values, model.EntityLink{
+			ID: uuid.UUID(row.ID.Bytes), SourceType: row.SourceType, SourceID: uuid.UUID(row.SourceID.Bytes),
+			TargetType: row.TargetType, TargetID: uuid.UUID(row.TargetID.Bytes), RelationType: row.RelationType, CreatedAt: row.CreatedAt.Time.UTC(),
+		})
+	}
+	return values, nil
 }
 func (*ContentRepository) CleanupTags(ctx context.Context, tx database.Tx, userID uuid.UUID) ([]model.Tag, error) {
 	rows, err := db.New(tx).SoftDeleteUnusedTags(ctx, pgUUID(userID))

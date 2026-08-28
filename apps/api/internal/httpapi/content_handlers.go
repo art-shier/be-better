@@ -7,7 +7,7 @@ import (
 )
 
 var recordPatchFields = map[string]bool{"rawText": true, "kind": true, "occurredAt": true, "mood": true, "energy": true, "archivedAt": true, "tags": true}
-var notePatchFields = map[string]bool{"title": true, "bodyMarkdown": true, "category": true, "archivedAt": true, "tags": true}
+var notePatchFields = map[string]bool{"title": true, "bodyMarkdown": true, "category": true, "archivedAt": true, "tags": true, "linkedEntityIds": true}
 var reviewPatchFields = map[string]bool{"reviewDate": true, "wins": true, "blockers": true, "mood": true, "energy": true, "tomorrowFocus": true, "aiSummary": true}
 
 func (router *Router) createRecord(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +206,7 @@ func (router *Router) updateNote(w http.ResponseWriter, r *http.Request) {
 	for i, tag := range current.Tags {
 		tagNames[i] = tag.Name
 	}
-	seed := service.NoteInput{Title: current.Title, BodyMarkdown: current.BodyMarkdown, Category: current.Category, ArchivedAt: current.ArchivedAt, Tags: tagNames}
+	seed := service.NoteInput{Title: current.Title, BodyMarkdown: current.BodyMarkdown, Category: current.Category, ArchivedAt: current.ArchivedAt, Tags: tagNames, LinkedEntityIDs: current.LinkedEntityIDs}
 	var input service.NoteInput
 	if !router.decodeMergePatch(w, r, seed, notePatchFields, &input) {
 		return
@@ -289,12 +289,12 @@ func (router *Router) listReviews(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	values, err := router.content.ListReviews(r.Context(), auth.Account.ID, limit)
+	page, err := router.content.ListReviews(r.Context(), auth.Account.ID, r.URL.Query().Get("cursor"), limit)
 	if err != nil {
 		router.handleServiceError(w, r, err)
 		return
 	}
-	router.writeJSON(w, http.StatusOK, map[string]any{"reviews": values})
+	router.writeJSON(w, http.StatusOK, page)
 }
 func (router *Router) updateReview(w http.ResponseWriter, r *http.Request) {
 	auth, ok := router.authenticateRequest(w, r)

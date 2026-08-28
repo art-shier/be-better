@@ -26,6 +26,7 @@ type AccountApplication interface {
 
 type SessionApplication interface {
 	Login(context.Context, service.LoginInput) (service.SessionResult, error)
+	CreateVerifiedSession(context.Context, model.Account, string) (service.SessionResult, error)
 	Authenticate(context.Context, string) (model.AuthenticatedSession, error)
 	Logout(context.Context, model.AuthenticatedSession) error
 	ChangePassword(context.Context, service.ChangePasswordInput) (service.SessionResult, error)
@@ -56,7 +57,7 @@ type TaskApplication interface {
 type CalendarApplication interface {
 	Create(context.Context, service.MutationContext, service.CalendarEventInput) (service.CalendarEventResult, error)
 	Get(context.Context, uuid.UUID, uuid.UUID) (service.CalendarEventResult, error)
-	List(context.Context, uuid.UUID, *time.Time, *time.Time, int) ([]model.CalendarEvent, error)
+	List(context.Context, uuid.UUID, *time.Time, *time.Time, string, int) (service.CalendarPage, error)
 	Update(context.Context, service.MutationContext, uuid.UUID, int64, service.CalendarEventInput) (service.CalendarEventResult, error)
 	Delete(context.Context, service.MutationContext, uuid.UUID, int64) error
 }
@@ -74,7 +75,7 @@ type ContentApplication interface {
 	DeleteNote(context.Context, service.MutationContext, uuid.UUID, int64) error
 	CreateReview(context.Context, service.MutationContext, service.ReviewInput) (model.DailyReview, error)
 	GetReview(context.Context, uuid.UUID, uuid.UUID) (model.DailyReview, error)
-	ListReviews(context.Context, uuid.UUID, int) ([]model.DailyReview, error)
+	ListReviews(context.Context, uuid.UUID, string, int) (service.ReviewPage, error)
 	UpdateReview(context.Context, service.MutationContext, uuid.UUID, int64, service.ReviewInput) (model.DailyReview, error)
 	DeleteReview(context.Context, service.MutationContext, uuid.UUID, int64) error
 	ListTags(context.Context, uuid.UUID) ([]model.Tag, error)
@@ -164,6 +165,7 @@ func NewRouter(options RouterOptions) (http.Handler, error) {
 	if router.sync != nil {
 		mux.HandleFunc("GET /api/v1/sync/bootstrap", router.syncBootstrap)
 		mux.HandleFunc("GET /api/v1/sync/changes", router.syncChanges)
+		mux.HandleFunc("POST /api/v1/sync/mutations", router.syncMutations)
 	}
 	if router.goals != nil {
 		mux.HandleFunc("GET /api/v1/goals", router.listGoals)

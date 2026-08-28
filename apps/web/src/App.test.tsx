@@ -1,3 +1,4 @@
+import "fake-indexeddb/auto";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,10 +7,24 @@ import { AppStoreProvider, useAppStore } from "./store/AppStore";
 import { UiProvider } from "./ui/UiProvider";
 import { createSeedData } from "./domain/seed";
 import { AuthProvider } from "./auth/AuthProvider";
-import { userStorageKeys } from "./store/storage";
+import type { AppData } from "./domain/types";
+import { replaceAccountEntities, type CachedEntityBatch } from "./offline/cache";
+import { deleteDayOrderDB } from "./offline/db";
+import { prepareInitialMutations } from "./store/commands";
 
 const testUser = { id: "user_test", email: "test@example.com", displayName: "测试用户" };
 const testSession = { user: testUser, expiresAt: "2026-09-26T08:00:00Z" };
+
+async function seedAccount(accountId: string, data: AppData): Promise<void> {
+  const grouped = new Map<CachedEntityBatch["entityType"], CachedEntityBatch["values"]>();
+  for (const mutation of prepareInitialMutations(accountId, data)) {
+    if (!mutation.optimisticEntity) continue;
+    const values = grouped.get(mutation.entityType) ?? [];
+    values.push(mutation.optimisticEntity);
+    grouped.set(mutation.entityType, values);
+  }
+  await replaceAccountEntities(accountId, crypto.randomUUID(), "test-cursor", [...grouped].map(([entityType, values]) => ({ entityType, values })));
+}
 
 function GuestHarness() {
   return <AuthProvider sessionCheckEnabled={false}><AppStoreProvider><UiProvider><Harness /></UiProvider></AppStoreProvider></AuthProvider>;
@@ -25,10 +40,11 @@ function Harness() {
 }
 
 describe("关键页面交互", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.setSystemTime(new Date("2026-08-27T10:00:00+08:00"));
     window.location.hash = "today";
     localStorage.setItem("dayorder.app.v1", JSON.stringify(createSeedData()));
+    await deleteDayOrderDB();
   });
 
   it("快速记录默认自动识别并创建带来源的日程", async () => {
@@ -86,11 +102,11 @@ describe("关键页面交互", () => {
     const seed = createSeedData();
     const goal = { ...seed.goals[0], id: "goal_portfolio", title: "完成个人作品集", why: "用于下一次求职展示" };
     const task = { ...seed.tasks[0], id: "task_portfolio", title: "制作作品集首页", goalId: goal.id, scheduledStart: undefined, scheduledEnd: undefined };
-    localStorage.setItem(userStorageKeys(testUser.id).data, JSON.stringify({ ...seed, goals: [goal], tasks: [task], events: [], records: [], notes: [], agentRuns: [], audit: [] }));
+    await seedAccount(testUser.id, { ...seed, goals: [goal], tasks: [task], events: [], records: [], notes: [], agentRuns: [], audit: [] });
     const user = userEvent.setup();
     render(<AccountHarness />);
 
-    await user.click(screen.getAllByRole("button", { name: /^Agent/ })[0]);
+    await user.click((await screen.findAllByRole("button", { name: /^Agent/ }))[0]);
     await user.click(screen.getAllByRole("button", { name: "发起委托" })[0]);
     await user.type(screen.getByLabelText("希望得到什么结果"), "安排作品集的下一步");
     await user.click(screen.getByRole("button", { name: /生成执行步骤/ }));

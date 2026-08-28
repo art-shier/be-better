@@ -417,6 +417,33 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .auth-tabs button.active, .account-tabs button.active { background: #fff; box-shadow: 0 1px 4px rgba(24,35,46,.08); color: var(--ink); }
 .auth-form { display: grid; gap: 13px; margin-top: 17px; }
 .auth-submit { width: 100%; }
+.auth-flow-intro { display: grid; grid-template-columns: 34px minmax(0,1fr); align-items: start; gap: 10px; border-left: 2px solid var(--primary); background: var(--primary-soft); color: var(--primary-deep); padding: 11px 12px; }
+.auth-flow-intro > svg { margin-top: 1px; }
+.auth-flow-intro strong, .auth-flow-intro p { display: block; }
+.auth-flow-intro strong { font-size: 11px; }
+.auth-flow-intro p { margin: 2px 0 0; color: var(--ink-2); font-size: 9px; }
+.auth-forgot { justify-self: end; margin-top: -7px; }
+.auth-reset-back { justify-self: center; }
+.form-success { margin: 0; border-left: 2px solid var(--success); background: #eaf1ee; color: var(--success); padding: 9px 11px; font-size: 10px; }
+.verification-ribbon { position: relative; z-index: 42; display: grid; grid-template-columns: 36px minmax(0,1fr) auto; align-items: center; gap: 11px; border-bottom: 1px solid #cad8df; background: #eaf1f4; color: var(--primary-deep); padding: 10px max(16px,calc((100vw - 1440px) / 2)); }
+.verification-ribbon::before { position: absolute; top: 0; bottom: 0; left: 0; width: 4px; background: var(--primary); content: ""; }
+.verification-ribbon-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: var(--r-control); background: #fff; color: var(--primary); }
+.verification-ribbon strong, .verification-ribbon p { display: block; }
+.verification-ribbon strong { font-size: 11px; }
+.verification-ribbon p { margin: 1px 0 0; color: var(--ink-2); font-size: 9px; }
+.verification-ribbon > small { grid-column: 2 / -1; color: var(--danger); font-size: 9px; }
+.verification-ribbon.migration-warning { border-color: #dec9bf; background: var(--accent-soft); color: #75503f; }
+.verification-ribbon.migration-warning::before { background: var(--accent); }
+.verification-ribbon.migration-warning .verification-ribbon-icon { color: var(--accent); }
+.spin { animation: verification-spin 900ms linear infinite; }
+@keyframes verification-spin { to { transform: rotate(360deg); } }
+.auth-route-shell { display: grid; min-height: 100vh; place-items: center; background: linear-gradient(145deg,#edf2f5 0 52%,#e4ebef 52%); padding: 24px; }
+.auth-route-card { width: min(100%,480px); border: 1px solid rgba(255,255,255,.82); border-radius: var(--r-structure); background: rgba(255,255,255,.96); box-shadow: var(--shadow-float); padding: 34px; }
+.auth-route-mark { display: grid; width: 48px; height: 48px; place-items: center; margin-bottom: 24px; border-radius: var(--r-control); background: var(--dark); color: #fff; }
+.auth-route-card h1 { margin-bottom: 7px; font-size: clamp(28px,7vw,42px); letter-spacing: -.04em; }
+.auth-route-card > p:not(.eyebrow) { color: var(--ink-2); font-size: 11px; }
+.auth-route-card > .button { margin-top: 12px; }
+.auth-route-back { display: inline-flex; align-items: center; gap: 5px; margin-top: 16px; }
 .migration-choice { display: grid; grid-template-columns: 20px minmax(0,1fr); align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: var(--r-panel); background: #fff; cursor: pointer; padding: 12px; }
 .migration-choice.active { border-color: #cfb5a8; background: var(--accent-soft); }
 .migration-choice > input { position: absolute; opacity: 0; pointer-events: none; }
@@ -673,6 +700,10 @@ button:disabled { cursor: not-allowed; opacity: .48; }
   .onboarding-areas { grid-template-columns: 1fr 1fr; }
   .onboarding-goal-row, .onboarding-modes { grid-template-columns: 1fr; }
   .security-forms { grid-template-columns: 1fr; }
+	.verification-ribbon { grid-template-columns: 34px minmax(0,1fr); padding: 10px 12px; }
+	.verification-ribbon > .button, .verification-ribbon > small { grid-column: 2; justify-self: start; }
+	.auth-route-shell { align-items: end; padding: 0; }
+	.auth-route-card { border-radius: 10px 10px 0 0; padding: 26px 20px max(26px,env(safe-area-inset-bottom)); }
   .security-forms .account-form + .account-form { border-top: 1px solid var(--line); border-left: 0; padding-top: 18px; padding-left: 0; }
   .account-menu { position: fixed; top: 60px; right: 10px; width: min(292px,calc(100vw - 20px)); }
   .onboarding-progress { width: 100%; }

@@ -1,7 +1,7 @@
 import { ChevronRight, Cloud, CloudOff, HardDrive, LogOut, Settings, Shield, UserRound } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthProvider";
-import { ApiError } from "../api/client";
+import { ApiError } from "../api/http";
 import type { SyncStatus } from "../store/AppStore";
 import { useUi } from "../ui/UiProvider";
 import { Modal } from "./Modal";

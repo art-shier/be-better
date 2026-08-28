@@ -1,10 +1,12 @@
+import "fake-indexeddb/auto";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { createSeedData } from "../domain/seed";
+import { putCachedEntity } from "../offline/cache";
+import { deleteDayOrderDB } from "../offline/db";
 import { AppStoreProvider } from "../store/AppStore";
-import { userStorageKeys } from "../store/storage";
 import { UiProvider } from "../ui/UiProvider";
 import { AccountControls } from "./AccountControls";
 
@@ -20,9 +22,12 @@ function Harness() {
 }
 
 describe("AccountControls", () => {
+  beforeEach(async () => deleteDayOrderDB());
+
   it("Go 服务不可达时禁用账户修改和退出", async () => {
     const actions = userEvent.setup();
-    localStorage.setItem(userStorageKeys(user.id).data, JSON.stringify(createSeedData()));
+    const settings = createSeedData().settings;
+    await putCachedEntity(user.id, "user_settings", { id: user.id, schemaVersion: settings.schemaVersion, version: settings.version, settings, createdAt: settings.updatedAt, updatedAt: settings.updatedAt });
     render(
       <AuthProvider initialSession={{ user, expiresAt: "2026-09-26T08:00:00Z" }}>
         <AppStoreProvider identity={{ kind: "user", userId: user.id }} syncEnabled={false}>
@@ -31,7 +36,7 @@ describe("AccountControls", () => {
       </AuthProvider>,
     );
 
-    await actions.click(screen.getByRole("button", { name: "模拟服务不可达" }));
+    await actions.click(await screen.findByRole("button", { name: "模拟服务不可达" }));
     expect(screen.getByTestId("mode")).toHaveTextContent("authenticated");
     await actions.click(screen.getByRole("button", { name: "打开账户菜单" }));
 

@@ -30,6 +30,10 @@ type MutationContext struct {
 	DeviceID   uuid.UUID
 	MutationID uuid.UUID
 	RequestID  uuid.UUID
+	// Duplicate is optional and lets batch callers distinguish an idempotent
+	// replay from the first successful application without changing every
+	// resource service return type.
+	Duplicate *bool
 }
 
 type CommandResult struct {
@@ -47,6 +51,21 @@ type CommandResponse struct {
 }
 
 type CommandOperation func(context.Context, database.Tx) (CommandResult, error)
+
+func executeResourceCommand(
+	ctx context.Context,
+	commands *CommandService,
+	mutation MutationContext,
+	commandName string,
+	requestBody []byte,
+	operation CommandOperation,
+) (CommandResponse, error) {
+	response, err := commands.Execute(ctx, resourceCommand(mutation, commandName, requestBody), operation)
+	if err == nil && mutation.Duplicate != nil {
+		*mutation.Duplicate = response.Duplicate
+	}
+	return response, err
+}
 
 type CommandSyncWriter interface {
 	Record(context.Context, database.Tx, uuid.UUID, []model.SyncChangeDraft) error

@@ -34,7 +34,7 @@ export function OnboardingDialog() {
   const finish = () => {
     if (!goalsValid) return;
     const now = new Date().toISOString();
-    const created: Goal[] = goals.slice(0, 3).map((goal) => ({ id: createId("goal"), title: goal.title.trim(), why: goal.why.trim(), area: goal.area, metricType: "project", targetValue: 100, currentValue: 0, unit: "%", startAt: now, dueAt: goal.dueDate ? new Date(`${goal.dueDate}T23:59:00`).toISOString() : undefined, status: "active", health: "normal", milestones: [], createdAt: now, updatedAt: now }));
+    const created: Goal[] = goals.slice(0, 3).map((goal) => ({ id: createId("goal"), title: goal.title.trim(), why: goal.why.trim(), area: goal.area, metricType: "project", targetValue: 100, currentValue: 0, unit: "%", startAt: now, dueAt: goal.dueDate ? new Date(`${goal.dueDate}T23:59:00`).toISOString() : undefined, status: "active", health: "normal", milestones: [], version: 0, createdAt: now, updatedAt: now }));
     dispatch({ type: "complete-onboarding", goals: created, focusAreas, dataMode });
     toast("首次设置已完成，已生成第一个今日行动");
   };

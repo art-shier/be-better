@@ -39,10 +39,16 @@ func (*CalendarRepository) GetEvent(ctx context.Context, tx database.Tx, userID,
 	return calendarEventFromRow(row), nil
 }
 
-func (*CalendarRepository) ListEvents(ctx context.Context, tx database.Tx, userID uuid.UUID, start, end *time.Time, limit int) ([]model.CalendarEvent, error) {
-	rows, err := db.New(tx).ListCalendarEvents(
-		ctx, pgUUID(userID), pgOptionalTime(start), pgOptionalTime(end), int32(limit),
-	)
+func (*CalendarRepository) ListEvents(ctx context.Context, tx database.Tx, userID uuid.UUID, start, end *time.Time, after *model.ResourcePosition, limit int) ([]model.CalendarEvent, error) {
+	var afterStart *time.Time
+	var afterID *uuid.UUID
+	if after != nil {
+		afterStart, afterID = &after.UpdatedAt, &after.ID
+	}
+	rows, err := db.New(tx).ListCalendarEvents(ctx, db.ListCalendarEventsParams{
+		UserID: pgUUID(userID), WindowStart: pgOptionalTime(start), WindowEnd: pgOptionalTime(end),
+		AfterStartAt: pgOptionalTime(afterStart), AfterID: pgOptionalUUID(afterID), PageSize: int32(limit),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("list calendar events: %w", err)
 	}
@@ -100,6 +106,14 @@ func (*CalendarRepository) ListReminders(ctx context.Context, tx database.Tx, us
 		return nil, fmt.Errorf("list calendar reminders: %w", err)
 	}
 	return calendarRemindersFromRows(rows), nil
+}
+
+func (*CalendarRepository) DeleteReminder(ctx context.Context, tx database.Tx, userID, eventID, reminderID uuid.UUID) (model.CalendarReminder, error) {
+	row, err := db.New(tx).SoftDeleteCalendarReminder(ctx, pgUUID(userID), pgUUID(eventID), pgUUID(reminderID))
+	if err != nil {
+		return model.CalendarReminder{}, mapDatabaseError("delete calendar reminder", err)
+	}
+	return calendarReminderFromRow(row), nil
 }
 
 func calendarWriteError(ctx context.Context, queries *db.Queries, userID, eventID uuid.UUID, operation string, err error) error {

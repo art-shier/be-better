@@ -41,9 +41,10 @@ function GoalEditor({ value, onClose }: { value?: Goal; onClose(): void }) {
     event.preventDefault();
     if (!title.trim()) return;
     const now = new Date().toISOString();
-    const milestones = milestoneText.split(/\r?\n/).map((item) => item.trim()).filter(Boolean).map((milestoneTitle, index) => { const existing = value?.milestones.find((item) => item.title === milestoneTitle) ?? value?.milestones[index]; return { id: existing?.id ?? createId("milestone"), title: milestoneTitle, dueAt: existing?.dueAt, completedAt: existing?.title === milestoneTitle ? existing.completedAt : undefined, sortOrder: index }; });
+    const goalId = value?.id ?? createId("goal");
+    const milestones = milestoneText.split(/\r?\n/).map((item) => item.trim()).filter(Boolean).map((milestoneTitle, index) => { const existing = value?.milestones.find((item) => item.title === milestoneTitle) ?? value?.milestones[index]; return { id: existing?.id ?? createId("milestone"), goalId, title: milestoneTitle, dueAt: existing?.dueAt, completedAt: existing?.title === milestoneTitle ? existing.completedAt : undefined, sortOrder: index, version: existing?.version ?? 0, createdAt: existing?.createdAt ?? now, updatedAt: now }; });
     const milestoneMetric = metricType === "milestone" && milestones.length > 0;
-    const goal: Goal = { id: value?.id ?? createId("goal"), title: title.trim(), why: why.trim(), area, metricType, currentValue: milestoneMetric ? milestones.filter((item) => item.completedAt).length : Number(currentValue), targetValue: milestoneMetric ? milestones.length : Math.max(1, Number(targetValue)), unit: milestoneMetric ? "项" : unit.trim() || "%", startAt: value?.startAt ?? now, dueAt: fromLocalInput(dueAt), status, health: value?.health ?? "normal", milestones: metricType === "milestone" ? milestones : value?.milestones ?? [], createdAt: value?.createdAt ?? now, updatedAt: now };
+    const goal: Goal = { id: goalId, title: title.trim(), why: why.trim(), area, metricType, currentValue: milestoneMetric ? milestones.filter((item) => item.completedAt).length : Number(currentValue), targetValue: milestoneMetric ? milestones.length : Math.max(1, Number(targetValue)), unit: milestoneMetric ? "项" : unit.trim() || "%", startAt: value?.startAt ?? now, dueAt: fromLocalInput(dueAt), status, health: value?.health ?? "normal", milestones: metricType === "milestone" ? milestones : value?.milestones ?? [], version: value?.version ?? 0, createdAt: value?.createdAt ?? now, updatedAt: now };
     dispatch({ type: value ? "update-goal" : "add-goal", goal });
     onClose(); toast(value ? "目标已更新" : "目标已创建");
   };
@@ -67,7 +68,8 @@ function TaskEditor({ value, onClose }: { value?: Task; onClose(): void }) {
     event.preventDefault();
     if (!title.trim()) return;
     const start = fromLocalInput(scheduledStart);
-    const task: Task = { id: value?.id ?? createId("task"), title: title.trim(), status, priority, estimateMinutes: Math.max(5, Number(estimate)), dueAt: fromLocalInput(dueAt), scheduledStart: start, scheduledEnd: start ? addMinutes(new Date(start), Math.max(5, Number(estimate))).toISOString() : undefined, goalId: goalId || undefined, createdAt: value?.createdAt ?? new Date().toISOString(), completedAt: status === "done" ? value?.completedAt ?? new Date().toISOString() : undefined, sourceRecordId: value?.sourceRecordId };
+    const now = new Date().toISOString();
+    const task: Task = { id: value?.id ?? createId("task"), title: title.trim(), status, priority, estimateMinutes: Math.max(5, Number(estimate)), dueAt: fromLocalInput(dueAt), scheduledStart: start, scheduledEnd: start ? addMinutes(new Date(start), Math.max(5, Number(estimate))).toISOString() : undefined, goalId: goalId || undefined, version: value?.version ?? 0, createdAt: value?.createdAt ?? now, updatedAt: now, completedAt: status === "done" ? value?.completedAt ?? now : undefined, sourceRecordId: value?.sourceRecordId };
     dispatch({ type: value ? "update-task" : "add-task", task }); onClose(); toast(value ? "任务已更新" : "任务已创建");
   };
   const remove = () => { if (value && window.confirm("删除这个任务？")) { dispatch({ type: "delete-task", id: value.id }); onClose(); toast("任务已删除"); } };
@@ -93,7 +95,8 @@ function EventEditor({ value, onClose }: { value?: CalendarEvent; onClose(): voi
     const startDate = new Date(startAt);
     const endDate = new Date(endAt);
     if (endDate <= startDate) { toast("结束时间必须晚于开始时间"); return; }
-    const calendarEvent: CalendarEvent = { id: value?.id ?? createId("event"), title: title.trim(), startAt: startDate.toISOString(), endAt: endDate.toISOString(), location: location.trim() || undefined, reminderMinutes: reminder >= 0 ? [reminder] : [], sourceCalendar: value?.sourceCalendar, kind, goalId: goalId || undefined, createdAt: value?.createdAt ?? new Date().toISOString() };
+    const now = new Date().toISOString();
+    const calendarEvent: CalendarEvent = { id: value?.id ?? createId("event"), title: title.trim(), startAt: startDate.toISOString(), endAt: endDate.toISOString(), location: location.trim() || undefined, reminderMinutes: reminder >= 0 ? [reminder] : [], reminders: value?.reminders, timezone: value?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC", sourceCalendar: value?.sourceCalendar, kind, goalId: goalId || undefined, version: value?.version ?? 0, createdAt: value?.createdAt ?? now, updatedAt: now };
     dispatch({ type: value ? "update-event" : "add-event", event: calendarEvent }); onClose(); toast(value ? "日程已更新" : "日程已创建");
   };
   const remove = () => { if (value && window.confirm("删除这个日程？")) { dispatch({ type: "delete-event", id: value.id }); onClose(); toast("日程已删除"); } };
@@ -114,7 +117,8 @@ function RecordEditor({ value, onClose }: { value?: RecordEntry; onClose(): void
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!rawText.trim() || !occurredAt) return;
-    const record: RecordEntry = { id: value?.id ?? createId("record"), rawText: rawText.trim(), kind, occurredAt: new Date(occurredAt).toISOString(), tags: tags.split(/[，,]/).map((item) => item.trim()).filter(Boolean), mood: mood || undefined, energy: energy || undefined, parsedEntityId: value?.parsedEntityId, archivedAt: value?.archivedAt };
+    const now = new Date().toISOString();
+    const record: RecordEntry = { id: value?.id ?? createId("record"), rawText: rawText.trim(), kind, occurredAt: new Date(occurredAt).toISOString(), tags: tags.split(/[，,]/).map((item) => item.trim()).filter(Boolean), mood: mood || undefined, energy: energy || undefined, parsedEntityId: value?.parsedEntityId, archivedAt: value?.archivedAt, version: value?.version ?? 0, createdAt: value?.createdAt ?? now, updatedAt: now };
     dispatch({ type: value ? "update-record" : "add-record", record });
     onClose(); toast(value ? "记录已更新" : "记录已创建");
   };
@@ -138,7 +142,7 @@ function NoteEditor({ value, onClose }: { value?: Note; onClose(): void }) {
     if (!title.trim()) return;
     const now = new Date().toISOString();
     const otherLinks = (value?.linkedEntityIds ?? []).filter((id) => !data.goals.some((goal) => goal.id === id));
-    const note: Note = { id: value?.id ?? createId("note"), title: title.trim(), bodyMarkdown: body, category, tags: tags.split(/[，,]/).map((item) => item.trim()).filter(Boolean), linkedEntityIds: [...otherLinks, ...(linkedGoalId ? [linkedGoalId] : [])], createdAt: value?.createdAt ?? now, updatedAt: now };
+    const note: Note = { id: value?.id ?? createId("note"), title: title.trim(), bodyMarkdown: body, category, tags: tags.split(/[，,]/).map((item) => item.trim()).filter(Boolean), linkedEntityIds: [...otherLinks, ...(linkedGoalId ? [linkedGoalId] : [])], version: value?.version ?? 0, createdAt: value?.createdAt ?? now, updatedAt: now };
     dispatch({ type: value ? "update-note" : "add-note", note }); onClose(); toast(value ? "笔记已保存" : "笔记已创建");
   };
   const remove = () => { if (value && window.confirm("删除这篇笔记？")) { dispatch({ type: "delete-note", id: value.id }); onClose(); toast("笔记已删除"); } };

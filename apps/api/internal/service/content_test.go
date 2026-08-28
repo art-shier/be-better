@@ -24,3 +24,19 @@ func TestContentValidationNormalizesTagsAndBoundsScores(t *testing.T) {
 		t.Fatalf("record validation error=%v", err)
 	}
 }
+
+func TestNormalizeLinkedEntityIDsDeduplicatesAndRejectsInvalidLinks(t *testing.T) {
+	source, first, second := uuid.New(), uuid.New(), uuid.New()
+	values, err := normalizeLinkedEntityIDs(source, []uuid.UUID{first, first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 2 || values[0] != first || values[1] != second {
+		t.Fatalf("linked ids=%#v", values)
+	}
+	for _, invalid := range [][]uuid.UUID{{uuid.Nil}, {source}} {
+		if _, err = normalizeLinkedEntityIDs(source, invalid); !errors.Is(err, ErrValidation) {
+			t.Fatalf("invalid links %#v error=%v", invalid, err)
+		}
+	}
+}

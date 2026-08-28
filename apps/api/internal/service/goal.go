@@ -46,25 +46,28 @@ type GoalPage struct {
 }
 
 type CreateGoalInput struct {
-	Title        string  `json:"title"`
-	Why          string  `json:"why"`
-	Area         string  `json:"area"`
-	MetricType   string  `json:"metricType"`
-	TargetValue  float64 `json:"targetValue"`
-	CurrentValue float64 `json:"currentValue"`
-	Unit         string  `json:"unit"`
-	StartDate    string  `json:"startDate"`
-	DueDate      *string `json:"dueDate"`
-	Status       string  `json:"status"`
-	Health       string  `json:"health"`
+	ID           *uuid.UUID `json:"id,omitempty"`
+	Title        string     `json:"title"`
+	Why          string     `json:"why"`
+	Area         string     `json:"area"`
+	MetricType   string     `json:"metricType"`
+	TargetValue  float64    `json:"targetValue"`
+	CurrentValue float64    `json:"currentValue"`
+	Unit         string     `json:"unit"`
+	StartDate    string     `json:"startDate"`
+	DueDate      *string    `json:"dueDate"`
+	Status       string     `json:"status"`
+	Health       string     `json:"health"`
 }
 
 type UpdateGoalInput = CreateGoalInput
 
 type CreateMilestoneInput struct {
-	Title     string     `json:"title"`
-	DueAt     *time.Time `json:"dueAt"`
-	SortOrder int        `json:"sortOrder"`
+	ID          *uuid.UUID `json:"id,omitempty"`
+	Title       string     `json:"title"`
+	DueAt       *time.Time `json:"dueAt"`
+	CompletedAt *time.Time `json:"completedAt"`
+	SortOrder   int        `json:"sortOrder"`
 }
 
 type UpdateMilestoneInput struct {
@@ -82,13 +85,17 @@ func NewGoalService(store GoalStore, transactor UserTransactor, commands *Comman
 }
 
 func (service *GoalService) Create(ctx context.Context, mutation MutationContext, input CreateGoalInput) (model.Goal, error) {
-	goal := model.Goal{ID: service.newUUID()}
+	goalID := service.newUUID()
+	if input.ID != nil {
+		goalID = *input.ID
+	}
+	goal := model.Goal{ID: goalID}
 	applyGoalInput(&goal, input)
 	if err := validateGoal(goal); err != nil {
 		return model.Goal{}, err
 	}
 	payload, _ := json.Marshal(input)
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "goal.create", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "goal.create", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		created, createErr := service.store.CreateGoal(ctx, tx, mutation.UserID, goal)
 		if createErr != nil {
 			return CommandResult{}, createErr
@@ -165,7 +172,7 @@ func (service *GoalService) Update(ctx context.Context, mutation MutationContext
 		Expected int64           `json:"expectedVersion"`
 		Input    UpdateGoalInput `json:"input"`
 	}{goalID, expectedVersion, input})
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "goal.update", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "goal.update", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		before, readErr := service.store.GetGoal(ctx, tx, mutation.UserID, goalID)
 		if readErr != nil {
 			return CommandResult{}, readErr
@@ -187,7 +194,7 @@ func (service *GoalService) Delete(ctx context.Context, mutation MutationContext
 		return fmt.Errorf("%w: goal ID and expected version are required", ErrValidation)
 	}
 	payload, _ := json.Marshal(map[string]any{"id": goalID, "expectedVersion": expectedVersion})
-	_, err := service.commands.Execute(ctx, resourceCommand(mutation, "goal.delete", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	_, err := executeResourceCommand(ctx, service.commands, mutation, "goal.delete", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		before, readErr := service.store.GetGoal(ctx, tx, mutation.UserID, goalID)
 		if readErr != nil {
 			return CommandResult{}, readErr
@@ -217,7 +224,11 @@ func (service *GoalService) CreateMilestone(ctx context.Context, mutation Mutati
 	if goalID == uuid.Nil {
 		return model.GoalMilestone{}, fmt.Errorf("%w: goal ID is required", ErrValidation)
 	}
-	milestone := model.GoalMilestone{ID: service.newUUID(), GoalID: goalID, Title: strings.TrimSpace(input.Title), DueAt: utcTime(input.DueAt), SortOrder: input.SortOrder}
+	milestoneID := service.newUUID()
+	if input.ID != nil {
+		milestoneID = *input.ID
+	}
+	milestone := model.GoalMilestone{ID: milestoneID, GoalID: goalID, Title: strings.TrimSpace(input.Title), DueAt: utcTime(input.DueAt), CompletedAt: utcTime(input.CompletedAt), SortOrder: input.SortOrder}
 	if err := validateMilestone(milestone); err != nil {
 		return model.GoalMilestone{}, err
 	}
@@ -225,7 +236,7 @@ func (service *GoalService) CreateMilestone(ctx context.Context, mutation Mutati
 		GoalID uuid.UUID            `json:"goalId"`
 		Input  CreateMilestoneInput `json:"input"`
 	}{goalID, input})
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "milestone.create", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "milestone.create", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		if _, readErr := service.store.GetGoal(ctx, tx, mutation.UserID, goalID); readErr != nil {
 			return CommandResult{}, readErr
 		}
@@ -280,7 +291,7 @@ func (service *GoalService) UpdateMilestone(ctx context.Context, mutation Mutati
 		Expected int64                `json:"expectedVersion"`
 		Input    UpdateMilestoneInput `json:"input"`
 	}{milestoneID, expectedVersion, input})
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "milestone.update", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "milestone.update", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		before, readErr := service.store.GetMilestone(ctx, tx, mutation.UserID, milestoneID)
 		if readErr != nil {
 			return CommandResult{}, readErr
@@ -303,7 +314,7 @@ func (service *GoalService) DeleteMilestone(ctx context.Context, mutation Mutati
 		return fmt.Errorf("%w: milestone ID and expected version are required", ErrValidation)
 	}
 	payload, _ := json.Marshal(map[string]any{"id": milestoneID, "expectedVersion": expectedVersion})
-	_, err := service.commands.Execute(ctx, resourceCommand(mutation, "milestone.delete", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	_, err := executeResourceCommand(ctx, service.commands, mutation, "milestone.delete", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		before, readErr := service.store.GetMilestone(ctx, tx, mutation.UserID, milestoneID)
 		if readErr != nil {
 			return CommandResult{}, readErr

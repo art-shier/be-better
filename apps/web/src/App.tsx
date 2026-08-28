@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useAuth } from "./auth/AuthProvider";
 import { AppShell, type ViewName } from "./components/AppShell";
 import { AuthDialog } from "./components/AuthDialog";
+import { PasswordResetPage } from "./components/PasswordResetPage";
+import { VerificationNotice } from "./components/VerificationNotice";
 import { Bot, LockKeyhole } from "lucide-react";
 import { AgentPage } from "./pages/AgentPage";
 import { CalendarPage } from "./pages/CalendarPage";
@@ -38,8 +40,13 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  if (window.location.pathname === "/reset-password") {
+    return <><PasswordResetPage /><AuthDialog /></>;
+  }
+
   return (
     <>
+      <VerificationNotice />
       <AppShell view={view} onNavigate={navigate} online={online}>
         {view === "today" && <TodayPage />}
         {view === "goals" && <GoalsPage />}

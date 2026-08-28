@@ -41,7 +41,15 @@ func (router *Router) verifyEmail(response http.ResponseWriter, request *http.Re
 		router.handleServiceError(response, request, err)
 		return
 	}
-	router.writeJSON(response, http.StatusOK, map[string]any{"user": account})
+	result, err := router.sessions.CreateVerifiedSession(request.Context(), account, request.UserAgent())
+	if err != nil {
+		router.handleServiceError(response, request, err)
+		return
+	}
+	router.setSessionCookie(response, request, result.Token, result.Session.ExpiresAt)
+	router.writeJSON(response, http.StatusOK, map[string]any{
+		"user": result.Account, "expiresAt": result.Session.ExpiresAt,
+	})
 }
 
 func (router *Router) resendVerification(response http.ResponseWriter, request *http.Request) {

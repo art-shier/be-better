@@ -190,10 +190,12 @@ CREATE TABLE dayorder.calendar_event_reminders (
     ),
     CONSTRAINT calendar_event_reminders_attempts_check CHECK (attempts >= 0),
     CONSTRAINT calendar_event_reminders_version_check CHECK (version > 0),
-    CONSTRAINT calendar_event_reminders_user_pair_unique UNIQUE (user_id, id),
-    CONSTRAINT calendar_event_reminders_event_offset_channel_unique
-        UNIQUE (user_id, event_id, offset_minutes, channel)
+    CONSTRAINT calendar_event_reminders_user_pair_unique UNIQUE (user_id, id)
 );
+
+CREATE UNIQUE INDEX calendar_event_reminders_event_offset_channel_unique
+    ON dayorder.calendar_event_reminders (user_id, event_id, offset_minutes, channel)
+    WHERE deleted_at IS NULL;
 
 CREATE INDEX calendar_event_reminders_due_idx
     ON dayorder.calendar_event_reminders (scheduled_at, id)

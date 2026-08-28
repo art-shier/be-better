@@ -50,7 +50,7 @@ func (service *SettingsService) Patch(ctx context.Context, mutation MutationCont
 		return model.UserSettings{}, err
 	}
 	payload, _ := json.Marshal(map[string]any{"expectedVersion": expected, "patch": patchObject})
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "settings.update", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "settings.update", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		before, e := service.store.Get(ctx, tx, mutation.UserID)
 		if e != nil {
 			return CommandResult{}, e

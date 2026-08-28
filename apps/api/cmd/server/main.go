@@ -3,117 +3,152 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
+	"dayorder.local/api/internal/config"
+	"dayorder.local/api/internal/database"
 	"dayorder.local/api/internal/httpapi"
-	"dayorder.local/api/internal/store"
+	dbmigrations "dayorder.local/api/internal/migrations"
+	postgresstore "dayorder.local/api/internal/postgres"
+	"dayorder.local/api/internal/service"
 )
 
 func main() {
-	addr := flag.String("addr", envOr("DAYORDER_ADDR", "127.0.0.1:8080"), "HTTP listen address")
-	dbPath := flag.String("db", envOr("DAYORDER_DB_PATH", filepath.Join("data", "dayorder.db")), "SQLite database path")
-	webDir := flag.String("web-dir", os.Getenv("DAYORDER_WEB_DIR"), "optional built web app directory")
-	flag.Parse()
-
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	storage, err := store.Open(*dbPath)
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	configuration, err := config.Load()
 	if err != nil {
-		logger.Error("open storage", "error", err)
+		logger.Error("invalid server configuration", "error", err)
 		os.Exit(1)
 	}
-	defer storage.Close()
-
-	api := httpapi.New(storage, httpapi.Options{
-		AllowedOrigins: splitCSV(envOr("DAYORDER_ALLOWED_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")),
-		Logger:         logger,
-	})
-	mux := http.NewServeMux()
-	mux.Handle("/api/", api)
-	if *webDir != "" {
-		spa, err := newSPAHandler(*webDir)
-		if err != nil {
-			logger.Error("configure web assets", "error", err)
-			os.Exit(1)
-		}
-		mux.Handle("/", spa)
-	} else {
-		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			_, _ = w.Write([]byte(`{"name":"DayOrder API","health":"/api/v1/health"}`))
-		})
+	startupContext, startupCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	pool, err := database.Open(startupContext, configuration.Database)
+	startupCancel()
+	if err != nil {
+		logger.Error("open API database", "error", err)
+		os.Exit(1)
 	}
-
-	server := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second}
+	defer pool.Close()
+	repository, err := postgresstore.NewAccountRepository(pool)
+	if err != nil {
+		logger.Error("create account repository", "error", err)
+		os.Exit(1)
+	}
+	accounts, err := service.NewAccountService(repository)
+	if err != nil {
+		logger.Error("create account service", "error", err)
+		os.Exit(1)
+	}
+	sessions, err := service.NewSessionService(repository, repository, configuration.AuthHMACKey)
+	if err != nil {
+		logger.Error("create session service", "error", err)
+		os.Exit(1)
+	}
+	transactor, err := database.NewPoolTransactor(pool)
+	if err != nil {
+		logger.Error("create transaction coordinator", "error", err)
+		os.Exit(1)
+	}
+	idempotency, err := service.NewIdempotencyService(postgresstore.NewIdempotencyRepository())
+	if err != nil {
+		logger.Error("create idempotency service", "error", err)
+		os.Exit(1)
+	}
+	syncService, err := service.NewSyncService(postgresstore.NewSyncRepository(), transactor, configuration.AuthHMACKey)
+	if err != nil {
+		logger.Error("create sync service", "error", err)
+		os.Exit(1)
+	}
+	auditService, err := service.NewAuditService(postgresstore.NewAuditRepository())
+	if err != nil {
+		logger.Error("create audit service", "error", err)
+		os.Exit(1)
+	}
+	commands, err := service.NewCommandService(transactor, idempotency, syncService, auditService, postgresstore.NewOutboxWriter())
+	if err != nil {
+		logger.Error("create command service", "error", err)
+		os.Exit(1)
+	}
+	cursors, err := service.NewResourceCursorCodec(configuration.AuthHMACKey)
+	if err != nil {
+		logger.Error("create resource cursor codec", "error", err)
+		os.Exit(1)
+	}
+	goals, err := service.NewGoalService(postgresstore.NewGoalRepository(), transactor, commands, cursors)
+	if err != nil {
+		logger.Error("create goal service", "error", err)
+		os.Exit(1)
+	}
+	tasks, err := service.NewTaskService(postgresstore.NewTaskRepository(), transactor, commands, cursors)
+	if err != nil {
+		logger.Error("create task service", "error", err)
+		os.Exit(1)
+	}
+	calendar, err := service.NewCalendarService(postgresstore.NewCalendarRepository(), transactor, commands, cursors)
+	if err != nil {
+		logger.Error("create calendar service", "error", err)
+		os.Exit(1)
+	}
+	content, err := service.NewContentService(postgresstore.NewContentRepository(), transactor, commands, cursors)
+	if err != nil {
+		logger.Error("create content service", "error", err)
+		os.Exit(1)
+	}
+	settings, err := service.NewSettingsService(postgresstore.NewSettingsRepository(), transactor, commands)
+	if err != nil {
+		logger.Error("create settings service", "error", err)
+		os.Exit(1)
+	}
+	devices, err := service.NewDeviceService(postgresstore.NewDeviceRepository(), transactor, auditService)
+	if err != nil {
+		logger.Error("create device service", "error", err)
+		os.Exit(1)
+	}
+	handler, err := httpapi.NewRouter(httpapi.RouterOptions{
+		Accounts: accounts, Sessions: sessions, Goals: goals, Tasks: tasks, Calendar: calendar,
+		Content: content, Settings: settings, Devices: devices, Sync: syncService, AllowedOrigins: configuration.AllowedOrigins, Logger: logger,
+		Ready: func(ctx context.Context) error {
+			if err := database.Ping(ctx, pool, configuration.Database.HealthTimeout); err != nil {
+				return err
+			}
+			var version int
+			var dirty bool
+			if err := pool.QueryRow(ctx, "SELECT version, dirty FROM dayorder.schema_migrations LIMIT 1").Scan(&version, &dirty); err != nil {
+				return err
+			}
+			if dirty || version != int(dbmigrations.LatestVersion) {
+				return fmt.Errorf("database schema version is not current")
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		logger.Error("create API router", "error", err)
+		os.Exit(1)
+	}
+	server := &http.Server{
+		Addr: configuration.Address, Handler: handler,
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second,
+		WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second,
+	}
 	go func() {
-		logger.Info("DayOrder server started", "addr", "http://"+*addr, "database", *dbPath, "webDir", *webDir)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("serve", "error", err)
+		logger.Info("DayOrder PostgreSQL API started", "addr", configuration.Address)
+		if serveErr := server.ListenAndServe(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			logger.Error("serve PostgreSQL API", "error", serveErr)
 			os.Exit(1)
 		}
 	}()
-
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	<-shutdownContext.Done()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := server.Shutdown(ctx); err != nil {
-		logger.Error("graceful shutdown", "error", err)
+	if err = server.Shutdown(ctx); err != nil {
+		logger.Error("graceful API shutdown", "error", err)
 	}
-}
-
-func envOr(key, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		return value
-	}
-	return fallback
-}
-
-func splitCSV(value string) []string {
-	parts := strings.Split(value, ",")
-	result := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part = strings.TrimSpace(part); part != "" {
-			result = append(result, part)
-		}
-	}
-	return result
-}
-
-func newSPAHandler(root string) (http.Handler, error) {
-	absolute, err := filepath.Abs(root)
-	if err != nil {
-		return nil, err
-	}
-	indexPath := filepath.Join(absolute, "index.html")
-	if _, err = os.Stat(indexPath); err != nil {
-		return nil, err
-	}
-	files := http.FileServer(http.Dir(absolute))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cleaned := filepath.Clean(filepath.FromSlash(strings.TrimPrefix(r.URL.Path, "/")))
-		candidate := filepath.Join(absolute, cleaned)
-		relative, relErr := filepath.Rel(absolute, candidate)
-		if relErr != nil || strings.HasPrefix(relative, "..") {
-			http.NotFound(w, r)
-			return
-		}
-		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
-			if strings.Contains(r.URL.Path, "/assets/") {
-				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			}
-			files.ServeHTTP(w, r)
-			return
-		}
-		w.Header().Set("Cache-Control", "no-cache")
-		http.ServeFile(w, r, indexPath)
-	}), nil
 }

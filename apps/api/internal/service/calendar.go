@@ -18,17 +18,19 @@ import (
 type CalendarStore interface {
 	CreateEvent(context.Context, database.Tx, uuid.UUID, model.CalendarEvent) (model.CalendarEvent, error)
 	GetEvent(context.Context, database.Tx, uuid.UUID, uuid.UUID) (model.CalendarEvent, error)
-	ListEvents(context.Context, database.Tx, uuid.UUID, *time.Time, *time.Time, int) ([]model.CalendarEvent, error)
+	ListEvents(context.Context, database.Tx, uuid.UUID, *time.Time, *time.Time, *model.ResourcePosition, int) ([]model.CalendarEvent, error)
 	UpdateEvent(context.Context, database.Tx, uuid.UUID, model.CalendarEvent, int64) (model.CalendarEvent, []model.CalendarReminder, error)
 	DeleteEvent(context.Context, database.Tx, uuid.UUID, uuid.UUID, int64) (model.CalendarEvent, []model.CalendarReminder, error)
 	CreateReminder(context.Context, database.Tx, uuid.UUID, model.CalendarReminder) (model.CalendarReminder, error)
 	ListReminders(context.Context, database.Tx, uuid.UUID, uuid.UUID) ([]model.CalendarReminder, error)
+	DeleteReminder(context.Context, database.Tx, uuid.UUID, uuid.UUID, uuid.UUID) (model.CalendarReminder, error)
 }
 
 type CalendarService struct {
 	store      CalendarStore
 	transactor UserTransactor
 	commands   *CommandService
+	cursors    *ResourceCursorCodec
 	newUUID    func() uuid.UUID
 }
 
@@ -37,6 +39,7 @@ type ReminderInput struct {
 	Channel       string `json:"channel"`
 }
 type CalendarEventInput struct {
+	ID             *uuid.UUID      `json:"id,omitempty"`
 	Title          string          `json:"title"`
 	StartAt        time.Time       `json:"startAt"`
 	EndAt          time.Time       `json:"endAt"`
@@ -52,23 +55,36 @@ type CalendarEventResult struct {
 	Reminders []model.CalendarReminder `json:"reminders"`
 }
 
-func NewCalendarService(store CalendarStore, transactor UserTransactor, commands *CommandService) (*CalendarService, error) {
-	if store == nil || transactor == nil || commands == nil {
-		return nil, errors.New("calendar store, transactor, and commands are required")
+type CalendarPage struct {
+	Events     []model.CalendarEvent `json:"events"`
+	NextCursor string                `json:"nextCursor,omitempty"`
+	HasMore    bool                  `json:"hasMore"`
+}
+
+func NewCalendarService(store CalendarStore, transactor UserTransactor, commands *CommandService, cursors *ResourceCursorCodec) (*CalendarService, error) {
+	if store == nil || transactor == nil || commands == nil || cursors == nil {
+		return nil, errors.New("calendar store, transactor, commands, and cursors are required")
 	}
-	return &CalendarService{store: store, transactor: transactor, commands: commands, newUUID: uuid.New}, nil
+	return &CalendarService{store: store, transactor: transactor, commands: commands, cursors: cursors, newUUID: uuid.New}, nil
 }
 
 func (service *CalendarService) Create(ctx context.Context, mutation MutationContext, input CalendarEventInput) (CalendarEventResult, error) {
-	event := eventFromInput(service.newUUID(), input)
+	eventID := service.newUUID()
+	if input.ID != nil {
+		eventID = *input.ID
+	}
+	event := eventFromInput(eventID, input)
 	if err := validateCalendarEvent(event); err != nil {
 		return CalendarEventResult{}, err
 	}
 	if err := validateReminderInputs(input.Reminders); err != nil {
 		return CalendarEventResult{}, err
 	}
+	if err := validateReminderInputs(input.Reminders); err != nil {
+		return CalendarEventResult{}, err
+	}
 	payload, _ := json.Marshal(input)
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "calendar_event.create", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "calendar_event.create", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		created, createErr := service.store.CreateEvent(ctx, tx, mutation.UserID, event)
 		if createErr != nil {
 			return CommandResult{}, createErr
@@ -108,17 +124,45 @@ func (service *CalendarService) Get(ctx context.Context, userID, eventID uuid.UU
 	return result, err
 }
 
-func (service *CalendarService) List(ctx context.Context, userID uuid.UUID, start, end *time.Time, limit int) ([]model.CalendarEvent, error) {
-	if limit < 1 || limit > 500 || (start != nil && end != nil && end.Before(*start)) {
-		return nil, fmt.Errorf("%w: invalid calendar window or limit", ErrValidation)
+func (service *CalendarService) List(ctx context.Context, userID uuid.UUID, start, end *time.Time, cursor string, limit int) (CalendarPage, error) {
+	if limit < 1 || limit > maxResourcePageSize || (start != nil && end != nil && end.Before(*start)) {
+		return CalendarPage{}, fmt.Errorf("%w: invalid calendar window or limit", ErrValidation)
+	}
+	scope := "calendar-events:" + optionalTimeScope(start) + ":" + optionalTimeScope(end)
+	var after *model.ResourcePosition
+	if cursor != "" {
+		decoded, err := service.cursors.Decode(userID, scope, cursor)
+		if err != nil {
+			return CalendarPage{}, err
+		}
+		after = &decoded
 	}
 	var events []model.CalendarEvent
 	err := service.transactor.WithUser(ctx, userID, func(ctx context.Context, tx database.Tx) error {
 		var readErr error
-		events, readErr = service.store.ListEvents(ctx, tx, userID, utcTime(start), utcTime(end), limit)
+		events, readErr = service.store.ListEvents(ctx, tx, userID, utcTime(start), utcTime(end), after, limit+1)
 		return readErr
 	})
-	return events, err
+	if err != nil {
+		return CalendarPage{}, err
+	}
+	hasMore := len(events) > limit
+	if hasMore {
+		events = events[:limit]
+	}
+	next := ""
+	if hasMore {
+		last := events[len(events)-1]
+		next, err = service.cursors.Encode(userID, scope, model.ResourcePosition{UpdatedAt: last.StartAt, ID: last.ID})
+	}
+	return CalendarPage{Events: events, NextCursor: next, HasMore: hasMore}, err
+}
+
+func optionalTimeScope(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func (service *CalendarService) Update(ctx context.Context, mutation MutationContext, eventID uuid.UUID, expectedVersion int64, input CalendarEventInput) (CalendarEventResult, error) {
@@ -134,23 +178,57 @@ func (service *CalendarService) Update(ctx context.Context, mutation MutationCon
 		Expected int64              `json:"expectedVersion"`
 		Input    CalendarEventInput `json:"input"`
 	}{eventID, expectedVersion, input})
-	response, err := service.commands.Execute(ctx, resourceCommand(mutation, "calendar_event.update", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "calendar_event.update", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		before, readErr := service.store.GetEvent(ctx, tx, mutation.UserID, eventID)
 		if readErr != nil {
 			return CommandResult{}, readErr
 		}
-		updated, reminders, updateErr := service.store.UpdateEvent(ctx, tx, mutation.UserID, event, expectedVersion)
+		beforeReminders, readErr := service.store.ListReminders(ctx, tx, mutation.UserID, eventID)
+		if readErr != nil {
+			return CommandResult{}, readErr
+		}
+		updated, rescheduled, updateErr := service.store.UpdateEvent(ctx, tx, mutation.UserID, event, expectedVersion)
 		if updateErr != nil {
 			return CommandResult{}, updateErr
 		}
 		changes := []model.SyncChangeDraft{{EntityType: "calendar_event", EntityID: updated.ID, Operation: "update", EntityVersion: updated.Version}}
-		outbox := make([]model.OutboxDraft, 0, len(reminders))
-		for _, reminder := range reminders {
-			changes = append(changes, model.SyncChangeDraft{EntityType: "reminder", EntityID: reminder.ID, Operation: "update", EntityVersion: reminder.Version})
+		remaining := make(map[string]model.CalendarReminder, len(rescheduled))
+		for _, reminder := range rescheduled {
+			remaining[reminderKey(reminder.OffsetMinutes, reminder.Channel)] = reminder
+		}
+		reminders := make([]model.CalendarReminder, 0, len(input.Reminders))
+		outbox := make([]model.OutboxDraft, 0, len(input.Reminders))
+		for _, desired := range input.Reminders {
+			key := reminderKey(desired.OffsetMinutes, desired.Channel)
+			reminder, exists := remaining[key]
+			operation := "update"
+			if exists {
+				delete(remaining, key)
+			} else {
+				operation = "create"
+				reminder, updateErr = service.store.CreateReminder(ctx, tx, mutation.UserID, model.CalendarReminder{
+					ID: service.newUUID(), EventID: updated.ID, OffsetMinutes: desired.OffsetMinutes, Channel: desired.Channel,
+					ScheduledAt: updated.StartAt.Add(-time.Duration(desired.OffsetMinutes) * time.Minute),
+				})
+				if updateErr != nil {
+					return CommandResult{}, updateErr
+				}
+			}
+			reminders = append(reminders, reminder)
+			changes = append(changes, model.SyncChangeDraft{EntityType: "reminder", EntityID: reminder.ID, Operation: operation, EntityVersion: reminder.Version})
 			outbox = append(outbox, reminderOutbox(reminder))
 		}
+		for _, reminder := range remaining {
+			deleted, deleteErr := service.store.DeleteReminder(ctx, tx, mutation.UserID, updated.ID, reminder.ID)
+			if deleteErr != nil {
+				return CommandResult{}, deleteErr
+			}
+			changes = append(changes, model.SyncChangeDraft{EntityType: "reminder", EntityID: deleted.ID, Operation: "delete", EntityVersion: deleted.Version})
+		}
+		beforeResult := CalendarEventResult{Event: before, Reminders: beforeReminders}
+		afterResult := CalendarEventResult{Event: updated, Reminders: reminders}
 		return CommandResult{Status: 200, Body: resourceJSON(CalendarEventResult{Event: updated, Reminders: reminders}), Changes: changes, Outbox: outbox,
-			Audits: []model.AuditDraft{{Action: "calendar_event.update", BeforeData: resourceJSON(before), AfterData: resourceJSON(updated), Entities: []model.AuditEntity{{EntityType: "calendar_event", EntityID: updated.ID}}}}}, nil
+			Audits: []model.AuditDraft{{Action: "calendar_event.update", BeforeData: resourceJSON(beforeResult), AfterData: resourceJSON(afterResult), Entities: []model.AuditEntity{{EntityType: "calendar_event", EntityID: updated.ID}}}}}, nil
 	})
 	return decodeCalendarResult(response, err)
 }
@@ -160,7 +238,7 @@ func (service *CalendarService) Delete(ctx context.Context, mutation MutationCon
 		return fmt.Errorf("%w: event ID and expected version are required", ErrValidation)
 	}
 	payload, _ := json.Marshal(map[string]any{"id": eventID, "expectedVersion": expectedVersion})
-	_, err := service.commands.Execute(ctx, resourceCommand(mutation, "calendar_event.delete", payload), func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+	_, err := executeResourceCommand(ctx, service.commands, mutation, "calendar_event.delete", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
 		before, readErr := service.store.GetEvent(ctx, tx, mutation.UserID, eventID)
 		if readErr != nil {
 			return CommandResult{}, readErr
@@ -209,13 +287,17 @@ func validateReminderInputs(inputs []ReminderInput) error {
 		if input.OffsetMinutes < 0 || input.OffsetMinutes > 525600 || (input.Channel != "in_app" && input.Channel != "email") {
 			return fmt.Errorf("%w: invalid reminder", ErrValidation)
 		}
-		key := fmt.Sprintf("%d:%s", input.OffsetMinutes, input.Channel)
+		key := reminderKey(input.OffsetMinutes, input.Channel)
 		if seen[key] {
 			return fmt.Errorf("%w: duplicate reminder", ErrValidation)
 		}
 		seen[key] = true
 	}
 	return nil
+}
+
+func reminderKey(offsetMinutes int, channel string) string {
+	return fmt.Sprintf("%d:%s", offsetMinutes, channel)
 }
 
 func reminderOutbox(reminder model.CalendarReminder) model.OutboxDraft {

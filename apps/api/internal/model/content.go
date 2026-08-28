@@ -22,16 +22,17 @@ type Record struct {
 }
 
 type Note struct {
-	ID           uuid.UUID  `json:"id"`
-	Title        string     `json:"title"`
-	BodyMarkdown string     `json:"bodyMarkdown"`
-	Category     string     `json:"category"`
-	ArchivedAt   *time.Time `json:"archivedAt,omitempty"`
-	Version      int64      `json:"version"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
-	DeletedAt    *time.Time `json:"deletedAt,omitempty"`
-	Tags         []Tag      `json:"tags,omitempty"`
+	ID              uuid.UUID   `json:"id"`
+	Title           string      `json:"title"`
+	BodyMarkdown    string      `json:"bodyMarkdown"`
+	Category        string      `json:"category"`
+	ArchivedAt      *time.Time  `json:"archivedAt,omitempty"`
+	Version         int64       `json:"version"`
+	CreatedAt       time.Time   `json:"createdAt"`
+	UpdatedAt       time.Time   `json:"updatedAt"`
+	DeletedAt       *time.Time  `json:"deletedAt,omitempty"`
+	Tags            []Tag       `json:"tags,omitempty"`
+	LinkedEntityIDs []uuid.UUID `json:"linkedEntityIds"`
 }
 
 type DailyReview struct {

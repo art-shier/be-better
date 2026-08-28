@@ -11,15 +11,23 @@ export type AgentStepStatus = "pending" | "running" | "done" | "failed";
 export type ActionMode = "read" | "confirm";
 export type DataMode = "local" | "selected";
 
-export interface Milestone {
+export interface VersionedResource {
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+export interface Milestone extends VersionedResource {
   id: string;
+  goalId: string;
   title: string;
   dueAt?: string;
   completedAt?: string;
   sortOrder: number;
 }
 
-export interface Goal {
+export interface Goal extends VersionedResource {
   id: string;
   title: string;
   why: string;
@@ -33,11 +41,9 @@ export interface Goal {
   status: GoalStatus;
   health: GoalHealth;
   milestones: Milestone[];
-  createdAt: string;
-  updatedAt: string;
 }
 
-export interface Task {
+export interface Task extends VersionedResource {
   id: string;
   title: string;
   status: TaskStatus;
@@ -48,24 +54,38 @@ export interface Task {
   scheduledEnd?: string;
   goalId?: string;
   sourceRecordId?: string;
-  createdAt: string;
   completedAt?: string;
 }
 
-export interface CalendarEvent {
+export type ReminderChannel = "in_app" | "email";
+export type ReminderStatus = "pending" | "delivered" | "failed" | "cancelled";
+
+export interface CalendarReminder extends VersionedResource {
+  id: string;
+  eventId: string;
+  offsetMinutes: number;
+  channel: ReminderChannel;
+  scheduledAt: string;
+  status: ReminderStatus;
+  deliveredAt?: string;
+  attempts: number;
+}
+
+export interface CalendarEvent extends VersionedResource {
   id: string;
   title: string;
   startAt: string;
   endAt: string;
   location?: string;
   reminderMinutes: number[];
+  reminders?: CalendarReminder[];
+  timezone: string;
   sourceCalendar?: string;
   kind: "fixed" | "focus" | "health" | "personal";
   goalId?: string;
-  createdAt: string;
 }
 
-export interface RecordEntry {
+export interface RecordEntry extends VersionedResource {
   id: string;
   rawText: string;
   kind: RecordKind;
@@ -77,19 +97,17 @@ export interface RecordEntry {
   archivedAt?: string;
 }
 
-export interface Note {
+export interface Note extends VersionedResource {
   id: string;
   title: string;
   bodyMarkdown: string;
   tags: string[];
   category: "产品思考" | "阅读笔记" | "健康训练" | "生活方法" | "其他";
   linkedEntityIds: string[];
-  createdAt: string;
-  updatedAt: string;
   archivedAt?: string;
 }
 
-export interface DailyReview {
+export interface DailyReview extends VersionedResource {
   id: string;
   date: string;
   wins: string;
@@ -167,6 +185,9 @@ export type UndoAction =
   | { type: "batch"; actions: UndoAction[] };
 
 export interface AppSettings {
+  schemaVersion: number;
+  version: number;
+  updatedAt: string;
   energy: number;
   aiEnabled: boolean;
   remindersEnabled: boolean;

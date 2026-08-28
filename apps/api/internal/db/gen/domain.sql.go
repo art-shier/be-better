@@ -763,14 +763,14 @@ SELECT
     reminder.status,
     reminder.version AS reminder_version,
     reminder.deleted_at AS reminder_deleted_at,
-	account.status AS account_status,
-	account.deleted_at AS account_deleted_at,
+    account.status AS account_status,
+    account.deleted_at AS account_deleted_at,
     account.email,
     account.display_name,
     event.title AS event_title,
     event.start_at AS event_start_at,
-	event.timezone,
-	event.deleted_at AS event_deleted_at
+    event.timezone,
+    event.deleted_at AS event_deleted_at
 FROM dayorder.calendar_event_reminders AS reminder
 JOIN dayorder.calendar_events AS event
   ON event.user_id = reminder.user_id AND event.id = reminder.event_id
@@ -833,14 +833,14 @@ SELECT
     reminder.status,
     reminder.version AS reminder_version,
     reminder.deleted_at AS reminder_deleted_at,
-	account.status AS account_status,
-	account.deleted_at AS account_deleted_at,
+    account.status AS account_status,
+    account.deleted_at AS account_deleted_at,
     account.email,
     account.display_name,
     event.title AS event_title,
     event.start_at AS event_start_at,
-	event.timezone,
-	event.deleted_at AS event_deleted_at
+    event.timezone,
+    event.deleted_at AS event_deleted_at
 FROM dayorder.calendar_event_reminders AS reminder
 JOIN dayorder.calendar_events AS event
   ON event.user_id = reminder.user_id AND event.id = reminder.event_id
@@ -994,16 +994,32 @@ WHERE user_id = $1
   AND deleted_at IS NULL
   AND ($2::timestamptz IS NULL OR end_at >= $2)
   AND ($3::timestamptz IS NULL OR start_at <= $3)
+  AND (
+      $4::timestamptz IS NULL
+      OR start_at > $4::timestamptz
+      OR (start_at = $4::timestamptz AND id > $5::uuid)
+  )
 ORDER BY start_at, id
-LIMIT $4
+LIMIT $6
 `
 
-func (q *Queries) ListCalendarEvents(ctx context.Context, userID pgtype.UUID, windowStart pgtype.Timestamptz, windowEnd pgtype.Timestamptz, pageSize int32) ([]*DayorderCalendarEvent, error) {
+type ListCalendarEventsParams struct {
+	UserID       pgtype.UUID        `db:"user_id" json:"user_id"`
+	WindowStart  pgtype.Timestamptz `db:"window_start" json:"window_start"`
+	WindowEnd    pgtype.Timestamptz `db:"window_end" json:"window_end"`
+	AfterStartAt pgtype.Timestamptz `db:"after_start_at" json:"after_start_at"`
+	AfterID      pgtype.UUID        `db:"after_id" json:"after_id"`
+	PageSize     int32              `db:"page_size" json:"page_size"`
+}
+
+func (q *Queries) ListCalendarEvents(ctx context.Context, arg ListCalendarEventsParams) ([]*DayorderCalendarEvent, error) {
 	rows, err := q.db.Query(ctx, listCalendarEvents,
-		userID,
-		windowStart,
-		windowEnd,
-		pageSize,
+		arg.UserID,
+		arg.WindowStart,
+		arg.WindowEnd,
+		arg.AfterStartAt,
+		arg.AfterID,
+		arg.PageSize,
 	)
 	if err != nil {
 		return nil, err
@@ -1081,11 +1097,21 @@ func (q *Queries) ListCalendarReminders(ctx context.Context, userID pgtype.UUID,
 const listDailyReviews = `-- name: ListDailyReviews :many
 SELECT id, user_id, review_date, wins, blockers, mood, energy, tomorrow_focus, ai_summary, version, created_at, updated_at, deleted_at FROM dayorder.daily_reviews
 WHERE user_id = $1 AND deleted_at IS NULL
-ORDER BY review_date DESC, id DESC LIMIT $2
+  AND (
+      $2::date IS NULL
+      OR review_date < $2::date
+      OR (review_date = $2::date AND id < $3::uuid)
+  )
+ORDER BY review_date DESC, id DESC LIMIT $4
 `
 
-func (q *Queries) ListDailyReviews(ctx context.Context, userID pgtype.UUID, pageSize int32) ([]*DayorderDailyReview, error) {
-	rows, err := q.db.Query(ctx, listDailyReviews, userID, pageSize)
+func (q *Queries) ListDailyReviews(ctx context.Context, userID pgtype.UUID, afterReviewDate pgtype.Date, afterID pgtype.UUID, pageSize int32) ([]*DayorderDailyReview, error) {
+	rows, err := q.db.Query(ctx, listDailyReviews,
+		userID,
+		afterReviewDate,
+		afterID,
+		pageSize,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1702,6 +1728,35 @@ func (q *Queries) SoftDeleteCalendarEvent(ctx context.Context, userID pgtype.UUI
 		&i.Kind,
 		&i.SourceCalendar,
 		&i.GoalID,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const softDeleteCalendarReminder = `-- name: SoftDeleteCalendarReminder :one
+UPDATE dayorder.calendar_event_reminders
+SET deleted_at = now(), status = 'cancelled', version = version + 1, updated_at = now()
+WHERE user_id = $1 AND event_id = $2
+  AND id = $3 AND deleted_at IS NULL
+RETURNING id, user_id, event_id, offset_minutes, channel, scheduled_at, status, delivered_at, attempts, version, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) SoftDeleteCalendarReminder(ctx context.Context, userID pgtype.UUID, eventID pgtype.UUID, reminderID pgtype.UUID) (*DayorderCalendarEventReminder, error) {
+	row := q.db.QueryRow(ctx, softDeleteCalendarReminder, userID, eventID, reminderID)
+	var i DayorderCalendarEventReminder
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.EventID,
+		&i.OffsetMinutes,
+		&i.Channel,
+		&i.ScheduledAt,
+		&i.Status,
+		&i.DeliveredAt,
+		&i.Attempts,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,

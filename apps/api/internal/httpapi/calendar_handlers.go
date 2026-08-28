@@ -6,7 +6,7 @@ import (
 	"dayorder.local/api/internal/service"
 )
 
-var calendarPatchFields = map[string]bool{"title": true, "startAt": true, "endAt": true, "timezone": true, "location": true, "kind": true, "sourceCalendar": true, "goalId": true}
+var calendarPatchFields = map[string]bool{"title": true, "startAt": true, "endAt": true, "timezone": true, "location": true, "kind": true, "sourceCalendar": true, "goalId": true, "reminders": true}
 
 func (router *Router) createCalendarEvent(w http.ResponseWriter, r *http.Request) {
 	auth, ok := router.authenticateRequest(w, r)
@@ -65,12 +65,12 @@ func (router *Router) listCalendarEvents(w http.ResponseWriter, r *http.Request)
 		router.writeError(w, r, http.StatusBadRequest, "INVALID_TIME_WINDOW", "end 必须是 RFC3339 时间", false, nil)
 		return
 	}
-	values, err := router.calendar.List(r.Context(), auth.Account.ID, start, end, limit)
+	page, err := router.calendar.List(r.Context(), auth.Account.ID, start, end, r.URL.Query().Get("cursor"), limit)
 	if err != nil {
 		router.handleServiceError(w, r, err)
 		return
 	}
-	router.writeJSON(w, http.StatusOK, map[string]any{"events": values})
+	router.writeJSON(w, http.StatusOK, page)
 }
 func (router *Router) updateCalendarEvent(w http.ResponseWriter, r *http.Request) {
 	auth, ok := router.authenticateRequest(w, r)
@@ -94,7 +94,11 @@ func (router *Router) updateCalendarEvent(w http.ResponseWriter, r *http.Request
 		router.handleServiceError(w, r, err)
 		return
 	}
-	seed := service.CalendarEventInput{Title: current.Event.Title, StartAt: current.Event.StartAt, EndAt: current.Event.EndAt, Timezone: current.Event.Timezone, Location: current.Event.Location, Kind: current.Event.Kind, SourceCalendar: current.Event.SourceCalendar, GoalID: current.Event.GoalID}
+	reminders := make([]service.ReminderInput, len(current.Reminders))
+	for index, reminder := range current.Reminders {
+		reminders[index] = service.ReminderInput{OffsetMinutes: reminder.OffsetMinutes, Channel: reminder.Channel}
+	}
+	seed := service.CalendarEventInput{Title: current.Event.Title, StartAt: current.Event.StartAt, EndAt: current.Event.EndAt, Timezone: current.Event.Timezone, Location: current.Event.Location, Kind: current.Event.Kind, SourceCalendar: current.Event.SourceCalendar, GoalID: current.Event.GoalID, Reminders: reminders}
 	var input service.CalendarEventInput
 	if !router.decodeMergePatch(w, r, seed, calendarPatchFields, &input) {
 		return

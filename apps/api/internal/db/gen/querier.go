@@ -62,9 +62,9 @@ type Querier interface {
 	InvalidateAccountTokens(ctx context.Context, userID pgtype.UUID, purpose string) (int64, error)
 	LinkNoteTag(ctx context.Context, userID pgtype.UUID, noteID pgtype.UUID, tagID pgtype.UUID) error
 	LinkRecordTag(ctx context.Context, userID pgtype.UUID, recordID pgtype.UUID, tagID pgtype.UUID) error
-	ListCalendarEvents(ctx context.Context, userID pgtype.UUID, windowStart pgtype.Timestamptz, windowEnd pgtype.Timestamptz, pageSize int32) ([]*DayorderCalendarEvent, error)
+	ListCalendarEvents(ctx context.Context, arg ListCalendarEventsParams) ([]*DayorderCalendarEvent, error)
 	ListCalendarReminders(ctx context.Context, userID pgtype.UUID, eventID pgtype.UUID) ([]*DayorderCalendarEventReminder, error)
-	ListDailyReviews(ctx context.Context, userID pgtype.UUID, pageSize int32) ([]*DayorderDailyReview, error)
+	ListDailyReviews(ctx context.Context, userID pgtype.UUID, afterReviewDate pgtype.Date, afterID pgtype.UUID, pageSize int32) ([]*DayorderDailyReview, error)
 	ListEntityLinks(ctx context.Context, userID pgtype.UUID, sourceType string, sourceID pgtype.UUID) ([]*DayorderEntityLink, error)
 	ListGoalMilestones(ctx context.Context, userID pgtype.UUID, goalID pgtype.UUID) ([]*DayorderGoalMilestone, error)
 	ListGoals(ctx context.Context, userID pgtype.UUID, afterUpdatedAt pgtype.Timestamptz, afterID pgtype.UUID, pageSize int32) ([]*DayorderGoal, error)
@@ -91,6 +91,7 @@ type Querier interface {
 	SearchNotes(ctx context.Context, userID pgtype.UUID, query string, pageSize int32) ([]*DayorderNote, error)
 	SetUserContext(ctx context.Context, userID pgtype.UUID) error
 	SoftDeleteCalendarEvent(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderCalendarEvent, error)
+	SoftDeleteCalendarReminder(ctx context.Context, userID pgtype.UUID, eventID pgtype.UUID, reminderID pgtype.UUID) (*DayorderCalendarEventReminder, error)
 	SoftDeleteCalendarReminders(ctx context.Context, userID pgtype.UUID, eventID pgtype.UUID) ([]*DayorderCalendarEventReminder, error)
 	SoftDeleteDailyReview(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderDailyReview, error)
 	SoftDeleteGoal(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderGoal, error)

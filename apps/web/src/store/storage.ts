@@ -5,6 +5,7 @@ export const LEGACY_SYNC_KEY = "dayorder.sync.v1";
 export const LEGACY_CONFLICT_KEY = "dayorder.conflict.v1";
 export const GUEST_STORAGE_KEY = "dayorder.guest.app.v1";
 export const LAST_ACCOUNT_KEY = "dayorder.last-account.v1";
+export const PENDING_REGISTRATION_KEY = "dayorder.pending-registration.v1";
 
 export interface LastAccount {
   id: string;
@@ -12,18 +13,15 @@ export interface LastAccount {
   displayName: string;
 }
 
+export interface PendingRegistration {
+	user: LastAccount;
+	migrate: boolean;
+}
+
 export interface StorageKeys {
   data: string;
   sync: string;
   conflict: string;
-}
-
-export function userStorageKeys(userId: string): StorageKeys {
-  return {
-    data: `dayorder.user.${userId}.app.v1`,
-    sync: `dayorder.user.${userId}.sync.v1`,
-    conflict: `dayorder.user.${userId}.conflict.v1`,
-  };
 }
 
 export const guestStorageKeys: StorageKeys = {
@@ -64,14 +62,32 @@ export function clearLastAccount(): void {
   try { localStorage.removeItem(LAST_ACCOUNT_KEY); } catch { /* best effort */ }
 }
 
-export function hasUserCache(userId: string): boolean {
-  try { return Boolean(localStorage.getItem(userStorageKeys(userId).data)); } catch { return false; }
+export function readPendingRegistration(): PendingRegistration | null {
+	try {
+		const parsed = JSON.parse(localStorage.getItem(PENDING_REGISTRATION_KEY) ?? "null") as Partial<PendingRegistration> | null;
+		if (!parsed || typeof parsed.migrate !== "boolean" || !parsed.user || typeof parsed.user.id !== "string" || typeof parsed.user.email !== "string" || typeof parsed.user.displayName !== "string") return null;
+		return parsed as PendingRegistration;
+	} catch {
+		return null;
+	}
 }
 
-export function saveUserState(userId: string, data: AppData, revision: number, updatedAt: string): void {
-  const keys = userStorageKeys(userId);
-  localStorage.setItem(keys.data, JSON.stringify(data));
-  localStorage.setItem(keys.sync, JSON.stringify({ revision, fingerprint: fingerprintData(data), updatedAt }));
+export function savePendingRegistration(registration: PendingRegistration): void {
+	try { localStorage.setItem(PENDING_REGISTRATION_KEY, JSON.stringify(registration)); } catch { /* best effort */ }
+}
+
+export function clearPendingRegistration(): void {
+	try { localStorage.removeItem(PENDING_REGISTRATION_KEY); } catch { /* best effort */ }
+}
+
+export function readGuestState(): AppData | null {
+	try {
+		const parsed = JSON.parse(localStorage.getItem(GUEST_STORAGE_KEY) ?? "null") as Partial<AppData> | null;
+		if (!parsed || !Array.isArray(parsed.goals) || !Array.isArray(parsed.tasks) || !Array.isArray(parsed.events) || !parsed.settings) return null;
+		return parsed as AppData;
+	} catch {
+		return null;
+	}
 }
 
 export function clearGuestStorage(): void {
@@ -80,23 +96,4 @@ export function clearGuestStorage(): void {
     localStorage.removeItem(guestStorageKeys.sync);
     localStorage.removeItem(guestStorageKeys.conflict);
   } catch { /* best effort */ }
-}
-
-export function clearUserStorage(userId: string): void {
-  const keys = userStorageKeys(userId);
-  try {
-    localStorage.removeItem(keys.data);
-    localStorage.removeItem(keys.sync);
-    localStorage.removeItem(keys.conflict);
-  } catch { /* best effort */ }
-}
-
-export function fingerprintData(data: AppData): string {
-  const source = JSON.stringify(data);
-  let hash = 2166136261;
-  for (let index = 0; index < source.length; index += 1) {
-    hash ^= source.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `${source.length}:${(hash >>> 0).toString(36)}`;
 }

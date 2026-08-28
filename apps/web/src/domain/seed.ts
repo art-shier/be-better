@@ -1,8 +1,13 @@
 import { addDays } from "date-fns";
-import type { AgentRun, AppData, CalendarEvent, Goal, Note, RecordEntry, Task } from "./types";
+import type { AgentRun, AppData, CalendarEvent, Goal, Milestone, Note, RecordEntry, Task } from "./types";
 import { atOffset, atToday, dateKey, toIso, todayStart } from "./dates";
 
 const nowIso = () => new Date().toISOString();
+
+function milestone(goalId: string, value: Omit<Milestone, "goalId" | "version" | "createdAt" | "updatedAt">): Milestone {
+  const timestamp = value.completedAt ?? value.dueAt ?? nowIso();
+  return { ...value, goalId, version: 1, createdAt: timestamp, updatedAt: timestamp };
+}
 
 const goals: Goal[] = [
   {
@@ -19,12 +24,13 @@ const goals: Goal[] = [
     status: "active",
     health: "attention",
     milestones: [
-      { id: "ms_1", title: "完成问题与人群定义", completedAt: toIso(addDays(todayStart(), -18)), sortOrder: 1 },
-      { id: "ms_2", title: "完成核心闭环", completedAt: toIso(addDays(todayStart(), -6)), sortOrder: 2 },
-      { id: "ms_3", title: "补全首次使用流程", dueAt: toIso(addDays(todayStart(), 3)), sortOrder: 3 },
-      { id: "ms_4", title: "完成可用性验证", dueAt: toIso(addDays(todayStart(), 11)), sortOrder: 4 },
-      { id: "ms_5", title: "输出开发方案", dueAt: toIso(addDays(todayStart(), 18)), sortOrder: 5 },
+      milestone("goal_product", { id: "ms_1", title: "完成问题与人群定义", completedAt: toIso(addDays(todayStart(), -18)), sortOrder: 1 }),
+      milestone("goal_product", { id: "ms_2", title: "完成核心闭环", completedAt: toIso(addDays(todayStart(), -6)), sortOrder: 2 }),
+      milestone("goal_product", { id: "ms_3", title: "补全首次使用流程", dueAt: toIso(addDays(todayStart(), 3)), sortOrder: 3 }),
+      milestone("goal_product", { id: "ms_4", title: "完成可用性验证", dueAt: toIso(addDays(todayStart(), 11)), sortOrder: 4 }),
+      milestone("goal_product", { id: "ms_5", title: "输出开发方案", dueAt: toIso(addDays(todayStart(), 18)), sortOrder: 5 }),
     ],
+    version: 1,
     createdAt: toIso(addDays(todayStart(), -25)),
     updatedAt: toIso(addDays(todayStart(), -4)),
   },
@@ -42,6 +48,7 @@ const goals: Goal[] = [
     status: "active",
     health: "normal",
     milestones: [],
+    version: 1,
     createdAt: toIso(addDays(todayStart(), -35)),
     updatedAt: toIso(addDays(todayStart(), -2)),
   },
@@ -58,6 +65,7 @@ const goals: Goal[] = [
     status: "active",
     health: "normal",
     milestones: [],
+    version: 1,
     createdAt: toIso(addDays(todayStart(), -220)),
     updatedAt: toIso(addDays(todayStart(), -7)),
   },
@@ -74,21 +82,23 @@ const goals: Goal[] = [
     status: "paused",
     health: "stalled",
     milestones: [],
+    version: 1,
     createdAt: toIso(addDays(todayStart(), -70)),
     updatedAt: toIso(addDays(todayStart(), -15)),
   },
 ];
 
+const task = (value: Omit<Task, "version" | "updatedAt">): Task => ({ ...value, version: 1, updatedAt: value.completedAt ?? value.createdAt });
 const tasks: Task[] = [
-  { id: "task_flow", title: "完成产品方案核心流程", status: "doing", priority: "important", estimateMinutes: 70, scheduledStart: toIso(atToday(9)), scheduledEnd: toIso(atToday(10, 10)), goalId: "goal_product", createdAt: toIso(addDays(todayStart(), -4)) },
-  { id: "task_dentist", title: "带上牙片和医保卡", status: "todo", priority: "important", estimateMinutes: 10, dueAt: toIso(atToday(14, 10)), goalId: undefined, createdAt: toIso(addDays(todayStart(), -1)) },
-  { id: "task_interviews", title: "整理用户访谈记录", status: "done", priority: "normal", estimateMinutes: 40, goalId: "goal_product", createdAt: toIso(addDays(todayStart(), -3)), completedAt: toIso(atToday(8, 46)) },
-  { id: "task_read", title: "阅读《设计中的设计》20 页", status: "todo", priority: "normal", estimateMinutes: 25, goalId: "goal_read", createdAt: toIso(addDays(todayStart(), -1)) },
-  { id: "task_weekly", title: "准备本周复盘", status: "todo", priority: "normal", estimateMinutes: 20, dueAt: toIso(atOffset(3, 17)), createdAt: nowIso() },
+  task({ id: "task_flow", title: "完成产品方案核心流程", status: "doing", priority: "important", estimateMinutes: 70, scheduledStart: toIso(atToday(9)), scheduledEnd: toIso(atToday(10, 10)), goalId: "goal_product", createdAt: toIso(addDays(todayStart(), -4)) }),
+  task({ id: "task_dentist", title: "带上牙片和医保卡", status: "todo", priority: "important", estimateMinutes: 10, dueAt: toIso(atToday(14, 10)), goalId: undefined, createdAt: toIso(addDays(todayStart(), -1)) }),
+  task({ id: "task_interviews", title: "整理用户访谈记录", status: "done", priority: "normal", estimateMinutes: 40, goalId: "goal_product", createdAt: toIso(addDays(todayStart(), -3)), completedAt: toIso(atToday(8, 46)) }),
+  task({ id: "task_read", title: "阅读《设计中的设计》20 页", status: "todo", priority: "normal", estimateMinutes: 25, goalId: "goal_read", createdAt: toIso(addDays(todayStart(), -1)) }),
+  task({ id: "task_weekly", title: "准备本周复盘", status: "todo", priority: "normal", estimateMinutes: 20, dueAt: toIso(atOffset(3, 17)), createdAt: nowIso() }),
 ];
 
 const event = (id: string, title: string, day: number, startH: number, startM: number, duration: number, kind: CalendarEvent["kind"], extras: Partial<CalendarEvent> = {}): CalendarEvent => ({
-  id, title, startAt: toIso(atOffset(day, startH, startM)), endAt: toIso(new Date(atOffset(day, startH, startM).getTime() + duration * 60_000)), reminderMinutes: [10], kind, createdAt: nowIso(), ...extras,
+  id, title, startAt: toIso(atOffset(day, startH, startM)), endAt: toIso(new Date(atOffset(day, startH, startM).getTime() + duration * 60_000)), reminderMinutes: [10], timezone: "Asia/Shanghai", kind, version: 1, createdAt: nowIso(), updatedAt: nowIso(), ...extras,
 });
 
 const events: CalendarEvent[] = [
@@ -104,19 +114,20 @@ const events: CalendarEvent[] = [
   event("event_week_review", "周复盘", 3, 16, 50, 50, "focus"),
 ];
 
+const record = (value: Omit<RecordEntry, "version" | "createdAt" | "updatedAt">): RecordEntry => ({ ...value, version: 1, createdAt: value.occurredAt, updatedAt: value.occurredAt });
 const records: RecordEntry[] = [
-  { id: "record_morning", rawText: "昨晚睡得稍晚，但起床后的状态比预想中好。上午先不要被消息打断。", kind: "status", occurredAt: toIso(atToday(8, 42)), energy: 3, tags: ["精力 3/5", "晨间状态"] },
-  { id: "record_idea", rawText: "产品首页不应该只是数据仪表盘，而要先回答“今天做什么”。", kind: "idea", occurredAt: toIso(atToday(10, 18)), tags: ["产品思考", "待整理为笔记"] },
-  { id: "record_done", rawText: "完成访谈记录整理，发现“计划太满”是最常出现的挫败来源。", kind: "completion", occurredAt: toIso(atToday(11, 35)), tags: ["已完成", "个人产品方案"] },
-  { id: "record_inbox_1", rawText: "周五下午三点看牙", kind: "inbox", occurredAt: toIso(atToday(12, 6)), tags: ["待确认"] },
-  { id: "record_inbox_2", rawText: "明早跑 5 公里", kind: "inbox", occurredAt: toIso(atToday(11, 48)), tags: ["待确认"] },
+  record({ id: "record_morning", rawText: "昨晚睡得稍晚，但起床后的状态比预想中好。上午先不要被消息打断。", kind: "status", occurredAt: toIso(atToday(8, 42)), energy: 3, tags: ["精力 3/5", "晨间状态"] }),
+  record({ id: "record_idea", rawText: "产品首页不应该只是数据仪表盘，而要先回答“今天做什么”。", kind: "idea", occurredAt: toIso(atToday(10, 18)), tags: ["产品思考", "待整理为笔记"] }),
+  record({ id: "record_done", rawText: "完成访谈记录整理，发现“计划太满”是最常出现的挫败来源。", kind: "completion", occurredAt: toIso(atToday(11, 35)), tags: ["已完成", "个人产品方案"] }),
+  record({ id: "record_inbox_1", rawText: "周五下午三点看牙", kind: "inbox", occurredAt: toIso(atToday(12, 6)), tags: ["待确认"] }),
+  record({ id: "record_inbox_2", rawText: "明早跑 5 公里", kind: "inbox", occurredAt: toIso(atToday(11, 48)), tags: ["待确认"] }),
 ];
 
 const notes: Note[] = [
-  { id: "note_loop", title: "生活管理产品的核心闭环", bodyMarkdown: "从目标出发，将真实时间约束、个人精力和历史执行记录组合成今天真正可行的计划。\n\n首页应先回答今天做什么，再提供更深的回顾与统计。", tags: ["产品", "核心闭环"], category: "产品思考", linkedEntityIds: ["goal_product"], createdAt: toIso(addDays(todayStart(), -10)), updatedAt: toIso(atToday(10, 26)) },
-  { id: "note_design", title: "《设计中的设计》", bodyMarkdown: "设计不是制造漂亮的物品，而是重新发现事物之间关系的一种方式。", tags: ["设计", "阅读"], category: "阅读笔记", linkedEntityIds: ["goal_read"], createdAt: toIso(addDays(todayStart(), -2)), updatedAt: toIso(addDays(todayStart(), -1)) },
-  { id: "note_run", title: "10 公里训练阶段复盘", bodyMarkdown: "下一阶段优先保持轻松跑心率，不急于增加强度。晚间训练容易被推迟，尽量安排到晚饭前。", tags: ["跑步", "复盘"], category: "健康训练", linkedEntityIds: ["goal_run"], createdAt: toIso(addDays(todayStart(), -5)), updatedAt: toIso(addDays(todayStart(), -3)) },
-  { id: "note_energy", title: "低精力日的任务选择", bodyMarkdown: "把任务分为创造、沟通和整理三种。精力不足时不靠意志力硬顶，而是切换到准备好的替代清单。", tags: ["方法", "精力"], category: "生活方法", linkedEntityIds: [], createdAt: toIso(addDays(todayStart(), -12)), updatedAt: toIso(addDays(todayStart(), -7)) },
+  { id: "note_loop", title: "生活管理产品的核心闭环", bodyMarkdown: "从目标出发，将真实时间约束、个人精力和历史执行记录组合成今天真正可行的计划。\n\n首页应先回答今天做什么，再提供更深的回顾与统计。", tags: ["产品", "核心闭环"], category: "产品思考", linkedEntityIds: ["goal_product"], version: 1, createdAt: toIso(addDays(todayStart(), -10)), updatedAt: toIso(atToday(10, 26)) },
+  { id: "note_design", title: "《设计中的设计》", bodyMarkdown: "设计不是制造漂亮的物品，而是重新发现事物之间关系的一种方式。", tags: ["设计", "阅读"], category: "阅读笔记", linkedEntityIds: ["goal_read"], version: 1, createdAt: toIso(addDays(todayStart(), -2)), updatedAt: toIso(addDays(todayStart(), -1)) },
+  { id: "note_run", title: "10 公里训练阶段复盘", bodyMarkdown: "下一阶段优先保持轻松跑心率，不急于增加强度。晚间训练容易被推迟，尽量安排到晚饭前。", tags: ["跑步", "复盘"], category: "健康训练", linkedEntityIds: ["goal_run"], version: 1, createdAt: toIso(addDays(todayStart(), -5)), updatedAt: toIso(addDays(todayStart(), -3)) },
+  { id: "note_energy", title: "低精力日的任务选择", bodyMarkdown: "把任务分为创造、沟通和整理三种。精力不足时不靠意志力硬顶，而是切换到准备好的替代清单。", tags: ["方法", "精力"], category: "生活方法", linkedEntityIds: [], version: 1, createdAt: toIso(addDays(todayStart(), -12)), updatedAt: toIso(addDays(todayStart(), -7)) },
 ];
 
 const agentRun: AgentRun = {
@@ -153,7 +164,7 @@ export function createSeedData(): AppData {
       { id: "audit_2", actor: "user", action: "整理 4 条会议记录", entityRefs: ["task_interviews"], createdAt: toIso(atOffset(-1, 17, 40)) },
       { id: "audit_3", actor: "agent", action: "检查目标健康度", entityRefs: goals.slice(0, 3).map((goal) => goal.id), createdAt: toIso(atOffset(-2, 9, 20)) },
     ],
-    settings: { energy: 3, aiEnabled: true, remindersEnabled: false, onboardingCompleted: true, focusAreas: ["工作", "健康", "成长"], dataMode: "local", localOnly: true, permissions: { goals: true, calendar: true, records: true, privateNotes: false } },
+    settings: { schemaVersion: 1, version: 1, updatedAt: nowIso(), energy: 3, aiEnabled: true, remindersEnabled: false, onboardingCompleted: true, focusAreas: ["工作", "健康", "成长"], dataMode: "local", localOnly: true, permissions: { goals: true, calendar: true, records: true, privateNotes: false } },
   };
 }
 
@@ -168,7 +179,7 @@ export function createEmptyData(): AppData {
     reviews: [],
     agentRuns: [],
     audit: [],
-    settings: { energy: 3, aiEnabled: true, remindersEnabled: false, onboardingCompleted: false, focusAreas: [], dataMode: "local", localOnly: true, permissions: { goals: true, calendar: true, records: true, privateNotes: false } },
+    settings: { schemaVersion: 1, version: 0, updatedAt: nowIso(), energy: 3, aiEnabled: true, remindersEnabled: false, onboardingCompleted: false, focusAreas: [], dataMode: "local", localOnly: true, permissions: { goals: true, calendar: true, records: true, privateNotes: false } },
   };
 }
 

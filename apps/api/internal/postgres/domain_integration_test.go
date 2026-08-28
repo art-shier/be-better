@@ -108,7 +108,7 @@ INSERT INTO dayorder.user_settings (user_id) VALUES ($1);
 	}
 
 	noteA, err := content.CreateNote(ctx, integrationMutation(userA, deviceA), service.NoteInput{
-		Title: "Private", BodyMarkdown: "alphaunique body", Category: "Work", Tags: []string{"Focus"},
+		Title: "Private", BodyMarkdown: "alphaunique body", Category: "Work", Tags: []string{"Focus"}, LinkedEntityIDs: []uuid.UUID{task.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -119,8 +119,13 @@ INSERT INTO dayorder.user_settings (user_id) VALUES ($1);
 		t.Fatal(err)
 	}
 	searchA, err := content.ListNotes(ctx, userA, "alphaunique", "", 20)
-	if err != nil || len(searchA.Notes) != 1 || searchA.Notes[0].ID != noteA.ID || len(searchA.Notes[0].Tags) != 1 {
+	if err != nil || len(searchA.Notes) != 1 || searchA.Notes[0].ID != noteA.ID || len(searchA.Notes[0].Tags) != 1 || len(searchA.Notes[0].LinkedEntityIDs) != 1 || searchA.Notes[0].LinkedEntityIDs[0] != task.ID {
 		t.Fatalf("own note search = %#v, %v", searchA, err)
+	}
+	if _, err = content.CreateNote(ctx, integrationMutation(userB, deviceB), service.NoteInput{
+		Title: "Invalid link", BodyMarkdown: "cross-user link", Category: "Work", LinkedEntityIDs: []uuid.UUID{task.ID},
+	}); !errors.Is(err, service.ErrValidation) {
+		t.Fatalf("cross-user note link error = %v", err)
 	}
 	searchOther, err := content.ListNotes(ctx, userA, "betaunique", "", 20)
 	if err != nil || len(searchOther.Notes) != 0 {
@@ -156,7 +161,7 @@ INSERT INTO dayorder.user_settings (user_id) VALUES ($1);
 			sawTaskData = true
 		case change.EntityType == "note" && change.EntityID == noteA.ID && len(change.Data) > 0:
 			var note model.Note
-			if json.Unmarshal(change.Data, &note) == nil && len(note.Tags) == 1 {
+			if json.Unmarshal(change.Data, &note) == nil && len(note.Tags) == 1 && len(note.LinkedEntityIDs) == 1 {
 				sawTaggedNote = true
 			}
 		}
