@@ -20,7 +20,6 @@ import { clearAccountCache, hasAccountCache } from "../offline/cache";
 import {
   clearLastAccount,
   clearPendingRegistration,
-  migrateLegacyStorage,
   readGuestState,
   readLastAccount,
   readPendingRegistration,
@@ -167,7 +166,6 @@ export function AuthProvider({
   }, [acceptSession, finishPendingMigration, pendingVerification, sessionCheckEnabled]);
 
   useEffect(() => {
-    migrateLegacyStorage();
     const controller = new AbortController();
     if (sessionCheckEnabled && !initialSession) void check(controller.signal);
     return () => controller.abort();

@@ -1,8 +1,5 @@
 import type { AppData } from "../domain/types";
 
-export const LEGACY_STORAGE_KEY = "dayorder.app.v1";
-export const LEGACY_SYNC_KEY = "dayorder.sync.v1";
-export const LEGACY_CONFLICT_KEY = "dayorder.conflict.v1";
 export const GUEST_STORAGE_KEY = "dayorder.guest.app.v1";
 export const LAST_ACCOUNT_KEY = "dayorder.last-account.v1";
 export const PENDING_REGISTRATION_KEY = "dayorder.pending-registration.v1";
@@ -16,32 +13,6 @@ export interface LastAccount {
 export interface PendingRegistration {
 	user: LastAccount;
 	migrate: boolean;
-}
-
-export interface StorageKeys {
-  data: string;
-  sync: string;
-  conflict: string;
-}
-
-export const guestStorageKeys: StorageKeys = {
-  data: GUEST_STORAGE_KEY,
-  sync: "dayorder.guest.sync.v1",
-  conflict: "dayorder.guest.conflict.v1",
-};
-
-export function migrateLegacyStorage(): void {
-  try {
-    if (!localStorage.getItem(GUEST_STORAGE_KEY)) {
-      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
-      if (legacy) localStorage.setItem(GUEST_STORAGE_KEY, legacy);
-    }
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
-    localStorage.removeItem(LEGACY_SYNC_KEY);
-    localStorage.removeItem(LEGACY_CONFLICT_KEY);
-  } catch {
-    // Storage errors must not make the local application unusable.
-  }
 }
 
 export function readLastAccount(): LastAccount | null {
@@ -91,9 +62,5 @@ export function readGuestState(): AppData | null {
 }
 
 export function clearGuestStorage(): void {
-  try {
-    localStorage.removeItem(guestStorageKeys.data);
-    localStorage.removeItem(guestStorageKeys.sync);
-    localStorage.removeItem(guestStorageKeys.conflict);
-  } catch { /* best effort */ }
+  try { localStorage.removeItem(GUEST_STORAGE_KEY); } catch { /* best effort */ }
 }

@@ -1,5 +1,5 @@
 import { addDays } from "date-fns";
-import type { AgentRun, AppData, CalendarEvent, Goal, Milestone, Note, RecordEntry, Task } from "./types";
+import type { AppData, CalendarEvent, Goal, Milestone, Note, RecordEntry, Task } from "./types";
 import { atOffset, atToday, dateKey, toIso, todayStart } from "./dates";
 
 const nowIso = () => new Date().toISOString();
@@ -130,25 +130,6 @@ const notes: Note[] = [
   { id: "note_energy", title: "低精力日的任务选择", bodyMarkdown: "把任务分为创造、沟通和整理三种。精力不足时不靠意志力硬顶，而是切换到准备好的替代清单。", tags: ["方法", "精力"], category: "生活方法", linkedEntityIds: [], version: 1, createdAt: toIso(addDays(todayStart(), -12)), updatedAt: toIso(addDays(todayStart(), -7)) },
 ];
 
-const agentRun: AgentRun = {
-  id: "run_week_plan",
-  intent: "整理本周剩余计划，优先保证产品方案和跑步目标",
-  status: "waiting",
-  actionMode: "confirm",
-  scope: ["目标 3 项", "任务 12 项", "本周日程"],
-  startedAt: toIso(atToday(9, 12)),
-  steps: [
-    { id: "step_read", title: "读取授权数据", detail: "目标、未完成任务和本周日程", status: "done", meta: "18 个对象" },
-    { id: "step_conflict", title: "检查时间与目标冲突", detail: "发现 1 个冲突、1 个停滞目标", status: "done", meta: "规则校验通过" },
-    { id: "step_changes", title: "生成待确认变更", detail: "2 项变更，需要你的决定", status: "done", meta: "当前步骤" },
-    { id: "step_apply", title: "写入并核验", detail: "确认后执行；失败不会产生部分写入", status: "pending", meta: "尚未开始" },
-  ],
-  changes: [
-    { id: "change_run", type: "reschedule-task", entityId: "task_run_suggested", title: "调整“轻松跑 5 公里”的时间", before: "周四 20:30", after: "周四 18:10", reason: "近两周晚间训练更容易被推迟，18:10 与固定日程无冲突。", status: "pending", sourceRefs: [{ id: "goal_run", kind: "goal", label: "稳定跑完 10 公里" }, { id: "event_run", kind: "event", label: "轻松跑 5 公里" }] },
-    { id: "change_focus", type: "create-task", title: "创建“产品方案核心流程”专注任务", after: "今天 09:00—10:10 · 70 分钟", reason: "该目标已 4 天未推进，上午是深度任务完成率最高的时段。", status: "pending", sourceRefs: [{ id: "goal_product", kind: "goal", label: "完成个人产品方案" }, { id: "record_morning", kind: "record", label: "晨间精力记录" }] },
-  ],
-};
-
 export function createSeedData(): AppData {
   return {
     version: 1,
@@ -158,12 +139,6 @@ export function createSeedData(): AppData {
     records,
     notes,
     reviews: [],
-    agentRuns: [agentRun],
-    audit: [
-      { id: "audit_1", actor: "agent", action: "生成周计划建议", entityRefs: ["run_week_plan"], createdAt: toIso(atToday(9, 12)) },
-      { id: "audit_2", actor: "user", action: "整理 4 条会议记录", entityRefs: ["task_interviews"], createdAt: toIso(atOffset(-1, 17, 40)) },
-      { id: "audit_3", actor: "agent", action: "检查目标健康度", entityRefs: goals.slice(0, 3).map((goal) => goal.id), createdAt: toIso(atOffset(-2, 9, 20)) },
-    ],
     settings: { schemaVersion: 1, version: 1, updatedAt: nowIso(), energy: 3, aiEnabled: true, remindersEnabled: false, onboardingCompleted: true, focusAreas: ["工作", "健康", "成长"], dataMode: "local", localOnly: true, permissions: { goals: true, calendar: true, records: true, privateNotes: false } },
   };
 }
@@ -177,8 +152,6 @@ export function createEmptyData(): AppData {
     records: [],
     notes: [],
     reviews: [],
-    agentRuns: [],
-    audit: [],
     settings: { schemaVersion: 1, version: 0, updatedAt: nowIso(), energy: 3, aiEnabled: true, remindersEnabled: false, onboardingCompleted: false, focusAreas: [], dataMode: "local", localOnly: true, permissions: { goals: true, calendar: true, records: true, privateNotes: false } },
   };
 }

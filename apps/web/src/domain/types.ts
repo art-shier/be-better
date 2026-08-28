@@ -6,8 +6,6 @@ export type GoalHealth = "normal" | "attention" | "stalled";
 export type TaskStatus = "todo" | "doing" | "done" | "archived";
 export type Priority = "normal" | "important";
 export type RecordKind = "status" | "idea" | "completion" | "inbox";
-export type AgentRunStatus = "ready" | "reading" | "analyzing" | "waiting" | "applying" | "completed" | "failed" | "stopped";
-export type AgentStepStatus = "pending" | "running" | "done" | "failed";
 export type ActionMode = "read" | "confirm";
 export type DataMode = "local" | "selected";
 
@@ -118,72 +116,6 @@ export interface DailyReview extends VersionedResource {
   aiSummary?: string;
 }
 
-export interface SourceRef {
-  id: string;
-  kind: EntityKind;
-  label: string;
-}
-
-export interface AgentStep {
-  id: string;
-  title: string;
-  detail: string;
-  status: AgentStepStatus;
-  meta?: string;
-}
-
-export type AgentChangeType = "reschedule-task" | "create-task" | "create-event" | "archive-record" | "link-note";
-
-export interface AgentChange {
-  id: string;
-  type: AgentChangeType;
-  entityId?: string;
-  title: string;
-  before?: string;
-  after: string;
-  reason: string;
-  sourceRefs: SourceRef[];
-  status: "pending" | "accepted" | "rejected";
-}
-
-export interface AgentRun {
-  id: string;
-  intent: string;
-  status: AgentRunStatus;
-  actionMode: ActionMode;
-  scope: string[];
-  sourceRefs?: SourceRef[];
-  steps: AgentStep[];
-  changes: AgentChange[];
-  startedAt: string;
-  finishedAt?: string;
-  summary?: string;
-}
-
-export interface AuditEvent {
-  id: string;
-  actor: "user" | "agent" | "system";
-  action: string;
-  entityRefs: string[];
-  before?: string;
-  after?: string;
-  createdAt: string;
-  undo?: UndoAction;
-}
-
-export type UndoAction =
-  | { type: "restore-task"; task: Task }
-  | { type: "delete-task"; taskId: string }
-  | { type: "restore-event"; event: CalendarEvent }
-  | { type: "delete-event"; eventId: string }
-  | { type: "restore-record"; record: RecordEntry }
-  | { type: "delete-record"; recordId: string }
-  | { type: "restore-note"; note: Note }
-  | { type: "delete-note"; noteId: string }
-  | { type: "restore-goal"; goal: Goal }
-  | { type: "delete-goal"; goalId: string }
-  | { type: "batch"; actions: UndoAction[] };
-
 export interface AppSettings {
   schemaVersion: number;
   version: number;
@@ -211,8 +143,6 @@ export interface AppData {
   records: RecordEntry[];
   notes: Note[];
   reviews: DailyReview[];
-  agentRuns: AgentRun[];
-  audit: AuditEvent[];
   settings: AppSettings;
 }
 

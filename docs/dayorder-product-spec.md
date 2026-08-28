@@ -169,27 +169,33 @@ AI 负责理解意图、排序、总结和解释；Agent 负责权限检查、�
 
 ```text
 Goal
-  id, title, why, area, metricType, targetValue, currentValue,
-  startAt, dueAt, status, health, createdAt, updatedAt
+  id, userId, title, why, area, metricType, targetValue, currentValue,
+  startDate, dueDate, status, health, version, createdAt, updatedAt
 
 Milestone
-  id, goalId, title, dueAt, completedAt, sortOrder
+  id, userId, goalId, title, dueAt, completedAt, sortOrder, version
 
 Task
-  id, title, status, priority, estimateMinutes, dueAt, scheduledStart,
-  scheduledEnd, goalId?, sourceRecordId?, createdAt, completedAt
+  id, userId, title, status, priority, estimateMinutes, dueAt,
+  scheduledStart, scheduledEnd, goalId?, sourceRecordId?, version
 
 Event
-  id, title, startAt, endAt, location?, reminderRules[], sourceCalendar?
+  id, userId, title, startAt, endAt, timezone, location?, kind,
+  sourceCalendar?, goalId?, version
+
+Reminder
+  id, userId, eventId, offsetMinutes, channel, scheduledAt,
+  status, attempts, deliveredAt?, version
 
 Record
-  id, rawText, type, occurredAt, mood?, energy?, tags[], parsedEntityId?
+  id, userId, rawText, kind, occurredAt, mood?, energy?, archivedAt?, version
 
 Note
-  id, title, bodyMarkdown, tags[], linkedEntityIds[], createdAt, updatedAt
+  id, userId, title, bodyMarkdown, category, archivedAt?, version
 
 DailyReview
-  id, date, wins, blockers, mood?, energy?, tomorrowFocus?, aiSummary?
+  id, userId, reviewDate, wins, blockers, mood?, energy,
+  tomorrowFocus, aiSummary?, version
 
 AIArtifact
   id, type, promptVersion, sourceRefs[], content, confidence,
@@ -200,8 +206,8 @@ AgentProfile
   actionMode, createdAt, updatedAt
 
 AgentRun
-  id, profileId?, userIntent, status, scope, plan, startedAt,
-  finishedAt?, summary?, error?
+  id, userId, intent, status, actionMode, scopeJsonb, version,
+  startedAt?, finishedAt?, summary?, error?
 
 AgentStep
   id, runId, type, toolName?, status, inputSummary, sourceRefs[],
@@ -212,19 +218,16 @@ ApprovalRequest
   decidedAt?, decidedBy?
 
 AuditEvent
-  id, runId?, actor, action, entityRefs[], before?, after?, createdAt
+  id, userId, runId?, actorType, action, beforeJsonb?, afterJsonb?, createdAt
 
 User
   id, email, displayName, passwordHash, createdAt, updatedAt
 
 Session
   id, userId, tokenHash, createdAt, lastSeenAt, expiresAt, userAgent
-
-UserAppState
-  userId, revision, payload, updatedAt
 ```
 
-首版关系型数据存 SQLite；笔记正文保留 Markdown；全文检索使用 SQLite FTS。语义检索作为可选索引，索引始终可以从原始数据重建。
+首版服务端数据存 PostgreSQL。实体版本、普通列、外键和关联表负责核心关系；JSONB 只承载设置、Agent scope/patch、审计快照和 Outbox payload。笔记正文保留 Markdown；语义索引作为可选派生数据，始终可以从原始数据重建。
 
 ## 7. 技术落地建议
 
@@ -232,8 +235,8 @@ UserAppState
 
 - Web/PWA 首发，移动端优先适配；验证核心闭环后再评估原生 App。
 - React + TypeScript；状态按服务端数据、临时 UI 状态和编辑草稿分层。
-- Go API 服务负责 SQLite、账户、HttpOnly Session、按用户隔离的状态、提醒规则、同步队列和模型适配。
-- 游客状态只写浏览器 localStorage；认证账户按用户 ID 缓存并以 revision 乐观锁同步。
+- Go API 服务负责 PostgreSQL 资源事务、账户、HttpOnly Session、RLS 用户隔离、提醒规则、增量同步和模型适配；Worker 负责 Outbox 邮件、提醒和 Agent 后台任务。
+- 游客数据只写浏览器 localStorage；认证账户按用户 ID 缓存在 IndexedDB，并以实体版本、Mutation 幂等键和同步游标收敛。
 - 后台提醒不可依赖网页常驻；桌面端使用系统进程，移动端使用系统通知能力。
 
 ### AI 编排
@@ -281,9 +284,9 @@ Agent 运行状态和审批队列通过本地 API 持久化，页面刷新后可
 ### M1：可用版本
 
 - 目标、任务、事件、记录、笔记的增删改查。
-- SQLite 持久化、全文检索、数据导出与备份。
-- 邮箱密码注册、登录、退出、资料与安全设置；注册时可原子迁移游客数据。
-- 每用户独立 AppData 与 revision；Session Cookie、Argon2id、登录限流和 Agent 登录门禁。
+- PostgreSQL 关系持久化、RLS、数据导出、加密备份与隔离恢复。
+- 邮箱密码注册、验证、登录、退出、资料与安全设置；验证成功后可用幂等资源 Mutation 迁移游客数据。
+- 每用户独立实体、设备和增量游标；Session Cookie、Argon2id、登录限流和 Agent 登录门禁。
 - 今日页规则化聚合、浏览器内提醒。
 - 无 AI 时也能完整使用。
 
@@ -306,8 +309,8 @@ Agent 运行状态和审批队列通过本地 API 持久化，页面刷新后可
 - 记录一条想法的操作不超过两步，首个字符输入在 1 秒内可用。
 - 用户可以从每条 AI 建议追溯到具体来源。
 - 无 AI、断网或模型失败时，目标、任务、日程、记录和笔记仍可使用。
-- 游客使用核心功能时不请求远端状态；注册迁移失败不删除任何本机数据。
-- 登录已有账户不合并当前游客数据；两个账户不能读取或覆盖对方状态。
+- 游客使用核心功能时不请求远端资源；注册迁移失败不删除任何本机数据。
+- 登录已有账户不合并当前游客数据；两个账户不能读取、关联或覆盖对方资源。
 - Agent 在游客、离线账户和 Session 失效状态下不能运行。
 - 所有自动写入都可撤销，所有批量写入都需确认。
 - Agent 运行前可查看本次数据范围和动作级别；运行中可查看步骤状态并随时停止。
@@ -328,8 +331,8 @@ Agent 运行状态和审批队列通过本地 API 持久化，页面刷新后可
 
 ### 11.1 运行状态
 
-- 游客：今天、目标、任务、日程、记录和笔记全部可用，数据仅保存在当前浏览器；不调用 `/state`。
-- 已验证账户：核心功能读取当前用户缓存并同步服务端；可以使用 Agent 和账户设置。
+- 游客：今天、目标、任务、日程、记录和笔记全部可用，数据仅保存在当前浏览器，不调用任何远端业务资源接口。
+- 已验证账户：核心功能先读取当前账户的 IndexedDB 实体缓存，再通过资源 API 和增量同步与服务端收敛；可以使用 Agent 和账户设置。
 - 离线账户：服务不可达时继续读取最近账户的本机缓存；Agent、资料修改、密码修改和退出不可用。
 - Session 失效：保留当前账户缓存并提示重新登录，不自动切回游客数据，也不允许 Agent 运行。
 
@@ -337,8 +340,9 @@ Agent 运行状态和审批队列通过本地 API 持久化，页面刷新后可
 
 - 认证入口使用应用上下文内弹窗，不建立营销式独立登录页。
 - 注册字段为称呼、邮箱和密码；默认勾选“迁移这台设备的数据”，并显示目标、任务和笔记数量。
-- 注册请求在同一 SQLite 事务中创建 User、revision 为 1 的 UserAppState 和 Session。成功响应后前端才清空游客空间；失败时游客数据保持不变。
-- 取消迁移时创建规范的空白 AppData v1。登录已有账户永不自动合并游客数据。
+- 注册先在 PostgreSQL 事务中创建 `pending_verification` 用户、默认设置、一次性验证令牌和 Outbox 事件，不建立 Session；验证邮箱成功后才创建正式 Session。
+- 游客迁移把各类实体转换为带幂等键的离线 Mutation，按目标、里程碑、记录、任务、日程、笔记、复盘和设置的依赖顺序提交。全部 Mutation 确认完成后才清理游客副本；失败时游客数据保持不变。
+- 取消迁移时账户从默认空数据开始。登录已有账户永不自动合并当前游客数据。
 - 正常退出需要联网；服务端撤销当前 Session 后，前端清除当前账户缓存并回到仍然存在的游客空间。
 - 修改邮箱和密码必须验证当前密码。修改密码后撤销其他 Session，并轮换当前 Session。
 
@@ -348,30 +352,44 @@ Agent 运行状态和审批队列通过本地 API 持久化，页面刷新后可
 
 ```text
 POST  /auth/register
+POST  /auth/verify-email
 POST  /auth/login
 POST  /auth/logout
 GET   /auth/session
 PATCH /users/me
 PUT   /users/me/email
 PUT   /users/me/password
-GET   /state
-PUT   /state
+GET|POST|PATCH|DELETE /goals、/tasks、/calendar-events、/records、/notes、/daily-reviews
+GET   /sync/bootstrap
+GET   /sync/changes
+POST  /sync/mutations
+GET|POST /agent-runs、/agent-changes、/audit-events
 ```
 
 - Session 使用 30 天 `dayorder_session` Cookie，属性为 `HttpOnly`、`SameSite=Lax`、`Path=/`；HTTPS 时启用 `Secure`。
 - 密码使用 Argon2id；服务端只保存 Session token 的 SHA-256 哈希。
-- 状态接口只能从 Session 上下文取得 `user_id`，请求体和 URL 均不能指定目标用户。
+- 所有业务查询只能从 Session 上下文取得 `user_id`，请求体和 URL 均不能指定目标用户；应用层过滤、复合外键和 PostgreSQL RLS 共同保证隔离。
 - 登录错误统一返回 `INVALID_CREDENTIALS`；IP 与标准化邮箱组合 15 分钟内最多 5 次失败。
-- 写请求校验 Origin；认证与状态响应设置 `Cache-Control: no-store`；AppData 请求上限为 16 MB。
+- 写请求校验 Origin；响应设置 `Cache-Control: no-store`。资源写入必须携带设备 ID 和幂等键，更新/删除还必须携带实体版本 `If-Match`。
+- 同一实体的并发旧版本写入返回冲突；不同实体可以独立同步。同步游标不可伪造，失效或过期时客户端清空该账户实体缓存并重新执行 bootstrap，而不丢弃未提交 Mutation。
 
-### 11.4 浏览器数据分区
+### 11.4 关系模型
 
-```text
-dayorder.guest.app.v1
-dayorder.user.<userId>.app.v1
-dayorder.user.<userId>.sync.v1
-dayorder.user.<userId>.conflict.v1
-dayorder.last-account.v1
-```
+不是“所有类型机械地各建一张表”，而是按关系完整性、查询方式和生命周期拆表：
 
-旧版 `dayorder.app.v1` 首次升级时只复制到游客分区，并删除旧的全局同步元数据。最近账户提示只保存用户 ID、称呼和邮箱，不保存令牌。
+- 身份域：`users`、`account_tokens`、`sessions`、`login_throttles`、`user_devices`、`account_deletions`。
+- 计划域：`goals`、`goal_milestones`、`tasks`、`calendar_events`、`calendar_event_reminders`。
+- 内容域：`records`、`notes`、`tags`、`record_tags`、`note_tags`、`entity_links`、`daily_reviews`、`user_settings`。
+- Agent 与可靠任务域：`agent_runs`、`agent_steps`、`agent_source_refs`、`agent_changes`、`audit_events`、`audit_event_entities`、`outbox_events`。
+- 同步与幂等域：`sync_changes`、`client_mutations`；每台设备的同步游标记录在 `user_devices`。
+
+核心可筛选、排序、关联的字段使用普通列，标签和多对多关系使用关联表。JSONB 只用于用户设置、Agent scope/patch、审计前后值和 Outbox payload 等结构灵活且不作为主要关系约束的内容。每个用户资源都有 `user_id`；跨表引用使用包含 `user_id` 的复合外键，防止错误关联到其他用户。
+
+### 11.5 浏览器数据分区
+
+- 游客只使用 `dayorder.guest.app.v1` localStorage 键。
+- 登录账户使用 IndexedDB 的 `entities`、`mutations`、`syncMeta`、`accounts` 四个对象存储，并以 `accountId` 作为分区键。
+- `entities` 保存资源级缓存；`mutations` 保存待提交操作；`syncMeta` 保存设备 ID、游标和序号；`accounts` 只保存账户缓存元数据。
+- `dayorder.last-account.v1` 只保存最近账户 ID、称呼和邮箱提示，不保存 Session、密码或其他令牌。
+
+本版本按全新 PostgreSQL 数据库上线，不提供旧数据库导入、双写、快照接口或浏览器旧键迁移。

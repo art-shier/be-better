@@ -12,7 +12,7 @@
 ```text
 apps/web/        React 19 + TypeScript + Vite
 apps/api/        Go API、Worker、Migration 与 PostgreSQL repository
-deploy/          数据库角色初始化；生产 Compose 文件在后续部署阶段补齐
+deploy/          生产 Compose、Caddy、PostgreSQL、pgBackRest 与 Prometheus
 docs/            产品、架构、实施计划和运行手册
 scripts/         构建与真实运行验收脚本
 ```
@@ -53,7 +53,8 @@ npm run dev
 
 - Web：通常为 <http://127.0.0.1:5173>
 - PostgreSQL API：<http://127.0.0.1:8080>
-- 健康检查：<http://127.0.0.1:8080/api/v1/health>
+- 存活检查：<http://127.0.0.1:8080/health/live>
+- 就绪检查：<http://127.0.0.1:8080/health/ready>
 - Worker：另一个终端运行 `npm run dev:worker`
 
 开发默认 `DAYORDER_MAIL_SINK=log`，不会投递邮件，也不会把验证或重置令牌写入日志。走真实邮件流程时配置 SMTP；生产环境强制 SMTP 与 TLS。
@@ -65,22 +66,23 @@ npm run dev
 - 登录已有账户不会合并游客数据。
 - API 暂时不可达时，已缓存账户仍可从 IndexedDB 打开和编辑；网络恢复、页面聚焦或周期定时器会继续同步。
 - 正常退出先撤销服务端 Session，再只清理当前账户的 IndexedDB 缓存，不影响游客空间和其他账户缓存。
-- Agent 需要已验证且在线的账户。当前 Agent UI 仍待持久化阶段切换为服务端 Run/Change 模型。
+- Agent 需要已验证且在线的账户。Run、Step、Change、来源引用、审计与撤销均由服务端持久化；生产 Provider 必须使用 HTTPS。
 
 ## 测试与构建
 
 ```powershell
 npm run typecheck
-npm run test:web
-go test ./apps/api/...
+npm test
 go vet ./apps/api/...
 npm run build
-npm run test:runtime:postgres
+npm run test:architecture
+npm run test:security
+npm run test:runtime
 ```
 
 真实 PostgreSQL 集成测试和运行验收需要 Docker。Docker 或 daemon 不可用时会明确输出 `SKIPPED`；测试不会用 SQLite 冒充 PostgreSQL。
 
-`test:runtime:postgres` 使用隔离的 Compose project 和临时 volume，验证注册、邮箱验证、核心资源、两设备增量同步以及 API 重启后的 Session/资源持久化，结束后只删除它创建的隔离资源。
+`test:runtime` 使用隔离的 Compose project 和临时 volume，验证空库 migration、认证、两用户隔离、关系资源 CRUD、两设备增量同步、幂等与版本冲突、API/Worker 重启、Outbox 和并发负载；随后执行部署安全检查。结束后只删除它创建的隔离资源。CI 还会启动完整生产 Compose，验证 Caddy TLS、SPA 深链接、API 代理和容器安全属性。
 
 ## 常用命令
 
@@ -90,11 +92,22 @@ npm run test:runtime:postgres
 | `npm run dev:worker` | 启动 Outbox Worker |
 | `npm run db:up` / `db:down` | 启停本地 PostgreSQL |
 | `npm run db:migrate` / `db:check` | 执行或检查 schema migration |
-| `npm run db:generate` | 使用 sqlc 重新生成数据库访问代码 |
+| `npm run db:generate` | 使用独立 `tools.mod` 中的 sqlc 重新生成数据库访问代码 |
 | `npm run build` | 构建 Web、API 和 Worker |
 | `npm start` | 启动正式 PostgreSQL API；生产静态资源将由 Caddy 托管 |
 
-旧 SQLite store 和旧 `/state` 源码当前只作为未引用的回归基线保留，正式 `cmd/server`、前端和 npm 运行入口均已不再使用；完整生产回归后会在清理阶段删除。
+## 单机生产部署
+
+生产仅支持全新 PostgreSQL 数据库，不提供其他数据库导入、双写或旧快照协议。先按 [密钥手册](docs/runbooks/secrets.md) 创建 `deploy/.env.production` 和 `deploy/secrets/*`，再执行：
+
+```powershell
+docker compose --env-file deploy/.env.production -f deploy/compose.yaml config
+docker compose --env-file deploy/.env.production -f deploy/compose.yaml build --pull
+docker compose --env-file deploy/.env.production -f deploy/compose.yaml up -d
+Invoke-WebRequest https://你的域名/health/ready
+```
+
+PostgreSQL 不发布主机端口；公网只开放 Caddy 的 80/443。上线、回滚、事故、用户删除和数据库维护分别见 [运行手册目录](docs/runbooks/)。备份与恢复目标为 RPO ≤ 5 分钟、RTO ≤ 60 分钟。
 
 ## 核心配置
 
@@ -122,6 +135,7 @@ npm run test:runtime:postgres
 - 账户：资料、邮箱、密码、设置和设备管理。
 - 资源：Goals/Milestones、Tasks、Calendar Events/Reminders、Records、Notes、Daily Reviews、Tags。
 - 同步：`GET /sync/bootstrap`、`GET /sync/changes`、`POST /sync/mutations`。
-- 运维：`GET /health` 和 `GET /ready`。
+- Agent/审计：Agent Runs、Agent Changes、Audit Events 和服务端撤销。
+- 运维：`GET /health/live`、`GET /health/ready`；指标使用独立内部监听端口。
 
 资源写入使用 `Idempotency-Key`、`X-Device-ID` 和 `If-Match`；错误采用统一 envelope，并区分认证、验证、冲突、限流和暂时不可用。

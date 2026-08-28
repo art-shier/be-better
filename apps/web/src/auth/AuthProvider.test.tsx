@@ -8,7 +8,7 @@ import type { AppData } from "../domain/types";
 import { getCachedEntities, hasAccountCache, putCachedEntity } from "../offline/cache";
 import { deleteDayOrderDB } from "../offline/db";
 import { AppStoreProvider } from "../store/AppStore";
-import { GUEST_STORAGE_KEY, LAST_ACCOUNT_KEY, LEGACY_STORAGE_KEY } from "../store/storage";
+import { GUEST_STORAGE_KEY, LAST_ACCOUNT_KEY } from "../store/storage";
 import { UiProvider } from "../ui/UiProvider";
 import { AuthProvider, useAuth } from "./AuthProvider";
 
@@ -36,14 +36,6 @@ describe("账户状态与游客迁移", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     await deleteDayOrderDB();
-  });
-
-  it("首次启动把旧全局数据移动到游客分区", () => {
-    const seed = createSeedData();
-    localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(seed));
-    render(<GuestAuthHarness />);
-    expect(localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
-    expect(JSON.parse(localStorage.getItem(GUEST_STORAGE_KEY) ?? "null").goals).toHaveLength(seed.goals.length);
   });
 
   it("注册后等待邮箱验证，验证成功才建立会话并启动游客迁移", async () => {

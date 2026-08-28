@@ -13,6 +13,7 @@ import { deleteDayOrderDB } from "./offline/db";
 import { prepareInitialMutations } from "./store/commands";
 import { acceptAgentChange, createAgentRun, getAgentRun, listAgentRuns, rejectAgentChange, stopAgentRun, type ServerAgentRun } from "./api/agent";
 import { listAuditEvents, undoAuditEvent } from "./api/audit";
+import { GUEST_STORAGE_KEY } from "./store/storage";
 
 vi.mock("./api/agent", async (importOriginal) => ({
   ...await importOriginal<typeof import("./api/agent")>(),
@@ -71,7 +72,7 @@ describe("关键页面交互", () => {
     vi.mocked(undoAuditEvent).mockReset();
     vi.setSystemTime(new Date("2026-08-27T10:00:00+08:00"));
     window.location.hash = "today";
-    localStorage.setItem("dayorder.app.v1", JSON.stringify(createSeedData()));
+    localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(createSeedData()));
     await deleteDayOrderDB();
   });
 
@@ -130,7 +131,7 @@ describe("关键页面交互", () => {
     const seed = createSeedData();
     const goal = { ...seed.goals[0], id: "goal_portfolio", title: "完成个人作品集", why: "用于下一次求职展示" };
     const task = { ...seed.tasks[0], id: "task_portfolio", title: "制作作品集首页", goalId: goal.id, scheduledStart: undefined, scheduledEnd: undefined };
-    await seedAccount(testUser.id, { ...seed, goals: [goal], tasks: [task], events: [], records: [], notes: [], agentRuns: [], audit: [] });
+    await seedAccount(testUser.id, { ...seed, goals: [goal], tasks: [task], events: [], records: [], notes: [] });
     const run = serverRun({
       sourceRefs: [{ id: crypto.randomUUID(), runId: "run_portfolio", entityType: "task", entityId: task.id, entityVersion: task.version, labelSnapshot: task.title, createdAt: "2026-08-27T02:01:00Z" }],
       changes: [{

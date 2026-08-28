@@ -122,8 +122,6 @@ export async function loadCachedAppData(accountId: string): Promise<AppData> {
     records: records.map(record),
     notes: notes.map(note),
     reviews: reviews.map(review),
-    agentRuns: [],
-    audit: [],
     settings: settings(userSettings[0]),
   };
 }

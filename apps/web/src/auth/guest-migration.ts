@@ -68,8 +68,6 @@ export function normalizeGuestDataForMigration(data: AppData): AppData {
       deletedAt: undefined,
     })),
     reviews: data.reviews.map((value) => ({ ...value, id: resolve(value.id)!, version: 0, deletedAt: undefined })),
-    agentRuns: [],
-    audit: [],
     settings: { ...data.settings, version: 1, updatedAt: new Date().toISOString() },
   };
 }

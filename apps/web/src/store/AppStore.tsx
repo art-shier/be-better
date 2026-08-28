@@ -19,7 +19,7 @@ import { runSyncCycle, type SyncCycleResult } from "../sync/engine";
 import { loadCachedAppData } from "./selectors";
 import { persistPreparedMutations, prepareMutations, type PreparedMutation } from "./commands";
 import { appReducer, type Action } from "./reducer";
-import { guestStorageKeys, migrateLegacyStorage } from "./storage";
+import { GUEST_STORAGE_KEY } from "./storage";
 
 export { appReducer, type Action } from "./reducer";
 
@@ -79,8 +79,6 @@ function normalizeData(data: AppData): AppData {
   return {
     ...data,
     reviews: data.reviews ?? [],
-    agentRuns: data.agentRuns ?? [],
-    audit: data.audit ?? [],
     settings: {
       ...data.settings,
       remindersEnabled: data.settings.remindersEnabled ?? false,
@@ -93,7 +91,7 @@ function normalizeData(data: AppData): AppData {
 
 function loadGuestData(): AppData {
   try {
-    const raw = localStorage.getItem(guestStorageKeys.data);
+    const raw = localStorage.getItem(GUEST_STORAGE_KEY);
     if (!raw) return createEmptyData();
     const parsed = JSON.parse(raw) as AppData;
     if (parsed.version !== 1 || !Array.isArray(parsed.goals) || !Array.isArray(parsed.tasks)) return createEmptyData();
@@ -118,7 +116,6 @@ export function AppStoreProvider({
   onServiceOffline,
   onServiceOnline,
 }: AppStoreProviderProps) {
-  migrateLegacyStorage();
   const accountId = identity.kind === "user" ? identity.userId : undefined;
   const accountMode = Boolean(accountId);
   const remoteSyncEnabled = accountMode && syncEnabled;
@@ -257,7 +254,7 @@ export function AppStoreProvider({
   useEffect(() => {
     if (accountMode) return;
     try {
-      localStorage.setItem(guestStorageKeys.data, JSON.stringify(data));
+      localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(data));
     } catch {
       // A full browser quota must not clear the running guest session.
     }
@@ -318,6 +315,4 @@ export function useAppStore(): StoreContextValue {
   return context;
 }
 
-export const STORAGE_KEY = guestStorageKeys.data;
-export const SYNC_META_KEY = guestStorageKeys.sync;
-export const CONFLICT_KEY = guestStorageKeys.conflict;
+export const STORAGE_KEY = GUEST_STORAGE_KEY;

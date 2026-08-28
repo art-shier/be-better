@@ -41,16 +41,14 @@ async function seedAccount(accountId: string, data: AppData): Promise<string> {
 }
 
 describe("appReducer", () => {
-  it("撤销快速记录时同时移除原文和派生任务", () => {
+  it("快速记录同时创建原文和关联的派生任务", () => {
     const seed = createSeedData();
     const draft = parseCapture("明早跑 5 公里", seed.goals);
     const saved = appReducer(seed, { type: "save-capture", draft });
     expect(saved.records).toHaveLength(seed.records.length + 1);
     expect(saved.tasks).toHaveLength(seed.tasks.length + 1);
-
-    const restored = appReducer(saved, { type: "undo", auditId: saved.audit[0].id });
-    expect(restored.records).toHaveLength(seed.records.length);
-    expect(restored.tasks).toHaveLength(seed.tasks.length);
+    expect(saved.records[0].parsedEntityId).toBe(saved.tasks[0].id);
+    expect(saved.tasks[0].sourceRecordId).toBe(saved.records[0].id);
   });
 
   it("接受收件箱建议时复用原记录且重复提交无效", () => {
@@ -63,34 +61,28 @@ describe("appReducer", () => {
     expect(accepted.records).toHaveLength(seed.records.length);
     expect(accepted.records.find((record) => record.id === source.id)?.parsedEntityId).toBeTruthy();
     expect(acceptedAgain).toBe(accepted);
-
-    const restored = appReducer(accepted, { type: "undo", auditId: accepted.audit[0].id });
-    expect(restored.records.find((record) => record.id === source.id)?.parsedEntityId).toBeUndefined();
   });
 
-  it("删除目标会解除关联且撤销后完整恢复", () => {
+  it("删除目标会解除弱关联且重复删除无效", () => {
     const seed = createSeedData();
     const goal = seed.goals.find((item) => seed.tasks.some((task) => task.goalId === item.id))!;
     const linkedTask = seed.tasks.find((task) => task.goalId === goal.id)!;
     const deleted = appReducer(seed, { type: "delete-goal", id: goal.id });
+    expect(deleted.goals.some((item) => item.id === goal.id)).toBe(false);
     expect(deleted.tasks.find((task) => task.id === linkedTask.id)?.goalId).toBeUndefined();
-    const restored = appReducer(deleted, { type: "undo", auditId: deleted.audit[0].id });
-    expect(restored.goals.some((item) => item.id === goal.id)).toBe(true);
-    expect(restored.tasks.find((task) => task.id === linkedTask.id)?.goalId).toBe(goal.id);
+    expect(appReducer(deleted, { type: "delete-goal", id: goal.id })).toBe(deleted);
   });
 
-  it("删除记录会清理笔记弱关联且撤销后恢复", () => {
+  it("删除记录会清理笔记弱关联且重复删除无效", () => {
     const seed = createSeedData();
     const record = seed.records[0];
     const note = { ...seed.notes[0], linkedEntityIds: [record.id] };
     const state = { ...seed, notes: [note, ...seed.notes.slice(1)] };
 
     const deleted = appReducer(state, { type: "delete-record", id: record.id });
+    expect(deleted.records.some((item) => item.id === record.id)).toBe(false);
     expect(deleted.notes[0].linkedEntityIds).toEqual([]);
-
-    const restored = appReducer(deleted, { type: "undo", auditId: deleted.audit[0].id });
-    expect(restored.records.some((item) => item.id === record.id)).toBe(true);
-    expect(restored.notes[0].linkedEntityIds).toEqual([record.id]);
+    expect(appReducer(deleted, { type: "delete-record", id: record.id })).toBe(deleted);
   });
 });
 
@@ -102,19 +94,17 @@ describe("AppStoreProvider", () => {
     await deleteDayOrderDB();
   });
 
-  it("兼容旧备份并补齐提醒设置", () => {
+  it("从当前游客分区恢复本地数据", () => {
     const data = createSeedData();
-    const legacy = { ...data, settings: { ...data.settings } } as typeof data & { settings: Omit<typeof data.settings, "remindersEnabled"> };
-    delete (legacy.settings as Partial<typeof data.settings>).remindersEnabled;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(legacy));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 
     function Probe() {
       const { data: current } = useAppStore();
-      return <output>{String(current.settings.remindersEnabled)}</output>;
+      return <output>{current.goals[0]?.title}</output>;
     }
 
     render(<AppStoreProvider><Probe /></AppStoreProvider>);
-    expect(screen.getByText("false")).toBeInTheDocument();
+    expect(screen.getByText(data.goals[0].title)).toBeInTheDocument();
   });
 
   it("游客数据只保存在本机且不请求状态接口", async () => {

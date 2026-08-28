@@ -15,6 +15,11 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	sessionCookie   = "dayorder_session"
+	sessionDuration = 30 * 24 * time.Hour
+)
+
 type requestIDKey struct{}
 
 type responseStatusWriter struct {
