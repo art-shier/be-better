@@ -153,7 +153,7 @@ VITE_API_BASE_URL=https://staging-api.example.com/api/v1 npm run build:release:w
 rsync -av release/web/ deploy@web.example.com:/var/www/dayorder/
 ```
 
-前端没有需要启动的 Node.js 服务。静态服务器需要把未知 SPA 路由回退到 `index.html`。`VITE_API_BASE_URL` 会写入静态 JS，API 地址变化后必须重新构建前端。
+前端没有需要启动的 Node.js 服务。静态服务器需要把未知 SPA 路由回退到 `index.html`。`VITE_API_BASE_URL` 会写入静态 JS，API 地址变化后必须重新构建并重新部署前端。
 
 ### 2. 构建并部署后端
 
