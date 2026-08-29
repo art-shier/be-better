@@ -158,3 +158,21 @@ test("runtime wrappers reject missing configuration, conflicting secrets, and mi
   assert.notEqual(missingBinary.status, 0);
   assert.match(missingBinary.stderr, /executable.*dayorder-api/i);
 });
+
+test("release build scripts and package commands expose the agreed contract", () => {
+  const webBuilder = readFileSync(resolve(root, "deploy/bare-metal/build-web.sh"), "utf8");
+  const backendBuilder = readFileSync(resolve(root, "deploy/bare-metal/build-backend.sh"), "utf8");
+  const packageManifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
+  const ignore = readFileSync(resolve(root, ".gitignore"), "utf8");
+
+  assert.match(webBuilder, /npm ci/);
+  assert.match(webBuilder, /npm run build:web/);
+  assert.match(webBuilder, /apps\/web\/dist/);
+  assert.match(backendBuilder, /CGO_ENABLED=0/);
+  assert.match(backendBuilder, /GOOS=linux/);
+  for (const command of ["cmd/server", "cmd/worker", "cmd/migrate"]) assert.match(backendBuilder, new RegExp(command));
+  assert.equal(packageManifest.scripts["test:deploy:bare"], "node --test scripts/bare-metal-deploy.test.mjs");
+  assert.equal(packageManifest.scripts["build:release:web"], "bash deploy/bare-metal/build-web.sh");
+  assert.equal(packageManifest.scripts["build:release:backend"], "bash deploy/bare-metal/build-backend.sh");
+  assert.match(ignore, /^release\/$/m);
+});

@@ -1,5 +1,6 @@
 node_modules/
 apps/web/dist/
+release/
 bin/
 data/
 *.db
