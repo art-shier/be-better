@@ -13,16 +13,16 @@
 
 ## 构建 Web
 
-同域代理 `/api` 时运行：
+开发和测试默认请求 `/api/v1`，Vite 会将 `/api` 代理到 `http://127.0.0.1:8080`：
 
 ```bash
 npm run build:release:web
 ```
 
-前端和 API 使用不同 Origin 时，在构建时固定 API 地址：
+生产构建未设置 `VITE_API_BASE_URL` 时默认请求 `https://better-api.shier.art/api/v1`。预发布或其他部署可以在构建时覆盖默认地址：
 
 ```bash
-VITE_API_BASE_URL=https://api.example.com/api/v1 npm run build:release:web
+VITE_API_BASE_URL=https://staging-api.example.com/api/v1 npm run build:release:web
 ```
 
 产物位于 `release/web/`。把该目录的内容同步到静态服务器站点根目录；SPA 服务必须把未知前端路由回退到 `index.html`。跨域部署还需将 Web Origin 写入 API 的 `DAYORDER_ALLOWED_ORIGINS`，并保持 HTTPS 与凭据请求配置一致。为了让当前 `SameSite=Lax` Session Cookie 稳定工作，优先使用同域反向代理，或使用同一注册域下的 Web/API 子域名。

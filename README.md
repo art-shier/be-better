@@ -122,7 +122,7 @@ PostgreSQL 不发布主机端口；公网只开放 Caddy 的 80/443。上线、�
 | `DAYORDER_ALLOWED_ORIGINS` | 允许携带凭据的 Web Origin |
 | `DAYORDER_AUTH_HMAC_KEY` | 至少 32 字节的认证/游标签名密钥 |
 | `DAYORDER_MAIL_SINK` | `log` 或 `smtp`；生产必须 `smtp` |
-| `VITE_API_BASE_URL` | 前端 API 根路径，默认 `/api/v1` |
+| `VITE_API_BASE_URL` | 前端 API 根地址；开发默认 `/api/v1`，生产默认 `https://better-api.shier.art/api/v1`，显式设置时覆盖默认值 |
 | `VITE_API_PROXY_TARGET` | Vite `/api` 代理目标 |
 
 完整示例见 [.env.example](.env.example)。
@@ -133,16 +133,16 @@ PostgreSQL 不发布主机端口；公网只开放 Caddy 的 80/443。上线、�
 
 ### 1. 构建并部署前端
 
-同域代理 `/api` 时直接构建：
+开发和测试默认请求 `/api/v1`，Vite 会将 `/api` 代理到 `http://127.0.0.1:8080`：
 
 ```bash
 npm run build:release:web
 ```
 
-前端与 API 使用不同 Origin 时，在构建时写入后端地址：
+生产构建未设置 `VITE_API_BASE_URL` 时默认请求 `https://better-api.shier.art/api/v1`。预发布或其他部署可以在构建时覆盖默认地址：
 
 ```bash
-VITE_API_BASE_URL=https://api.example.com/api/v1 npm run build:release:web
+VITE_API_BASE_URL=https://staging-api.example.com/api/v1 npm run build:release:web
 ```
 
 静态产物位于 `release/web/`，将该目录内容上传到 Nginx、Caddy、对象存储或 CDN 的站点根目录即可，例如：
