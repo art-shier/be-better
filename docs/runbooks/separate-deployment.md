@@ -13,13 +13,15 @@
 
 ## 构建 Web
 
-开发和测试默认请求 `/api/v1`，Vite 会将 `/api` 代理到 `http://127.0.0.1:8080`：
+开发和测试默认请求 `/api/v1`，Vite 会将 `/api` 代理到 `http://127.0.0.1:8080`。
+
+未显式设置 `VITE_API_BASE_URL` 时，普通 `npm run build:release:web` 是生产构建，默认写入 `https://better-api.shier.art/api/v1`：
 
 ```bash
 npm run build:release:web
 ```
 
-生产构建未设置 `VITE_API_BASE_URL` 时默认请求 `https://better-api.shier.art/api/v1`。预发布或其他部署可以在构建时覆盖默认地址：
+预发布或其他部署可以在构建时覆盖默认地址：
 
 ```bash
 VITE_API_BASE_URL=https://staging-api.example.com/api/v1 npm run build:release:web
