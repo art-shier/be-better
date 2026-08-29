@@ -21,13 +21,13 @@
 npm run build:release:web
 ```
 
-预发布或其他部署可以在构建时覆盖默认地址：
+只有 `VITE_API_BASE_URL` 去除首尾空白后仍为非空值时才会覆盖默认地址；预发布或其他部署可以在构建时覆盖：
 
 ```bash
 VITE_API_BASE_URL=https://staging-api.example.com/api/v1 npm run build:release:web
 ```
 
-产物位于 `release/web/`。把该目录的内容同步到静态服务器站点根目录；SPA 服务必须把未知前端路由回退到 `index.html`。跨域部署还需将 Web Origin 写入 API 的 `DAYORDER_ALLOWED_ORIGINS`，并保持 HTTPS 与凭据请求配置一致。为了让当前 `SameSite=Lax` Session Cookie 稳定工作，优先使用同域反向代理，或使用同一注册域下的 Web/API 子域名。
+产物位于 `release/web/`。`VITE_API_BASE_URL` 会在构建时写入静态 JS；API 地址变化后必须重新构建并重新部署前端。把该目录的内容同步到静态服务器站点根目录；SPA 服务必须把未知前端路由回退到 `index.html`。跨域部署还需将 Web Origin 写入 API 的 `DAYORDER_ALLOWED_ORIGINS`，并保持 HTTPS 与凭据请求配置一致。为了让当前 `SameSite=Lax` Session Cookie 稳定工作，优先使用同域反向代理，或使用同一注册域下的 Web/API 子域名。
 
 ## 构建 Backend
 
