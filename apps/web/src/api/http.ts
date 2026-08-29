@@ -1,5 +1,11 @@
-const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
-export const API_BASE_URL = (configuredBaseUrl || "/api/v1").replace(/\/$/, "");
+const PRODUCTION_API_BASE_URL = "https://better-api.shier.art/api/v1";
+
+export function resolveApiBaseUrl(configuredBaseUrl: string | undefined, production: boolean): string {
+  const fallback = production ? PRODUCTION_API_BASE_URL : "/api/v1";
+  return (configuredBaseUrl?.trim() || fallback).replace(/\/$/, "");
+}
+
+export const API_BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL, import.meta.env.PROD);
 
 export type ApiErrorCategory = "auth" | "conflict" | "rate-limit" | "unavailable" | "validation" | "request" | "server";
 

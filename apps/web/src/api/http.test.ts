@@ -1,9 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, apiRequest } from "./http";
+import { ApiError, apiRequest, resolveApiBaseUrl } from "./http";
 
 const jsonResponse = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), {
   status,
   headers: { "Content-Type": "application/json", ...headers },
+});
+
+describe("resolveApiBaseUrl", () => {
+  it("uses the development fallback when no URL is configured", () => {
+    expect(resolveApiBaseUrl(undefined, false)).toBe("/api/v1");
+  });
+
+  it("uses the production fallback when no URL is configured", () => {
+    expect(resolveApiBaseUrl(undefined, true)).toBe("https://better-api.shier.art/api/v1");
+  });
+
+  it("uses the production fallback when the configured URL is blank", () => {
+    expect(resolveApiBaseUrl("   ", true)).toBe("https://better-api.shier.art/api/v1");
+  });
+
+  it("trims and removes one trailing slash from an explicit URL in development", () => {
+    expect(resolveApiBaseUrl("  https://staging.example.test/api/v1/  ", false)).toBe("https://staging.example.test/api/v1");
+  });
+
+  it("trims and removes one trailing slash from an explicit URL in production", () => {
+    expect(resolveApiBaseUrl("  https://staging.example.test/api/v1/  ", true)).toBe("https://staging.example.test/api/v1");
+  });
 });
 
 describe("apiRequest", () => {
