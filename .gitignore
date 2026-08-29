@@ -8,6 +8,7 @@ data/
 coverage/
 .artifacts/
 .superpowers/
+.worktrees/
 .coder-studio/session-metadata.json
 .postgres-data/
 .pgbackrest/
