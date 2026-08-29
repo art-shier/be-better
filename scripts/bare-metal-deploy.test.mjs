@@ -176,3 +176,26 @@ test("release build scripts and package commands expose the agreed contract", ()
   assert.equal(packageManifest.scripts["build:release:backend"], "bash deploy/bare-metal/build-backend.sh");
   assert.match(ignore, /^release\/$/m);
 });
+
+test("service configuration templates keep database roles isolated", () => {
+  const api = readFileSync(resolve(root, "deploy/bare-metal/config/api.env.example"), "utf8");
+  const worker = readFileSync(resolve(root, "deploy/bare-metal/config/worker.env.example"), "utf8");
+  const migrate = readFileSync(resolve(root, "deploy/bare-metal/config/migrate.env.example"), "utf8");
+
+  assert.match(api, /^DATABASE_URL_FILE=/m);
+  assert.match(api, /^DAYORDER_AUTH_HMAC_KEY_FILE=/m);
+  assert.doesNotMatch(api, /^WORKER_DATABASE_URL(?:_FILE)?=/m);
+  assert.doesNotMatch(api, /^MIGRATION_DATABASE_URL(?:_FILE)?=/m);
+
+  assert.match(worker, /^WORKER_DATABASE_URL_FILE=/m);
+  assert.match(worker, /^DAYORDER_AUTH_HMAC_KEY_FILE=/m);
+  assert.match(worker, /^DAYORDER_SMTP_PASSWORD_FILE=/m);
+  assert.match(worker, /^DAYORDER_AGENT_HTTP_KEY_FILE=/m);
+  assert.doesNotMatch(worker, /^DATABASE_URL(?:_FILE)?=/m);
+  assert.doesNotMatch(worker, /^MIGRATION_DATABASE_URL(?:_FILE)?=/m);
+
+  assert.match(migrate, /^MIGRATION_DATABASE_URL_FILE=/m);
+  assert.doesNotMatch(migrate, /^DATABASE_URL(?:_FILE)?=/m);
+  assert.doesNotMatch(migrate, /^WORKER_DATABASE_URL(?:_FILE)?=/m);
+  assert.doesNotMatch(`${api}\n${worker}\n${migrate}`, /development-only|replace-with|change-me/i);
+});
