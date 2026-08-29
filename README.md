@@ -96,7 +96,7 @@ npm run test:runtime
 | `npm run build` | 构建 Web、API 和 Worker |
 | `npm start` | 启动正式 PostgreSQL API；生产静态资源将由 Caddy 托管 |
 
-## 单机生产部署
+## Docker Compose 单机部署（保留）
 
 生产仅支持全新 PostgreSQL 数据库，不提供其他数据库导入、双写或旧快照协议。先按 [密钥手册](docs/runbooks/secrets.md) 创建 `deploy/.env.production` 和 `deploy/secrets/*`，再执行：
 
@@ -129,16 +129,125 @@ PostgreSQL 不发布主机端口；公网只开放 Caddy 的 80/443。上线、�
 
 ## Linux 前后端分离部署
 
-项目提供不依赖 Docker 的 Linux 发布脚本：
+项目提供不依赖 Docker 的 Linux 构建与运行脚本。构建机需要 Node.js 22.22+（或 24.15+）、npm、Go 1.25+ 和 Bash；后端运行服务器不需要安装 Node.js 或 Go。
+
+### 1. 构建并部署前端
+
+同域代理 `/api` 时直接构建：
 
 ```bash
 npm run build:release:web
+```
+
+前端与 API 使用不同 Origin 时，在构建时写入后端地址：
+
+```bash
+VITE_API_BASE_URL=https://api.example.com/api/v1 npm run build:release:web
+```
+
+静态产物位于 `release/web/`，将该目录内容上传到 Nginx、Caddy、对象存储或 CDN 的站点根目录即可，例如：
+
+```bash
+rsync -av release/web/ deploy@web.example.com:/var/www/dayorder/
+```
+
+前端没有需要启动的 Node.js 服务。静态服务器需要把未知 SPA 路由回退到 `index.html`。`VITE_API_BASE_URL` 会写入静态 JS，API 地址变化后必须重新构建前端。
+
+### 2. 构建并部署后端
+
+构建当前机器架构的 Linux API、Worker 和 Migrator：
+
+```bash
 npm run build:release:backend
 ```
 
-- `release/web/` 是可直接部署到 Nginx、Caddy、对象存储或 CDN 的静态资源。
-- `release/backend/` 包含独立的 API、Worker、Migrator 二进制、启动脚本和配置模板。
-- API、Worker 使用独立进程和数据库账号；发布时先执行 migration，再分别重启两个服务。
+需要交叉构建时可以显式指定架构：
+
+```bash
+GOARCH=amd64 npm run build:release:backend
+# 或者
+GOARCH=arm64 npm run build:release:backend
+```
+
+上传完整后端发布目录：
+
+```bash
+ssh deploy@api.example.com 'sudo install -d -o deploy -g deploy /opt/dayorder/releases/0.2.0'
+rsync -av release/backend/ deploy@api.example.com:/opt/dayorder/releases/0.2.0/
+ssh deploy@api.example.com 'sudo chown -R dayorder:dayorder /opt/dayorder/releases/0.2.0'
+```
+
+`release/backend/` 包含：
+
+```text
+bin/dayorder-api
+bin/dayorder-worker
+bin/dayorder-migrate
+scripts/start-api.sh
+scripts/start-worker.sh
+scripts/migrate.sh
+config/api.env.example
+config/worker.env.example
+config/migrate.env.example
+```
+
+### 3. 准备后端配置
+
+在后端服务器分别创建 API、Worker 和 Migrator 配置：
+
+```bash
+sudo install -d -m 0750 -o root -g dayorder /etc/dayorder /etc/dayorder/secrets
+sudo install -m 0640 -o root -g dayorder /opt/dayorder/releases/0.2.0/config/api.env.example /etc/dayorder/api.env
+sudo install -m 0640 -o root -g dayorder /opt/dayorder/releases/0.2.0/config/worker.env.example /etc/dayorder/worker.env
+sudo install -m 0640 -o root -g dayorder /opt/dayorder/releases/0.2.0/config/migrate.env.example /etc/dayorder/migrate.env
+```
+
+编辑这三个环境文件，并在 `/etc/dayorder/secrets/` 创建其引用的数据库 URL、认证密钥、SMTP 密码和 Agent 密钥文件。API、Worker、Migrator 应使用三个不同权限的 PostgreSQL 账号。
+
+前端部署在 `https://app.example.com` 时，API 配置至少需要调整：
+
+```bash
+DAYORDER_PUBLIC_URL=https://app.example.com
+DAYORDER_ALLOWED_ORIGINS=https://app.example.com
+```
+
+### 4. 执行数据库迁移
+
+每次启动新版本前先执行 migration，再检查 schema 版本：
+
+```bash
+cd /opt/dayorder/releases/0.2.0
+sudo -u dayorder ./scripts/migrate.sh up /etc/dayorder/migrate.env
+sudo -u dayorder ./scripts/migrate.sh check /etc/dayorder/migrate.env
+```
+
+任一命令失败都应停止发布，不要继续重启 API 或 Worker。
+
+### 5. 分别启动 API 和 Worker
+
+API 和 Worker 是两个独立的前台服务：
+
+```bash
+cd /opt/dayorder/releases/0.2.0
+sudo -u dayorder ./scripts/start-api.sh /etc/dayorder/api.env
+```
+
+另一个终端或独立的 systemd/Supervisor 服务启动 Worker：
+
+```bash
+cd /opt/dayorder/releases/0.2.0
+sudo -u dayorder ./scripts/start-worker.sh /etc/dayorder/worker.env
+```
+
+启动脚本使用 `exec` 保持前台运行，不自行放入后台。生产环境应让进程管理器负责开机启动、日志、重启和停止超时。
+
+### 6. 发布后检查
+
+```bash
+curl --fail --silent --show-error https://api.example.com/health/live
+curl --fail --silent --show-error https://api.example.com/health/ready
+curl --fail --silent --show-error http://127.0.0.1:9091/metrics >/dev/null
+```
 
 完整的服务器依赖、跨域配置、上传、迁移、启动和健康检查命令见 [前后端分离部署手册](docs/runbooks/separate-deployment.md)。原有 Docker Compose 部署路径继续保留，但不是该流程的依赖。
 
