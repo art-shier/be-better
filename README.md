@@ -127,6 +127,21 @@ PostgreSQL 不发布主机端口；公网只开放 Caddy 的 80/443。上线、�
 
 完整示例见 [.env.example](.env.example)。
 
+## Linux 前后端分离部署
+
+项目提供不依赖 Docker 的 Linux 发布脚本：
+
+```bash
+npm run build:release:web
+npm run build:release:backend
+```
+
+- `release/web/` 是可直接部署到 Nginx、Caddy、对象存储或 CDN 的静态资源。
+- `release/backend/` 包含独立的 API、Worker、Migrator 二进制、启动脚本和配置模板。
+- API、Worker 使用独立进程和数据库账号；发布时先执行 migration，再分别重启两个服务。
+
+完整的服务器依赖、跨域配置、上传、迁移、启动和健康检查命令见 [前后端分离部署手册](docs/runbooks/separate-deployment.md)。原有 Docker Compose 部署路径继续保留，但不是该流程的依赖。
+
 ## API 概览
 
 所有业务接口位于 `/api/v1`：

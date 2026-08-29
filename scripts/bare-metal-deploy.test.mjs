@@ -199,3 +199,23 @@ test("service configuration templates keep database roles isolated", () => {
   assert.doesNotMatch(migrate, /^WORKER_DATABASE_URL(?:_FILE)?=/m);
   assert.doesNotMatch(`${api}\n${worker}\n${migrate}`, /development-only|replace-with|change-me/i);
 });
+
+test("project documentation covers the Docker-independent release path", () => {
+  const readme = readFileSync(resolve(root, "README.md"), "utf8");
+  const runbook = readFileSync(resolve(root, "docs/runbooks/separate-deployment.md"), "utf8");
+
+  assert.match(readme, /前后端分离部署/);
+  assert.match(readme, /build:release:web/);
+  assert.match(readme, /build:release:backend/);
+  for (const phrase of [
+    "VITE_API_BASE_URL",
+    "migrate.sh up",
+    "migrate.sh check",
+    "start-api.sh",
+    "start-worker.sh",
+    "/health/ready",
+    "systemd",
+  ]) {
+    assert.match(runbook, new RegExp(phrase.replace("/", "\\/")));
+  }
+});
