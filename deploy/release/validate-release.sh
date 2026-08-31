@@ -39,8 +39,8 @@ checksum_names=()
 checksum_count=0
 while IFS= read -r record || [[ -n "$record" ]]; do
   ((checksum_count += 1))
-  [[ "$record" =~ ^[0-9a-f]{64}\ \ ([^/[:space:]]+)$ ]] || die "checksum record has an invalid strict format"
-  checksum_names+=("${BASH_REMATCH[1]}")
+  [[ "$record" =~ ^[0-9a-f]{64}\ ([\ \*])([^/[:space:]]+)$ ]] || die "checksum record has an invalid strict format"
+  checksum_names+=("${BASH_REMATCH[2]}")
 done < "$asset_directory/SHA256SUMS"
 [[ "$checksum_count" -eq 7 ]] || die "SHA256SUMS must contain exactly seven checksum records"
 actual_checksum_names="$(printf '%s\n' "${checksum_names[@]}" | LC_ALL=C sort)"

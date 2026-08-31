@@ -131,6 +131,15 @@ test("release validator accepts the complete real Linux asset contract", (t) => 
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /release asset validation passed/i);
+
+  const checksums = readFileSync(resolve(fixture.assets, "SHA256SUMS"), "utf8");
+  writeFileSync(
+    resolve(fixture.assets, "SHA256SUMS"),
+    checksums.replace(/^([0-9a-f]{64})  /gm, "$1 *"),
+    "utf8",
+  );
+  const binaryModeRecords = runValidator(fixture);
+  assert.equal(binaryModeRecords.status, 0, binaryModeRecords.stderr);
 });
 
 test("release validator rejects extra top-level entries and an incomplete checksum record set", (t) => {
