@@ -14,7 +14,7 @@ function jobSections(workflow) {
   const jobsStart = workflow.indexOf("jobs:\n");
   assert.notEqual(jobsStart, -1, "workflow must define jobs");
   const jobs = workflow.slice(jobsStart + "jobs:\n".length);
-  const headers = [...jobs.matchAll(/^  ([a-z][a-z0-9_-]*):\n/gm)];
+  const headers = [...jobs.matchAll(/^  ([A-Za-z_][A-Za-z0-9_-]*):\n/gm)];
   return headers.map((header, index) => ({
     name: header[1],
     section: jobs.slice(header.index + header[0].length, headers[index + 1]?.index),
@@ -32,19 +32,39 @@ function namedRunBlock(job, name) {
   const start = job.indexOf(step);
   assert.notEqual(start, -1, `release job must define the ${name} step`);
   const afterStep = job.slice(start + step.length);
+  const nextStep = afterStep.search(/\n      - /);
+  const stepSection = afterStep.slice(0, nextStep === -1 ? undefined : nextStep);
   const runMarker = "        run: |\n";
-  const runStart = afterStep.indexOf(runMarker);
+  const runStart = stepSection.indexOf(runMarker);
   assert.notEqual(runStart, -1, `${name} step must define a literal run block`);
-  const afterRun = afterStep.slice(runStart + runMarker.length);
-  const nextStep = afterRun.search(/\n      - /);
-  return afterRun.slice(0, nextStep === -1 ? undefined : nextStep);
+  return stepSection.slice(runStart + runMarker.length);
+}
+
+function stripShellComment(line) {
+  let quote;
+  let escaped = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (escaped) {
+      escaped = false;
+    } else if (character === "\\" && quote !== "'") {
+      escaped = true;
+    } else if (quote) {
+      if (character === quote) quote = undefined;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+    } else if (character === "#" && (index === 0 || /[\s;&|()]/.test(line[index - 1]))) {
+      return line.slice(0, index);
+    }
+  }
+  return line;
 }
 
 function releaseCommands(publishRun) {
   return publishRun
     .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => stripShellComment(line).trim())
+    .filter(Boolean)
     .flatMap((line) => [...line.matchAll(/\bgh release (?:view|create|upload|edit)\b[^\n]*/g)].map((match) => match[0]));
 }
 
@@ -123,11 +143,17 @@ test("Release workflow rejects a broader permission grant in a non-release job",
 
 test("Release workflow rejects a new non-release job with release-write permission", () => {
   const workflow = readFileSync(resolve(root, ".github/workflows/release.yml"), "utf8");
-  const mutated = workflow.replace(
-    "  release:\n",
-    "  rogue:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: write\n    steps: []\n\n  release:\n",
-  );
+  const mutated = `${workflow}\n  Rogue:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: write\n    steps: []\n`;
   assert.throws(() => assertReleaseWorkflowContract(mutated), /job set|non-release job permissions/);
+});
+
+test("Release workflow binds the publish run block to the named step", () => {
+  const workflow = readFileSync(resolve(root, ".github/workflows/release.yml"), "utf8");
+  const mutated = workflow.replace(
+    "      - name: Publish verified GitHub Release\n        shell: bash\n        run: |",
+    "      - name: Publish verified GitHub Release\n        shell: bash\n      - name: Unrelated later step\n        shell: bash\n        run: |",
+  );
+  assert.throws(() => assertReleaseWorkflowContract(mutated), /literal run block/);
 });
 
 test("Release workflow rejects an upload after remote asset verification", () => {
@@ -144,6 +170,15 @@ test("Release workflow rejects a commented upload in place of the publish comman
   const mutated = workflow.replace(
     '          gh release upload "$tag" "${assets[@]}" --clobber',
     '          # gh release upload "$tag" "${assets[@]}" --clobber\n          printf \'upload skipped\\n\'',
+  );
+  assert.throws(() => assertReleaseWorkflowContract(mutated), /publish step|release command sequence/);
+});
+
+test("Release workflow rejects an inline-commented upload in place of the publish command", () => {
+  const workflow = readFileSync(resolve(root, ".github/workflows/release.yml"), "utf8");
+  const mutated = workflow.replace(
+    '          gh release upload "$tag" "${assets[@]}" --clobber',
+    '          :; # gh release upload "$tag" "${assets[@]}" --clobber',
   );
   assert.throws(() => assertReleaseWorkflowContract(mutated), /publish step|release command sequence/);
 });
