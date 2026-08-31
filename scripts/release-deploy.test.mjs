@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   linkSync,
   mkdirSync,
@@ -183,6 +184,11 @@ function readDeploymentFile(path) {
   const result = runPosix("cat", ["--", shellPath(path)]);
   assert.equal(result.status, 0, result.stderr);
   return result.stdout;
+}
+
+function deploymentFileExists(path) {
+  if (process.platform !== "win32") return existsSync(path);
+  return runPosix("test", ["-f", shellPath(path)]).status === 0;
 }
 
 function runDeploy(fixture, args, extraEnvironment = {}) {
@@ -595,4 +601,34 @@ test("configuration templates preserve roots with sed-special characters", (t) =
   for (const name of ["api.env", "migrate.env", "worker.env"]) {
     assert.match(readFileSync(resolve(specialRoot, "dayorder-config", name), "utf8"), new RegExp(secrets.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
+});
+
+test("real generated assets install without privilege and stop at first configuration", {
+  skip: !process.env.DAYORDER_TEST_REAL_ASSETS,
+}, (t) => {
+  const source = resolve(process.env.DAYORDER_TEST_REAL_ASSETS);
+  const manifest = JSON.parse(readFileSync(resolve(source, "release-manifest.json"), "utf8"));
+  const f = fixture(t);
+  const destination = resolve(f.releases, manifest.version);
+  mkdirSync(destination, { recursive: true });
+  for (const name of [...checksumNames, "SHA256SUMS"]) {
+    copyFileSync(resolve(source, name), resolve(destination, name));
+  }
+  f.latest = manifest.version;
+
+  const firstAll = runDeploy(f, ["all"]);
+  assert.notEqual(firstAll.status, 0);
+  assert.match(firstAll.stderr, /configuration templates were created/);
+  for (const name of ["api.env", "migrate.env", "worker.env"]) {
+    assert.equal(existsSync(resolve(f.runDirectory, "dayorder-config", name)), true);
+  }
+  assert.equal(existsSync(resolve(f.runDirectory, "current-server")), false);
+  assert.equal(existsSync(resolve(f.runDirectory, "current-worker")), false);
+  assert.equal(existsSync(resolve(f.runDirectory, "current-web")), false);
+  assert.doesNotMatch(readFileSync(f.log, "utf8"), /migrate|systemctl/);
+
+  const web = runDeploy(f, ["web"]);
+  assert.equal(web.status, 0, web.stderr);
+  assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-web")), deploymentRealpath(resolve(f.runDirectory, `releases/${manifest.version}/web`)));
+  assert.equal(deploymentFileExists(resolve(f.runDirectory, "current-web/index.html")), true);
 });
