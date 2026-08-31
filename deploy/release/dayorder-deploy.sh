@@ -331,7 +331,7 @@ normalized_mode() {
 }
 
 ensure_owned_directory() {
-  local path="$1" label="$2" expected_mode="$3" created=0 owner actual_mode logical physical
+  local path="$1" label="$2" expected_mode="$3" mode_policy="${4:-exact}" created=0 owner actual_mode logical physical
   [[ ! -L "$path" ]] || die "$label must not be a symbolic link: $path"
   logical="$(realpath -ms -- "$path")"
   physical="$(realpath -m -- "$path")"
@@ -348,7 +348,11 @@ ensure_owned_directory() {
   [[ "$owner" == "$deployment_uid" ]] || die "$label must be owned by the deployment user: $path"
   actual_mode="$(stat -c %a -- "$path")" || die "cannot read $label mode: $path"
   actual_mode="$(normalized_mode "$actual_mode")"
-  [[ "$actual_mode" == "$expected_mode" ]] || die "$label must use mode 0$expected_mode: $path"
+  if [[ "$mode_policy" == no_external_write ]]; then
+    (( (8#$actual_mode & 0022) == 0 )) || die "$label must not be group- or other-writable: $path"
+  else
+    [[ "$actual_mode" == "$expected_mode" ]] || die "$label must use mode 0$expected_mode: $path"
+  fi
   (( created == 0 )) || return 0
 }
 
@@ -462,7 +466,7 @@ preflight_unit() {
   local service="$1" unit_dir unit
   unit_dir="$(unit_directory)"
   [[ "$unit_dir" == /* && ! "$unit_dir" =~ [[:cntrl:]] ]] || die "systemd unit directory must be an absolute safe path"
-  ensure_owned_directory "$unit_dir" "systemd unit directory" 700
+  ensure_owned_directory "$unit_dir" "systemd unit directory" 700 no_external_write
   unit="$unit_dir/$service.service"
   if [[ -e "$unit" || -L "$unit" ]]; then
     validate_owned_file "$unit" "systemd unit file" 644

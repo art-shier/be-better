@@ -116,6 +116,7 @@ archive_projection() {
   while IFS= read -r path; do
     [[ -n "$path" && "$path" != /* && "$path" != *$'\n'* && "$path" != *$'\r'* ]] || \
       die "$label archive contains an unsafe member path"
+    [[ "$path" != *[[:space:]]* ]] || die "$label archive contains whitespace in a member path: $path"
     case "/$path/" in *"/../"*) die "$label archive contains an unsafe member path: $path" ;; esac
     [[ "$path" != *"//"* ]] || die "$label archive contains a noncanonical member path: $path"
   done <<< "$listing"

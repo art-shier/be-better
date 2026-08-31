@@ -825,6 +825,30 @@ test("systemd unit symlinks are rejected without overwriting external files", (t
   assert.equal(readFileSync(outside, "utf8"), "outside-unit-sentinel\n");
 });
 
+test("systemd unit directories allow read access but reject group or other writers", (t) => {
+  for (const mode of ["0750", "0755"]) {
+    const safe = configuredFixture(t, "v1.2.3");
+    const unitDirectory = resolve(safe.home, ".config/systemd/user");
+    mkdirSync(unitDirectory, { recursive: true });
+    recordDeploymentMode(safe, unitDirectory, mode);
+
+    const result = runDeploy(safe, ["server"]);
+
+    assert.equal(result.status, 0, `mode ${mode}: ${result.stderr}`);
+  }
+
+  const unsafe = configuredFixture(t, "v1.2.3");
+  const unsafeUnitDirectory = resolve(unsafe.home, ".config/systemd/user");
+  mkdirSync(unsafeUnitDirectory, { recursive: true });
+  recordDeploymentMode(unsafe, unsafeUnitDirectory, "0775");
+
+  const unsafeResult = runDeploy(unsafe, ["server"]);
+
+  assert.notEqual(unsafeResult.status, 0);
+  assert.match(unsafeResult.stderr, /systemd unit directory.*group|other.*writ/i);
+  assert.doesNotMatch(readFileSync(unsafe.log, "utf8"), /migrate|systemctl --user daemon-reload/);
+});
+
 test("rollback restart failure reports manual intervention while restoring the old Server link", (t) => {
   const f = configuredFixture(t, "v1.2.3");
   const initial = runDeploy(f, ["server", "--version", "v1.2.3"]);

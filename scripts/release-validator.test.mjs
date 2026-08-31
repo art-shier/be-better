@@ -187,6 +187,30 @@ test("release validator rejects archive contract drift even with refreshed check
   assert.match(result.stderr, /web archive.*contract|archive member/i);
 });
 
+test("release validator rejects whitespace members that spoof contract paths", (t) => {
+  const fixture = releaseFixture(t);
+  const mutatedWeb = resolve(fixture.base, "whitespace-web");
+  write(resolve(mutatedWeb, "index.html"), "<main>mutated</main>\n");
+  write(resolve(mutatedWeb, "assets/app.js"), "console.log('expected')\n");
+  write(resolve(mutatedWeb, "unexpected ./assets/app.js"), "console.log('unexpected')\n");
+  const archive = resolve(fixture.assets, "dayorder-web.tar.gz");
+  const uncompressedArchive = resolve(fixture.base, "whitespace-web.tar");
+  requireSuccess(runBash([
+    "-c",
+    'tar --mtime=@0 --owner=0 --group=0 --numeric-owner --no-recursion --mode=0755 -C "$1" -cf "$3" . && tar --mtime=@0 --owner=0 --group=0 --numeric-owner --no-recursion --mode=0755 -C "$1" -rf "$3" ./assets && tar --mtime=@0 --owner=0 --group=0 --numeric-owner --no-recursion --mode=0644 -C "$1" -rf "$3" ./index.html ./assets/app.js "./unexpected ./assets/app.js" && gzip -n < "$3" > "$2"',
+    "dayorder-whitespace-web",
+    mutatedWeb,
+    archive,
+    uncompressedArchive,
+  ]), "create whitespace-spoofing Web fixture");
+  refreshChecksums(fixture.assets);
+
+  const result = runValidator(fixture);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /whitespace|unsafe member path|archive member/i);
+});
+
 test("release validator rejects a backend archive with the wrong ELF architecture", (t) => {
   const fixture = releaseFixture(t);
   copyFileSync(
