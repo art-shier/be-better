@@ -145,3 +145,16 @@ test("release builder exposes isolated CI targets and one complete local build",
   assert.equal(packageJson.scripts["build:release:assets"], "bash deploy/release/build-release.sh all");
   assert.equal(packageJson.scripts["test:release"], "node --test scripts/release-*.test.mjs");
 });
+
+test("gitignore tracks release source scripts while ignoring root release output", () => {
+  const sourceProbe = spawnSync("git", ["check-ignore", "--no-index", "deploy/release/future-release-helper.sh"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  const outputProbe = spawnSync("git", ["check-ignore", "--no-index", "release/future-release.tar.gz"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  assert.equal(sourceProbe.status, 1, sourceProbe.stdout || sourceProbe.stderr);
+  assert.equal(outputProbe.status, 0, outputProbe.stderr);
+});
