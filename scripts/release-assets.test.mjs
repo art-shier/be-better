@@ -31,6 +31,17 @@ function listArchive(path) {
   return result.stdout.trim().split("\n").map((entry) => entry.replace(/^\.\//, "")).filter(Boolean).sort();
 }
 
+function archiveMode(path, entry) {
+  const result = spawnSync("tar", ["-tvzf", tarPath(path)], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  const line = result.stdout.split(/\r?\n/).find((candidate) => {
+    const normalized = candidate.trimEnd();
+    return normalized.endsWith(` ${entry}`) || normalized.endsWith(` ./${entry}`);
+  });
+  assert.ok(line, `archive entry is missing: ${entry}`);
+  return line.trim().split(/\s+/, 1)[0];
+}
+
 function fixture(t) {
   const base = mkdtempSync(resolve(tmpdir(), "dayorder-release-assets-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));
@@ -70,9 +81,19 @@ test("packager emits the exact Web, Server, and Worker archive contracts", (t) =
   mkdirSync(extracted);
   const unpack = spawnSync("tar", ["-xzf", tarPath(resolve(f.assets, "dayorder-server-linux-amd64.tar.gz")), "-C", tarPath(extracted)], { encoding: "utf8" });
   assert.equal(unpack.status, 0, unpack.stderr);
-  assert.equal(statSync(resolve(extracted, "bin/dayorder-api")).mode & 0o777, 0o755);
-  assert.equal(statSync(resolve(extracted, "scripts/start-api.sh")).mode & 0o777, 0o755);
-  assert.equal(statSync(resolve(extracted, "config/api.env.example")).mode & 0o777, 0o644);
+  assert.equal(statSync(resolve(extracted, "bin/dayorder-api")).isFile(), true);
+  assert.equal(statSync(resolve(extracted, "scripts/start-api.sh")).isFile(), true);
+  assert.equal(statSync(resolve(extracted, "config/api.env.example")).isFile(), true);
+  if (process.platform === "win32") {
+    const archive = resolve(f.assets, "dayorder-server-linux-amd64.tar.gz");
+    assert.equal(archiveMode(archive, "bin/dayorder-api"), "-rwxr-xr-x");
+    assert.equal(archiveMode(archive, "scripts/start-api.sh"), "-rwxr-xr-x");
+    assert.equal(archiveMode(archive, "config/api.env.example"), "-rw-r--r--");
+  } else {
+    assert.equal(statSync(resolve(extracted, "bin/dayorder-api")).mode & 0o777, 0o755);
+    assert.equal(statSync(resolve(extracted, "scripts/start-api.sh")).mode & 0o777, 0o755);
+    assert.equal(statSync(resolve(extracted, "config/api.env.example")).mode & 0o777, 0o644);
+  }
 });
 
 test("packager rejects missing inputs and unsupported architectures", (t) => {
