@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.tag.outputs.commit }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24.15.0"
+          cache: npm
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.25.0"
+          cache-dependency-path: apps/api/go.sum
+      - name: Validate stable tag and main ancestry
+        id: tag
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tag="$GITHUB_REF_NAME"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            printf 'invalid stable tag: %s\n' "$tag" >&2
+            exit 1
+          }
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          commit="$(git rev-parse "$tag^{}")"
+          git merge-base --is-ancestor "$commit" origin/main || {
+            printf 'tag commit is not on origin/main\n' >&2
+            exit 1
+          }
+          printf 'commit=%s\n' "$commit" >> "$GITHUB_OUTPUT"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:web
+      - run: npm run test:api
+      - run: go vet ./apps/api/...
+      - run: npm run test:architecture
+      - run: npm run test:deploy
+      - run: npm run test:deploy:bare
+      - run: npm run test:release
+
+  web:
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24.15.0"
+          cache: npm
+      - name: Build Web Release asset
+        shell: bash
+        run: DAYORDER_RELEASE_OUTPUT="$PWD/release/github" bash deploy/release/build-release.sh web
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-web
+          path: release/github/dayorder-web.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  backend:
+    runs-on: ubuntu-latest
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.25.0"
+          cache-dependency-path: apps/api/go.sum
+      - name: Build backend Release assets
+        shell: bash
+        run: DAYORDER_RELEASE_OUTPUT="$PWD/release/github" bash deploy/release/build-release.sh backend "${{ matrix.arch }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-backend-${{ matrix.arch }}
+          path: |
+            release/github/dayorder-server-linux-${{ matrix.arch }}.tar.gz
+            release/github/dayorder-worker-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [validate, web, backend]
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*
+          path: release/github
+          merge-multiple: true
+      - name: Generate Manifest and checksums
+        shell: bash
+        run: |
+          DAYORDER_RELEASE_OUTPUT="$PWD/release/github" bash deploy/release/build-release.sh finalize \
+            "$GITHUB_REF_NAME" "${{ needs.validate.outputs.commit }}"
+      - name: Validate local asset set
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected=$'SHA256SUMS\ndayorder-deploy.sh\ndayorder-server-linux-amd64.tar.gz\ndayorder-server-linux-arm64.tar.gz\ndayorder-web.tar.gz\ndayorder-worker-linux-amd64.tar.gz\ndayorder-worker-linux-arm64.tar.gz\nrelease-manifest.json'
+          actual="$(find release/github -maxdepth 1 -type f -printf '%f\n' | sort)"
+          [[ "$actual" == "$expected" ]] || {
+            printf 'local release asset set is incomplete\n%s\n' "$actual" >&2
+            exit 1
+          }
+          (cd release/github && sha256sum -c SHA256SUMS)
+      - name: Publish verified GitHub Release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tag="$GITHUB_REF_NAME"
+          draft_state="$RUNNER_TEMP/dayorder-release-draft"
+          if gh release view "$tag" --json isDraft --jq .isDraft > "$draft_state" 2>/dev/null; then
+            [[ "$(<"$draft_state")" == true ]] || {
+              printf 'release %s is already public; refusing to replace it\n' "$tag" >&2
+              exit 1
+            }
+          else
+            gh release create "$tag" --verify-tag --draft --generate-notes --title "$tag"
+          fi
+          gh release upload "$tag" release/github/* --clobber
+          expected=$'SHA256SUMS\ndayorder-deploy.sh\ndayorder-server-linux-amd64.tar.gz\ndayorder-server-linux-arm64.tar.gz\ndayorder-web.tar.gz\ndayorder-worker-linux-amd64.tar.gz\ndayorder-worker-linux-arm64.tar.gz\nrelease-manifest.json'
+          actual="$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)"
+          [[ "$actual" == "$expected" ]] || {
+            printf 'release asset set is incomplete\n%s\n' "$actual" >&2
+            exit 1
+          }
+          gh release edit "$tag" --draft=false
