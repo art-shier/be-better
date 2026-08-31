@@ -24,6 +24,7 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -z "$requested_version" || "$requested_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "version must match vX.Y.Z"
 [[ -n "$root_input" ]] || die "deployment root must not be empty"
+[[ ! "$root_input" =~ [[:cntrl:]] ]] || die "deployment root contains control characters"
 [[ ! -L "$root_input" ]] || die "deployment root must not be a symbolic link"
 root="$(realpath -m -- "$root_input")"
 home="$(realpath -m -- "${HOME:?HOME is required}")"
@@ -289,12 +290,20 @@ config_dir="$root/dayorder-config"
 config_created=0
 
 ensure_config() {
-  local name="$1" component_name="$2" template
+  local name="$1" component_name="$2" template needle='/etc/dayorder/secrets' line remaining prefix output
   template="$root/releases/$version/$component_name/config/$name.env.example"
   local destination="$config_dir/$name.env" temporary="$config_dir/.$name.env.$$"
   [[ -f "$destination" ]] && return
   mkdir -p -- "$config_dir/secrets"; chmod 0700 "$config_dir" "$config_dir/secrets"
-  sed "s#/etc/dayorder/secrets#$config_dir/secrets#g" "$template" > "$temporary"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    remaining="$line"; output=""
+    while [[ "$remaining" == *"$needle"* ]]; do
+      prefix="${remaining%%"$needle"*}"
+      output+="$prefix$config_dir/secrets"
+      remaining="${remaining#*"$needle"}"
+    done
+    printf '%s\n' "$output$remaining"
+  done < "$template" > "$temporary"
   chmod 0600 "$temporary"; mv -- "$temporary" "$destination"
   config_created=1
   printf 'Created %s; fill it and the referenced secret files before retrying.\n' "$destination" >&2
@@ -308,6 +317,11 @@ systemd_quote() {
   local value="$1"
   value="${value//\\/\\\\}"; value="${value//\"/\\\"}"; value="${value//%/%%}"
   printf '"%s"' "$value"
+}
+
+validate_systemd_value() {
+  [[ "$1" =~ [[:cntrl:]] ]] && die "systemd unit value contains control characters"
+  return 0
 }
 
 preflight_systemd() {
@@ -358,10 +372,20 @@ wait_for_api() {
 }
 
 restore_link() {
-  local name="$1" old="$2" service="${3:-}"
-  if [[ -n "$old" ]]; then switch_link "$name" "$old"; else rm -f -- "$root/current-$name"; fi
+  local name="$1" old="$2" service="${3:-}" link
+  link="$root/current-$name"
+  if [[ -n "$old" ]]; then
+    switch_link "$name" "$old" || { printf 'dayorder-deploy: rollback failed to restore %s link\n' "$name" >&2; return 1; }
+  else
+    rm -f -- "$link" || { printf 'dayorder-deploy: rollback failed to remove %s link\n' "$name" >&2; return 1; }
+    [[ ! -e "$link" && ! -L "$link" ]] || { printf 'dayorder-deploy: rollback failed to remove %s link\n' "$name" >&2; return 1; }
+  fi
   if [[ -n "$service" ]]; then
-    if [[ -n "$old" ]]; then systemctl --user restart "$service.service"; else systemctl --user stop "$service.service" || true; fi
+    if [[ -n "$old" ]]; then
+      systemctl --user restart "$service.service" || { printf 'dayorder-deploy: rollback failed to restart %s\n' "$service" >&2; return 1; }
+    else
+      systemctl --user stop "$service.service" || { printf 'dayorder-deploy: rollback failed to stop %s\n' "$service" >&2; return 1; }
+    fi
   fi
 }
 
@@ -374,7 +398,8 @@ deploy_server() {
   switch_link server "$destination" || return 1; server_changed=1
   if ! write_unit dayorder-api "$root/current-server" start-api.sh "$config_dir/api.env" 30 || \
     ! activate_service dayorder-api || ! wait_for_api; then
-    restore_link server "$server_old" dayorder-api; server_changed=0; return 1
+    restore_link server "$server_old" dayorder-api || return 2
+    server_changed=0; return 1
   fi
   printf 'Server %s deployed\n' "$version"
 }
@@ -386,7 +411,8 @@ deploy_worker() {
   switch_link worker "$destination" || return 1; worker_changed=1
   if ! write_unit dayorder-worker "$root/current-worker" start-worker.sh "$config_dir/worker.env" 60 || \
     ! activate_service dayorder-worker || ! systemctl --user is-active --quiet dayorder-worker.service; then
-    restore_link worker "$worker_old" dayorder-worker; worker_changed=0; return 1
+    restore_link worker "$worker_old" dayorder-worker || return 2
+    worker_changed=0; return 1
   fi
   printf 'Worker %s deployed\n' "$version"
 }
@@ -395,7 +421,7 @@ deploy_web() {
   local destination="$root/releases/$version/web"
   web_old="$(current_target web)" || return 1
   if [[ "$web_old" == "$destination" ]]; then printf 'Web %s is already deployed\n' "$version"; return 0; fi
-  switch_link web "$destination"
+  switch_link web "$destination" || return 1
   web_changed=1
   printf 'Web %s deployed at %s/current-web; configure Nginx/Caddy/CDN separately\n' "$version" "$root"
 }
@@ -428,28 +454,54 @@ if (( config_created != 0 )); then
 fi
 case "$component" in
   server)
-    require_config api; require_config migrate; preflight_systemd
+    require_config api; require_config migrate; preflight_systemd; validate_systemd_value "$root"
     ;;
   worker)
-    require_config worker; preflight_systemd
+    require_config worker; preflight_systemd; validate_systemd_value "$root"
     ;;
   all)
-    require_config api; require_config migrate; require_config worker; preflight_systemd
+    require_config api; require_config migrate; require_config worker; preflight_systemd; validate_systemd_value "$root"
     ;;
 esac
+rollback_failed=0
 case "$component" in
-  server) deploy_server || die "Server deployment failed; the previous application link was restored" ;;
-  worker) deploy_worker || die "Worker deployment failed; the previous application link was restored" ;;
+  server)
+    if ! deploy_server; then
+      (( server_changed == 0 )) || die "Server deployment failed; rollback failed; manual intervention required"
+      die "Server deployment failed; previous application link was preserved or restored"
+    fi
+    ;;
+  worker)
+    if ! deploy_worker; then
+      (( worker_changed == 0 )) || die "Worker deployment failed; rollback failed; manual intervention required"
+      die "Worker deployment failed; previous application link was preserved or restored"
+    fi
+    ;;
   web) deploy_web ;;
   all)
-    if ! deploy_server; then die "Server deployment failed before later components were activated"; fi
+    if ! deploy_server; then
+      (( server_changed == 0 )) || die "Server deployment failed; rollback failed; manual intervention required"
+      die "Server deployment failed before later components were activated"
+    fi
     if ! deploy_worker; then
-      (( server_changed == 0 )) || restore_link server "$server_old" dayorder-api
+      (( worker_changed == 0 )) || rollback_failed=1
+      if (( server_changed != 0 )); then
+        restore_link server "$server_old" dayorder-api || rollback_failed=1
+        (( rollback_failed != 0 )) || server_changed=0
+      fi
+      (( rollback_failed == 0 )) || die "Worker deployment failed; rollback failed; manual intervention required"
       die "Worker deployment failed; activated application links were restored"
     fi
     if ! deploy_web; then
-      (( worker_changed == 0 )) || restore_link worker "$worker_old" dayorder-worker
-      (( server_changed == 0 )) || restore_link server "$server_old" dayorder-api
+      if (( worker_changed != 0 )); then
+        restore_link worker "$worker_old" dayorder-worker || rollback_failed=1
+        (( rollback_failed != 0 )) || worker_changed=0
+      fi
+      if (( server_changed != 0 )); then
+        restore_link server "$server_old" dayorder-api || rollback_failed=1
+        (( rollback_failed != 0 )) || server_changed=0
+      fi
+      (( rollback_failed == 0 )) || die "Web deployment failed; rollback failed; manual intervention required"
       die "Web deployment failed; activated application links were restored"
     fi
     ;;

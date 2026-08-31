@@ -8,7 +8,6 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -96,8 +95,25 @@ if [[ "$*" == *show-user* ]]; then printf '%s\\n' "\${DAYORDER_TEST_LINGER:-yes}
   writeExecutable(resolve(directory, "systemctl"), `#!/usr/bin/env bash
 if [[ "$*" == *show-environment* ]]; then exit 0; fi
 printf 'systemctl %s\\n' "$*" >> "$DAYORDER_TEST_LOG"
+if [[ "$*" == *restart*dayorder-api.service* && "\${DAYORDER_TEST_SYSTEMCTL_RESTART_FAIL:-0}" == 1 ]]; then exit 1; fi
 if [[ "$*" == *is-active*dayorder-worker.service* && "\${DAYORDER_TEST_WORKER_FAIL:-0}" == 1 ]]; then exit 1; fi
 exit 0
+`);
+  writeExecutable(resolve(directory, "mv"), `#!/usr/bin/env bash
+if [[ "\${DAYORDER_TEST_MV_FAIL_WEB:-0}" == 1 && "$*" == *"/.current-web."* ]]; then exit 1; fi
+if [[ -n "\${DAYORDER_TEST_MODE_LOG:-}" ]]; then
+  source="\${@: -2:1}"; destination="\${@: -1}"
+  mode="$(awk -F '\\t' -v path="$source" '$2 == path { value = $1 } END { print value }' "$DAYORDER_TEST_MODE_LOG")"
+  [[ -z "$mode" ]] || printf '%s\\t%s\\n' "$mode" "$destination" >> "$DAYORDER_TEST_MODE_LOG"
+fi
+exec /bin/mv "$@"
+`);
+  writeExecutable(resolve(directory, "chmod"), `#!/usr/bin/env bash
+mode="$1"; shift
+if [[ -n "\${DAYORDER_TEST_MODE_LOG:-}" ]]; then
+  for path in "$@"; do printf '%s\\t%s\\n' "$mode" "$path" >> "$DAYORDER_TEST_MODE_LOG"; done
+fi
+exec /bin/chmod "$mode" "$@"
 `);
   writeExecutable(resolve(directory, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
   // Git for Windows does not provide flock; the fixture models uncontended locking.
@@ -114,12 +130,14 @@ function fixture(t) {
     commands: resolve(base, "commands"),
     home: resolve(base, "home"),
     log: resolve(base, "commands.log"),
+    modeLog: resolve(base, "modes.log"),
     latest: "v1.2.3",
   };
   for (const directory of [value.releases, value.runDirectory, value.commands, value.home]) {
     mkdirSync(directory, { recursive: true });
   }
   writeFileSync(value.log, "", "utf8");
+  writeFileSync(value.modeLog, "", "utf8");
   makeCommands(value.commands);
   return value;
 }
@@ -128,7 +146,7 @@ function shellPath(path) {
   if (process.platform !== "win32") return path;
   // This fixture runs the POSIX deployer under WSL on Windows. Adapt only
   // fixture command paths; deployed links remain real POSIX symlinks.
-  const match = /^([A-Za-z]):\\(.*)$/.exec(path);
+  const match = /^([A-Za-z]):\\([\s\S]*)$/.exec(path);
   assert.ok(match, `expected Windows path: ${path}`);
   return `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll("\\", "/")}`;
 }
@@ -142,6 +160,19 @@ function deploymentRealpath(path) {
 
 function deploymentPath(path) {
   return process.platform === "win32" ? shellPath(path) : path;
+}
+
+function bashLiteral(value) {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function deploymentMode(fixture, path) {
+  if (process.platform !== "win32") return (statSync(path).mode & 0o777).toString(8);
+  const target = shellPath(path);
+  const record = readFileSync(fixture.modeLog, "utf8").trim().split("\n").reverse()
+    .find((line) => line.endsWith(`\t${target}`));
+  assert.ok(record, `missing virtual POSIX mode for ${target}`);
+  return Number.parseInt(record.split("\t", 1)[0], 8).toString(8);
 }
 
 function readDeploymentFile(path) {
@@ -163,16 +194,17 @@ function runDeploy(fixture, args, extraEnvironment = {}) {
     DAYORDER_TEST_RELEASES: shellPath(fixture.releases),
     DAYORDER_TEST_LATEST: fixture.latest,
     DAYORDER_TEST_LOG: shellPath(fixture.log),
+    DAYORDER_TEST_MODE_LOG: shellPath(fixture.modeLog),
     HOME: shellPath(fixture.home),
     USER: "dayorder-test",
     XDG_CONFIG_HOME: shellPath(resolve(fixture.home, ".config")),
     ...extraEnvironment,
   };
   const exports = Object.entries(deploymentEnvironment)
-    .map(([name, value]) => `export ${name}=${JSON.stringify(value)}`).join("; ");
-  const launcher = `PATH=${JSON.stringify(commandPath)}; export PATH; ${exports}; exec /bin/bash ${[
+    .map(([name, value]) => `export ${name}=${bashLiteral(value)}`).join("; ");
+  const launcher = `PATH=${bashLiteral(commandPath)}; export PATH; ${exports}; exec /bin/bash ${[
     shellPath(deployer), ...shellArgs,
-  ].map(JSON.stringify).join(" ")}`;
+  ].map(bashLiteral).join(" ")}`;
   return spawnSync(bash, ["-c", launcher], {
     cwd: fixture.runDirectory,
     encoding: "utf8",
@@ -392,9 +424,7 @@ test("first all deployment creates persistent templates and stops before migrati
   for (const name of ["api.env", "migrate.env", "worker.env"]) {
     const path = resolve(f.runDirectory, "dayorder-config", name);
     assert.equal(existsSync(path), true);
-    // WSL on non-metadata NTFS mounts cannot expose POSIX chmod bits via
-    // Node. Production still performs chmod 0600; POSIX runners assert it.
-    assert.equal(statSync(path).mode & 0o777, process.platform === "win32" ? 0o666 : 0o600);
+    assert.equal(deploymentMode(f, path), "600");
     assert.match(readFileSync(path, "utf8"), new RegExp(deploymentPath(resolve(f.runDirectory, "dayorder-config/secrets")).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
   assert.equal(existsSync(resolve(f.runDirectory, "current-server")), false);
@@ -489,4 +519,52 @@ test("Successful all activates Server then Worker then Web and a repeat is a no-
   assert.equal((repeat.stdout.match(/already deployed/g) ?? []).length, 3);
   const repeatLog = readFileSync(f.log, "utf8").slice(logBeforeRepeat.length);
   assert.doesNotMatch(repeatLog, /migrate|daemon-reload| enable | restart | start /);
+});
+
+test("Web link failure during all restores Server and Worker while Web stays old", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const initial = runDeploy(f, ["all", "--version", "v1.2.3"]);
+  assert.equal(initial.status, 0, initial.stderr);
+  makeAssetRelease(f, "v1.2.4");
+  writeFileSync(f.log, "", "utf8");
+  const failed = runDeploy(f, ["all", "--version", "v1.2.4"], { DAYORDER_TEST_MV_FAIL_WEB: "1" });
+  assert.notEqual(failed.status, 0);
+  for (const name of ["server", "worker", "web"]) {
+    assert.equal(deploymentRealpath(resolve(f.runDirectory, `current-${name}`)), deploymentRealpath(resolve(f.runDirectory, `releases/v1.2.3/${name}`)));
+  }
+  assert.doesNotMatch(failed.stdout, /Web v1\.2\.4 deployed/);
+  const log = readFileSync(f.log, "utf8");
+  assert.match(log, /systemctl --user restart dayorder-api\.service/);
+  assert.match(log, /systemctl --user restart dayorder-worker\.service/);
+});
+
+test("rollback restart failure reports manual intervention while restoring the old Server link", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const initial = runDeploy(f, ["server", "--version", "v1.2.3"]);
+  assert.equal(initial.status, 0, initial.stderr);
+  makeAssetRelease(f, "v1.2.4");
+  const failed = runDeploy(f, ["server", "--version", "v1.2.4"], { DAYORDER_TEST_SYSTEMCTL_RESTART_FAIL: "1" });
+  assert.notEqual(failed.status, 0);
+  assert.match(failed.stderr, /rollback failed.*manual intervention/i);
+  assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-server")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.3/server")));
+});
+
+test("service deployment rejects control characters in the root before migration", (t) => {
+  const f = fixture(t); makeAssetRelease(f, "v1.2.3");
+  const unsafeRoot = resolve(f.base, "unsafe\nroot");
+  const result = runDeploy(f, ["server", "--root", unsafeRoot]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /control character/i);
+  assert.doesNotMatch(readFileSync(f.log, "utf8"), /migrate|systemctl/);
+});
+
+test("configuration templates preserve roots with sed-special characters", (t) => {
+  const f = fixture(t); makeAssetRelease(f, "v1.2.3");
+  const specialRoot = resolve(f.base, process.platform === "win32" ? "root&hash#backslash" : "root&hash#back\\slash");
+  const result = runDeploy(f, ["all", "--root", specialRoot]);
+  assert.notEqual(result.status, 0);
+  const secrets = deploymentPath(resolve(specialRoot, "dayorder-config/secrets"));
+  for (const name of ["api.env", "migrate.env", "worker.env"]) {
+    assert.match(readFileSync(resolve(specialRoot, "dayorder-config", name), "utf8"), new RegExp(secrets.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
 });
