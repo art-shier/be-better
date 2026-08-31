@@ -127,11 +127,27 @@ PostgreSQL 不发布主机端口；公网只开放 Caddy 的 80/443。上线、�
 
 完整示例见 [.env.example](.env.example)。
 
-## Linux 前后端分离部署
+## GitHub Release Linux 部署
+
+生产部署的首选入口是公开 GitHub Release。部署机需要 Linux、Bash、`curl`、`tar`、`sha256sum`、`flock` 和常见 GNU 工具；Web、Server 和 Worker 可以在不同机器上分别运行。首次在部署根目录执行：
+
+```bash
+mkdir -p ~/a
+cd ~/a
+curl -fsSLO https://github.com/art-shier/be-better/releases/latest/download/dayorder-deploy.sh
+chmod 0755 dayorder-deploy.sh
+./dayorder-deploy.sh all
+```
+
+首次运行 Server 或 Worker 时，脚本会创建 `~/a/dayorder-config/{api.env,migrate.env,worker.env,secrets/}` 并停止。填写这些文件和其中引用的密钥后重新运行 `./dayorder-deploy.sh all`。如果脚本要求启用用户级 systemd linger，只需执行一次 `sudo loginctl enable-linger "$USER"`，然后再次运行部署命令。
+
+Web 仅更新 `~/a/current-web` 的静态资源链接；请让 Nginx/Caddy 的站点根目录指向该链接。API 和 Worker 会作为两个独立的 `systemd --user` 服务运行。完整的首次安装、更新、日志、指定版本和回退限制见[前后端分离部署手册](docs/runbooks/separate-deployment.md)。
+
+### 本地构建/离线传输
 
 项目提供不依赖 Docker 的 Linux 构建与运行脚本。构建机需要 Node.js 22.22+（或 24.15+）、npm、Go 1.25+ 和 Bash；后端运行服务器不需要安装 Node.js 或 Go。
 
-### 1. 构建并部署前端
+#### 1. 构建并部署前端
 
 开发和测试默认请求 `/api/v1`，Vite 会将 `/api` 代理到 `http://127.0.0.1:8080`。
 
@@ -155,7 +171,7 @@ rsync -av release/web/ deploy@web.example.com:/var/www/dayorder/
 
 前端没有需要启动的 Node.js 服务。静态服务器需要把未知 SPA 路由回退到 `index.html`。`VITE_API_BASE_URL` 会写入静态 JS，API 地址变化后必须重新构建并重新部署前端。
 
-### 2. 构建并部署后端
+#### 2. 构建并部署后端
 
 构建当前机器架构的 Linux API、Worker 和 Migrator：
 
@@ -193,7 +209,7 @@ config/worker.env.example
 config/migrate.env.example
 ```
 
-### 3. 准备后端配置
+#### 3. 准备后端配置
 
 在后端服务器分别创建 API、Worker 和 Migrator 配置：
 
@@ -213,7 +229,7 @@ DAYORDER_PUBLIC_URL=https://app.example.com
 DAYORDER_ALLOWED_ORIGINS=https://app.example.com
 ```
 
-### 4. 执行数据库迁移
+#### 4. 执行数据库迁移
 
 每次启动新版本前先执行 migration，再检查 schema 版本：
 
@@ -225,7 +241,7 @@ sudo -u dayorder ./scripts/migrate.sh check /etc/dayorder/migrate.env
 
 任一命令失败都应停止发布，不要继续重启 API 或 Worker。
 
-### 5. 分别启动 API 和 Worker
+#### 5. 分别启动 API 和 Worker
 
 API 和 Worker 是两个独立的前台服务：
 
@@ -243,7 +259,7 @@ sudo -u dayorder ./scripts/start-worker.sh /etc/dayorder/worker.env
 
 启动脚本使用 `exec` 保持前台运行，不自行放入后台。生产环境应让进程管理器负责开机启动、日志、重启和停止超时。
 
-### 6. 发布后检查
+#### 6. 发布后检查
 
 ```bash
 curl --fail --silent --show-error https://api.example.com/health/live

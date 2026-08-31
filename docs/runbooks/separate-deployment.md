@@ -1,120 +1,110 @@
 # Linux 前后端分离部署手册
 
-本手册用于将 DayOrder Web、API、Worker 和数据库迁移器分别部署到 Linux。该流程不构建或运行 Docker 容器，也不负责安装 PostgreSQL、反向代理或进程管理器。
+本手册说明通过 GitHub Release 在 Linux 裸机上分别安装和更新 DayOrder Web、Server 与 Worker。该流程不构建或运行 Docker，也不安装 PostgreSQL、Nginx、Caddy 或 systemd。部署机需要 Linux、Bash、`curl`、`tar`、`sha256sum`、`flock` 和常见 GNU 工具。
 
-## 依赖与服务边界
+## 首次安装
 
-构建机需要 Node.js 22.22+（或 24.15+）、npm、Go 1.25+、Bash、`realpath` 和常见 GNU 工具。后端运行机只需要 Linux、CA 证书、时区数据、Bash 以及可访问的 PostgreSQL。
+在希望成为部署根目录的位置下载稳定的部署脚本。未指定 `--version` 时，脚本解析最新公开 Release：
 
-- Web 是纯静态资源。
-- API 是长期运行的 HTTP 服务。
-- Worker 是长期运行的异步任务服务。
-- Migrator 是发布期间执行一次的数据库任务。
+```bash
+mkdir -p ~/a
+cd ~/a
+curl -fsSLO https://github.com/art-shier/be-better/releases/latest/download/dayorder-deploy.sh
+chmod 0755 dayorder-deploy.sh
+./dayorder-deploy.sh all
+```
 
-## 构建 Web
+`--root` 未指定时使用命令启动时的 `$PWD`，不是脚本文件所在目录；例如可将 Server 安装到另一个绝对路径：
 
-开发和测试默认请求 `/api/v1`，Vite 会将 `/api` 代理到 `http://127.0.0.1:8080`。
+```bash
+./dayorder-deploy.sh server --root /srv/dayorder
+```
 
-未显式设置 `VITE_API_BASE_URL` 时，普通 `npm run build:release:web` 是生产构建，默认写入 `https://better-api.shier.art/api/v1`：
+以在 `~/a` 中运行脚本为例，目录布局固定为：
+
+```text
+~/a/
+├── dayorder-deploy.sh
+├── releases/
+│   ├── v0.3.0/
+│   │   ├── web/
+│   │   ├── server/
+│   │   └── worker/
+│   └── v0.3.1/
+├── current-web -> releases/v0.3.1/web
+├── current-server -> releases/v0.3.1/server
+├── current-worker -> releases/v0.3.1/worker
+└── dayorder-config/
+    ├── api.env
+    ├── migrate.env
+    ├── worker.env
+    └── secrets/
+```
+
+首次 Server 部署缺少 `api.env` 或 `migrate.env`、或首次 Worker 部署缺少 `worker.env` 时，脚本会创建权限受限的 `dayorder-config` 和 `secrets/`，从已校验产物复制缺失模板，然后在 migration、链接切换和服务启动之前停止。填写配置与密钥后重试同一命令。已有配置永不覆盖，历史版本不会自动删除。
+
+Server 与 Worker 需要可用的用户级 systemd 管理器。若脚本要求启用 linger，请执行一次：
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+脚本不会提权或自动执行 `sudo`。
+
+## 组件操作与更新
+
+按需部署单一组件，或使用 `all`：
+
+```bash
+./dayorder-deploy.sh web
+./dayorder-deploy.sh server
+./dayorder-deploy.sh worker
+./dayorder-deploy.sh all
+./dayorder-deploy.sh all --version v0.3.0
+```
+
+`all` 会先完成 Server migration 与就绪检查，再激活 Worker，最后切换 Web 链接。Server 或 Worker 激活失败时，应用链接会恢复到本次部署之前的版本并重新启动旧服务；`all` 后续步骤失败也会按逆序恢复本次已切换的应用链接。
+
+Web 只下载、校验并切换 `current-web`；Web 部署不安装、配置或启动 Nginx/Caddy，也不启动静态服务器。Nginx/Caddy 必须将站点根目录指向 `<root>/current-web`。Server 与 Worker 是两个独立的 `systemd --user` 服务，分别使用持久化的 `api.env`、`migrate.env` 与 `worker.env`。
+
+指定旧版本仅切换应用版本；数据库 migration 不会回退；指定旧版本只回退应用链接，因此版本必须使用 expand/contract migration 保持相邻版本兼容。
+
+## 服务状态与日志
+
+部署完成后检查两个服务：
+
+```bash
+systemctl --user status dayorder-api.service dayorder-worker.service
+journalctl --user -u dayorder-api.service -f
+journalctl --user -u dayorder-worker.service -f
+```
+
+API 默认就绪检查地址为 `http://127.0.0.1:8080/health/ready`；可用 `DAYORDER_DEPLOY_HEALTH_URL` 覆盖。Worker 成功条件是 `systemctl --user is-active dayorder-worker.service` 返回 `active`，不提供业务 HTTP 健康端点。
+
+## Release 内容与安全边界
+
+每个 Release 提供 Web、Linux `amd64`/`arm64` Server 与 Worker 压缩包，以及 `dayorder-deploy.sh`、`release-manifest.json` 和 `SHA256SUMS`。脚本在解压和激活前校验 HTTPS 下载、资产名、Manifest、SHA-256 和归档内容。
+
+Migration 只会在切换 Server 前向前执行并检查 schema；migration、下载、校验、解压或配置预检失败时不切换链接。请在确认不再需要的版本后自行清理 `releases/`，不要删除 `dayorder-config`。
+
+## 本地构建/离线传输
+
+无法访问 GitHub Release 时，可在具备 Node.js 22.22+（或 24.15+）、npm、Go 1.25+ 与 Bash 的构建机生成静态资源和 Linux 后端目录，再用受控传输工具复制：
 
 ```bash
 npm run build:release:web
-```
-
-只有 `VITE_API_BASE_URL` 去除首尾空白后仍为非空值时才会覆盖默认地址；预发布或其他部署可以在构建时覆盖：
-
-```bash
-VITE_API_BASE_URL=https://staging-api.example.com/api/v1 npm run build:release:web
-```
-
-产物位于 `release/web/`。`VITE_API_BASE_URL` 会在构建时写入静态 JS；API 地址变化后必须重新构建并重新部署前端。把该目录的内容同步到静态服务器站点根目录；SPA 服务必须把未知前端路由回退到 `index.html`。跨域部署还需将 Web Origin 写入 API 的 `DAYORDER_ALLOWED_ORIGINS`，并保持 HTTPS 与凭据请求配置一致。为了让当前 `SameSite=Lax` Session Cookie 稳定工作，优先使用同域反向代理，或使用同一注册域下的 Web/API 子域名。
-
-## 构建 Backend
-
-默认构建当前机器架构的 Linux 二进制：
-
-```bash
 npm run build:release:backend
 ```
 
-也可以显式构建目标架构：
+Web 位于 `release/web/`；后端目录位于 `release/backend/`，其中包含 API、Worker、Migrator、启动脚本和环境模板。离线传输仍须先执行 migration 检查、使用独立的 API/Worker/Migrator 数据库账号，并由两个独立服务管理 API 与 Worker。
+
+`VITE_API_BASE_URL` 会在 Web 构建时写入静态资源；离线环境要改用其他 API 地址时，必须在构建时显式设置它。传输后的后端仍按以下顺序执行并由进程管理器托管：
 
 ```bash
-GOARCH=amd64 npm run build:release:backend
-GOARCH=arm64 npm run build:release:backend
+VITE_API_BASE_URL=https://api.example.com/api/v1 npm run build:release:web
+cd release/backend
+./scripts/migrate.sh up /path/to/migrate.env
+./scripts/migrate.sh check /path/to/migrate.env
+./scripts/start-api.sh /path/to/api.env
+./scripts/start-worker.sh /path/to/worker.env
 ```
-
-产物位于 `release/backend/`。上传整个目录，不要只上传 `bin/`，因为运行脚本通过相对路径寻找二进制。
-
-## 安装目录与配置
-
-以下示例把版本产物安装到 `/opt/dayorder/releases/0.2.0`，配置和密钥放到版本目录之外。系统用户只需首次创建：
-
-```bash
-sudo useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin dayorder
-sudo install -d -o dayorder -g dayorder /opt/dayorder/releases/0.2.0
-sudo cp -a release/backend/. /opt/dayorder/releases/0.2.0/
-sudo chown -R dayorder:dayorder /opt/dayorder/releases/0.2.0
-sudo install -d -m 0750 -o root -g dayorder /etc/dayorder /etc/dayorder/secrets
-sudo install -m 0640 -o root -g dayorder deploy/bare-metal/config/api.env.example /etc/dayorder/api.env
-sudo install -m 0640 -o root -g dayorder deploy/bare-metal/config/worker.env.example /etc/dayorder/worker.env
-sudo install -m 0640 -o root -g dayorder deploy/bare-metal/config/migrate.env.example /etc/dayorder/migrate.env
-```
-
-如果 `dayorder` 用户已存在，跳过 `useradd`。编辑三个环境文件中的域名、SMTP、Agent 和容量设置。`DAYORDER_PUBLIC_URL` 应指向用户能打开验证与重置页面的 Web Origin。分别创建以下密钥文件并保持 `0640 root:dayorder` 权限：
-
-- `api_database_url`
-- `worker_database_url`
-- `migration_database_url`
-- `auth_hmac_key`
-- `smtp_password`
-- `agent_http_key`
-
-数据库 URL 应使用三个不同的 PostgreSQL 账号。API 和 Worker 不得使用 migrator 账号。密钥文件只能包含单行值，末尾换行会由启动脚本移除。
-
-## 执行数据库迁移
-
-每次启动新应用版本前执行：
-
-```bash
-cd /opt/dayorder/releases/0.2.0
-sudo -u dayorder ./scripts/migrate.sh up /etc/dayorder/migrate.env
-sudo -u dayorder ./scripts/migrate.sh check /etc/dayorder/migrate.env
-```
-
-任一命令失败都应停止发布。迁移只向前执行，不提供自动降级。
-
-## 启动 API 与 Worker
-
-启动脚本通过 `exec` 保持前台并把信号直接交给 Go 进程，应由 systemd、Supervisor 或同类工具管理：
-
-```bash
-cd /opt/dayorder/releases/0.2.0
-sudo -u dayorder ./scripts/start-api.sh /etc/dayorder/api.env
-sudo -u dayorder ./scripts/start-worker.sh /etc/dayorder/worker.env
-```
-
-为 API 和 Worker 创建两个独立服务单元，分别设置工作目录、`ExecStart`、非 root 用户、重启策略和停止超时。不要在启动脚本外再套 `nohup` 或 `&`。API 建议预留至少 30 秒停止时间，Worker 至少 60 秒。
-
-## 反向代理与静态站点
-
-公网反向代理只需要把 `/api/*` 和 `/health/*` 转发到 API 的 `DAYORDER_ADDR`。API 和 Worker 指标地址默认绑定回环接口，不应直接暴露公网。Worker 没有业务 HTTP 入口。
-
-如果 Web 与 API 分属不同域名，认证 Cookie 请求依赖浏览器凭据模式和 API CORS 白名单；两端都必须使用 HTTPS。
-
-## 发布后检查
-
-```bash
-curl --fail --silent --show-error https://api.example.com/health/live
-curl --fail --silent --show-error https://api.example.com/health/ready
-curl --fail --silent --show-error http://127.0.0.1:9090/metrics >/dev/null
-curl --fail --silent --show-error http://127.0.0.1:9091/metrics >/dev/null
-```
-
-随后检查 API 与 Worker 日志，并人工完成注册、邮箱验证、登录、资源写入和同步。API `/health/ready` 会拒绝 schema 版本落后的数据库。
-
-## 升级与回退
-
-新版本先上传到新的版本目录，执行 migration 和检查后再切换两个服务。保留上一版完整后端目录和 Web 产物，便于回退应用二进制。
-
-数据库 migration 不会随应用回退而降级。涉及 schema 的版本必须采用 expand/contract，保证相邻应用版本能在新 schema 上短期运行。回退后重新检查 `/health/ready`、Worker 日志和 Outbox 堆积。

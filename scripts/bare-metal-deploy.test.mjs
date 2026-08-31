@@ -218,4 +218,19 @@ test("project documentation covers the Docker-independent release path", () => {
   ]) {
     assert.match(runbook, new RegExp(phrase.replace("/", "\\/")));
   }
+  for (const phrase of [
+    "dayorder-deploy.sh all",
+    "releases/latest/download/dayorder-deploy.sh",
+    "dayorder-config",
+    "current-web",
+    "systemctl --user",
+    "loginctl enable-linger",
+    "journalctl --user",
+    "--version v0.3.0",
+    "数据库 migration 不会回退",
+  ]) {
+    assert.match(`${readme}\n${runbook}`, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(runbook, /Web.*不.*Nginx|不.*启动.*Nginx/s);
+  assert.match(runbook, /Server.*Worker.*独立/s);
 });
