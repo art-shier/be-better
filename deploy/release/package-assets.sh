@@ -32,6 +32,25 @@ make_archive() {
   mv -f -- "$temporary" "$output"
 }
 
+make_contract_archive() {
+  local source="$1" output="$2" staging archive operation path mode
+  shift 2
+  [[ $(( $# % 2 )) -eq 0 ]] || die "internal archive contract must contain path/mode pairs"
+  mkdir -p -- "$(dirname -- "$output")"
+  new_temporary_directory staging
+  archive="$staging/archive.tar"
+  operation=-cf
+  while [[ $# -gt 0 ]]; do
+    path="$1" mode="$2"
+    shift 2
+    tar --mtime="@${SOURCE_DATE_EPOCH:-0}" --owner=0 --group=0 --numeric-owner \
+      --no-recursion --mode="$mode" -C "$source" "$operation" "$archive" "$path"
+    operation=-rf
+  done
+  gzip -n < "$archive" > "${output}.tmp.$$"
+  mv -f -- "${output}.tmp.$$" "$output"
+}
+
 package_web() {
   local source="$1" output_dir="$2" staging
   require_file "$source/index.html"
@@ -57,8 +76,27 @@ package_backend() {
     install -D -m "$( [[ "$path" == bin/* || "$path" == scripts/* ]] && printf 0755 || printf 0644 )" \
       "$source/$path" "$worker/$path"
   done
-  make_archive "$server" "$output_dir/dayorder-server-linux-$arch.tar.gz"
-  make_archive "$worker" "$output_dir/dayorder-worker-linux-$arch.tar.gz"
+  make_contract_archive "$server" "$output_dir/dayorder-server-linux-$arch.tar.gz" \
+    . 0755 \
+    ./bin 0755 \
+    ./bin/dayorder-api 0755 \
+    ./bin/dayorder-migrate 0755 \
+    ./config 0755 \
+    ./config/api.env.example 0644 \
+    ./config/migrate.env.example 0644 \
+    ./scripts 0755 \
+    ./scripts/migrate.sh 0755 \
+    ./scripts/runtime-env.sh 0755 \
+    ./scripts/start-api.sh 0755
+  make_contract_archive "$worker" "$output_dir/dayorder-worker-linux-$arch.tar.gz" \
+    . 0755 \
+    ./bin 0755 \
+    ./bin/dayorder-worker 0755 \
+    ./config 0755 \
+    ./config/worker.env.example 0644 \
+    ./scripts 0755 \
+    ./scripts/runtime-env.sh 0755 \
+    ./scripts/start-worker.sh 0755
 }
 
 write_metadata() {

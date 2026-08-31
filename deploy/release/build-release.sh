@@ -48,7 +48,7 @@ case "$command" in
   finalize) [[ $# -eq 3 ]] || die "usage: build-release.sh finalize <version> <revision>"; finalize "$2" "$3" ;;
   all)
     [[ $# -eq 1 ]] || die "usage: build-release.sh all"
-    version="v$(node -p "require('$root_dir/package.json').version")"
+    version="v$(cd -- "$root_dir" && node -p "require('./package.json').version")"
     revision="$(git -C "$root_dir" rev-parse HEAD)"
     build_web
     build_backend amd64

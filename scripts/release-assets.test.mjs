@@ -51,7 +51,8 @@ function fixture(t) {
   write(resolve(web, "index.html"), "<main>dayorder</main>\n");
   write(resolve(web, "assets/app.js"), "console.log('dayorder')\n");
   for (const name of ["dayorder-api", "dayorder-worker", "dayorder-migrate"]) {
-    write(resolve(backend, `bin/${name}`), "#!/usr/bin/env bash\nexit 0\n", 0o755);
+    // Real ELF binaries have no shebang for Git/MSYS to infer executability from.
+    write(resolve(backend, `bin/${name}`), "\x7fELF fixture\n", 0o755);
   }
   for (const name of ["runtime-env.sh", "start-api.sh", "start-worker.sh", "migrate.sh"]) {
     write(resolve(backend, `scripts/${name}`), "#!/usr/bin/env bash\nexit 0\n", 0o755);
@@ -144,6 +145,33 @@ test("release builder exposes isolated CI targets and one complete local build",
   assert.match(builder, /web\|backend\|finalize\|all/);
   assert.equal(packageJson.scripts["build:release:assets"], "bash deploy/release/build-release.sh all");
   assert.equal(packageJson.scripts["test:release"], "node --test scripts/release-*.test.mjs");
+});
+
+test("release builder resolves package metadata from the repository working directory", (t) => {
+  const f = fixture(t);
+  const commands = resolve(f.base, "commands");
+  write(resolve(commands, "node"), `#!/usr/bin/env bash
+if [[ "$*" == *"$DAYORDER_TEST_ROOT"* ]]; then
+  printf 'node cannot resolve package metadata outside its path namespace: %s\\n' "$*" >&2
+  exit 91
+fi
+[[ "$PWD" == "$DAYORDER_TEST_ROOT" ]] || exit 91
+printf 'relative metadata probe passed\\n' >&2
+exit 92
+`, 0o755);
+
+  const result = spawnSync("bash", [resolve(root, "deploy/release/build-release.sh"), "all"], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      DAYORDER_TEST_ROOT: tarPath(root),
+      PATH: `${commands}${process.platform === "win32" ? ";" : ":"}${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 92, result.stderr);
+  assert.match(result.stderr, /relative metadata probe passed/);
 });
 
 test("gitignore tracks release source scripts while ignoring root release output", () => {
