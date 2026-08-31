@@ -22,6 +22,8 @@
     "test:deploy:bare": "node --test scripts/bare-metal-deploy.test.mjs",
     "build:release:web": "bash deploy/bare-metal/build-web.sh",
     "build:release:backend": "bash deploy/bare-metal/build-backend.sh",
+    "test:release": "node --test scripts/release-*.test.mjs",
+    "build:release:assets": "bash deploy/release/build-release.sh all",
     "test:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/runtime-acceptance.ps1",
     "test:runtime:postgres": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/runtime-postgres-acceptance.ps1",
     "test:security": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/security-acceptance.ps1",

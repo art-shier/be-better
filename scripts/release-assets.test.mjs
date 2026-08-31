@@ -135,3 +135,13 @@ test("metadata names every asset and SHA256SUMS verifies all seven inputs", (t) 
   assert.equal(verify.stdout.trim().split("\n").length, 7);
   assert.doesNotMatch(readFileSync(resolve(f.assets, "SHA256SUMS"), "utf8"), /SHA256SUMS/);
 });
+
+test("release builder exposes isolated CI targets and one complete local build", () => {
+  const builder = readFileSync(resolve(root, "deploy/release/build-release.sh"), "utf8");
+  const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
+  assert.match(builder, /build-web\.sh/);
+  assert.match(builder, /build-backend\.sh/);
+  assert.match(builder, /web\|backend\|finalize\|all/);
+  assert.equal(packageJson.scripts["build:release:assets"], "bash deploy/release/build-release.sh all");
+  assert.equal(packageJson.scripts["test:release"], "node --test scripts/release-*.test.mjs");
+});
