@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -96,11 +97,13 @@ if [[ "$*" == *show-user* ]]; then printf '%s\\n' "\${DAYORDER_TEST_LINGER:-yes}
 if [[ "$*" == *show-environment* ]]; then exit 0; fi
 printf 'systemctl %s\\n' "$*" >> "$DAYORDER_TEST_LOG"
 if [[ "$*" == *restart*dayorder-api.service* && "\${DAYORDER_TEST_SYSTEMCTL_RESTART_FAIL:-0}" == 1 ]]; then exit 1; fi
+if [[ "$*" == *stop*dayorder-api.service* && "\${DAYORDER_TEST_SYSTEMCTL_STOP_FAIL:-0}" == 1 ]]; then exit 1; fi
 if [[ "$*" == *is-active*dayorder-worker.service* && "\${DAYORDER_TEST_WORKER_FAIL:-0}" == 1 ]]; then exit 1; fi
 exit 0
 `);
   writeExecutable(resolve(directory, "mv"), `#!/usr/bin/env bash
 if [[ "\${DAYORDER_TEST_MV_FAIL_WEB:-0}" == 1 && "$*" == *"/.current-web."* ]]; then exit 1; fi
+if [[ "\${DAYORDER_TEST_MV_FAIL_SERVER_ROLLBACK:-0}" == 1 && "$*" == *"/.current-server."* && "$(readlink "\${@: -2:1}")" == *"/releases/v1.2.3/server" ]]; then exit 1; fi
 if [[ -n "\${DAYORDER_TEST_MODE_LOG:-}" ]]; then
   source="\${@: -2:1}"; destination="\${@: -1}"
   mode="$(awk -F '\\t' -v path="$source" '$2 == path { value = $1 } END { print value }' "$DAYORDER_TEST_MODE_LOG")"
@@ -547,6 +550,31 @@ test("rollback restart failure reports manual intervention while restoring the o
   assert.notEqual(failed.status, 0);
   assert.match(failed.stderr, /rollback failed.*manual intervention/i);
   assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-server")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.3/server")));
+});
+
+test("rollback link failure reports manual intervention and leaves the new Server link visible", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const initial = runDeploy(f, ["server", "--version", "v1.2.3"]);
+  assert.equal(initial.status, 0, initial.stderr);
+  makeAssetRelease(f, "v1.2.4");
+  const failed = runDeploy(f, ["server", "--version", "v1.2.4"], {
+    DAYORDER_TEST_HEALTH_FAIL: "1",
+    DAYORDER_TEST_MV_FAIL_SERVER_ROLLBACK: "1",
+  });
+  assert.notEqual(failed.status, 0);
+  assert.match(failed.stderr, /rollback failed.*manual intervention/i);
+  assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-server")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.4/server")));
+});
+
+test("rollback service-stop failure reports manual intervention after removing a new Server link", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const failed = runDeploy(f, ["server"], {
+    DAYORDER_TEST_HEALTH_FAIL: "1",
+    DAYORDER_TEST_SYSTEMCTL_STOP_FAIL: "1",
+  });
+  assert.notEqual(failed.status, 0);
+  assert.match(failed.stderr, /rollback failed.*manual intervention/i);
+  assert.equal(existsSync(resolve(f.runDirectory, "current-server")), false);
 });
 
 test("service deployment rejects control characters in the root before migration", (t) => {
