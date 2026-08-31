@@ -10,19 +10,42 @@ const assetNames = [
   "release-manifest.json", "SHA256SUMS",
 ];
 
-function jobSection(workflow, name) {
+function jobSections(workflow) {
   const jobsStart = workflow.indexOf("jobs:\n");
   assert.notEqual(jobsStart, -1, "workflow must define jobs");
-  const header = `  ${name}:\n`;
-  const start = workflow.indexOf(header, jobsStart);
-  assert.notEqual(start, -1, `workflow must define the ${name} job`);
-  const remaining = workflow.slice(start + header.length);
-  const nextJob = remaining.search(/\n  [a-z][a-z0-9_-]*:\n/);
-  return remaining.slice(0, nextJob === -1 ? undefined : nextJob);
+  const jobs = workflow.slice(jobsStart + "jobs:\n".length);
+  const headers = [...jobs.matchAll(/^  ([a-z][a-z0-9_-]*):\n/gm)];
+  return headers.map((header, index) => ({
+    name: header[1],
+    section: jobs.slice(header.index + header[0].length, headers[index + 1]?.index),
+  }));
 }
 
-function releaseCommands(releaseJob) {
-  return [...releaseJob.matchAll(/\bgh release (?:view|create|upload|edit)\b[^\n]*/g)].map((match) => match[0]);
+function jobSection(workflow, name) {
+  const section = jobSections(workflow).find((job) => job.name === name)?.section;
+  assert.ok(section, `workflow must define the ${name} job`);
+  return section;
+}
+
+function namedRunBlock(job, name) {
+  const step = `      - name: ${name}\n`;
+  const start = job.indexOf(step);
+  assert.notEqual(start, -1, `release job must define the ${name} step`);
+  const afterStep = job.slice(start + step.length);
+  const runMarker = "        run: |\n";
+  const runStart = afterStep.indexOf(runMarker);
+  assert.notEqual(runStart, -1, `${name} step must define a literal run block`);
+  const afterRun = afterStep.slice(runStart + runMarker.length);
+  const nextStep = afterRun.search(/\n      - /);
+  return afterRun.slice(0, nextStep === -1 ? undefined : nextStep);
+}
+
+function releaseCommands(publishRun) {
+  return publishRun
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .flatMap((line) => [...line.matchAll(/\bgh release (?:view|create|upload|edit)\b[^\n]*/g)].map((match) => match[0]));
 }
 
 function assertReleaseWorkflowContract(workflow) {
@@ -34,27 +57,30 @@ function assertReleaseWorkflowContract(workflow) {
   const globalPermissions = globalConfig.match(/^permissions:\n((?:  [^\n]+\n)+)/m)?.[1];
   assert.equal(globalPermissions?.trim(), "contents: read", "global permissions must be contents: read only");
   assert.doesNotMatch(workflow, /^\s*permissions:\s*write-all\s*$/m, "workflow must not grant write-all");
-  for (const job of ["validate", "web", "backend"]) {
-    assert.doesNotMatch(jobSection(workflow, job), /^    permissions:/m, "non-release job permissions must remain default-safe");
+  const jobs = jobSections(workflow);
+  assert.deepEqual(jobs.map((job) => job.name), ["validate", "web", "backend", "release"], "workflow job set must be fixed");
+  for (const job of jobs.filter((job) => job.name !== "release")) {
+    assert.doesNotMatch(job.section, /^    permissions:/m, "non-release job permissions must remain default-safe");
   }
   const releaseJob = jobSection(workflow, "release");
   const releasePermissions = releaseJob.match(/^    permissions:\n((?:      [^\n]+\n)+)/m)?.[1];
   assert.equal(releasePermissions?.trim(), "contents: write", "release job must grant only contents: write");
   assert.match(workflow, /cancel-in-progress:\s*false/);
   assert.match(workflow, /matrix:[\s\S]*arch:\s*\[amd64, arm64\]/);
-  const localValidation = workflow.match(/- name: Validate local asset set[\s\S]*?(?=\n      - name: Publish verified GitHub Release)/)?.[0] ?? "";
+  const localValidation = namedRunBlock(releaseJob, "Validate local asset set");
   assert.match(localValidation, /find release\/github -maxdepth 1 -mindepth 1 -printf '%f\\n' \| sort/);
   assert.doesNotMatch(localValidation, /-type f/);
   assert.match(localValidation, /\[\[ "\$actual" == "\$expected" \]\]/);
   assert.match(localValidation, /sha256sum -c SHA256SUMS/);
   for (const asset of assetNames) assert.match(localValidation, new RegExp(asset.replaceAll(".", "\\.")));
 
-  assert.match(releaseJob, /gh release create[\s\S]*--draft/);
-  assert.match(releaseJob, /gh release view "\$tag" --json isDraft --jq \.isDraft/);
-  assert.match(releaseJob, /\[\[ "\$\(<"\$draft_state"\)" == true \]\]/);
-  assert.match(releaseJob, /release %s is already public; refusing to replace it/);
-  assert.doesNotMatch(releaseJob, /gh release delete/);
-  const commands = releaseCommands(releaseJob);
+  const publishRun = namedRunBlock(releaseJob, "Publish verified GitHub Release");
+  assert.match(publishRun, /gh release create[\s\S]*--draft/);
+  assert.match(publishRun, /gh release view "\$tag" --json isDraft --jq \.isDraft/);
+  assert.match(publishRun, /\[\[ "\$\(<"\$draft_state"\)" == true \]\]/);
+  assert.match(publishRun, /release %s is already public; refusing to replace it/);
+  assert.doesNotMatch(publishRun, /gh release delete/);
+  const commands = releaseCommands(publishRun);
   assert.deepEqual(
     commands.map((command) => command.match(/^gh release ([a-z]+)/)?.[1]),
     ["view", "create", "upload", "view", "edit"],
@@ -65,18 +91,18 @@ function assertReleaseWorkflowContract(workflow) {
   assert.equal(commands[2], 'gh release upload "$tag" "${assets[@]}" --clobber');
   assert.match(commands[3], /^gh release view "\$tag" --json assets --jq '\.assets\[\]\.name'/);
   assert.equal(commands[4], 'gh release edit "$tag" --draft=false');
-  for (const asset of assetNames) assert.match(releaseJob, new RegExp(`release/github/${asset.replaceAll(".", "\\.")}`));
-  assert.match(releaseJob, /gh release upload "\$tag" "\$\{assets\[@\]\}" --clobber/);
-  assert.doesNotMatch(releaseJob, /gh release upload[^\n]*release\/github\/\*/);
-  const remoteValidation = releaseJob.slice(releaseJob.indexOf("gh release upload"));
+  for (const asset of assetNames) assert.match(publishRun, new RegExp(`release/github/${asset.replaceAll(".", "\\.")}`));
+  assert.match(publishRun, /gh release upload "\$tag" "\$\{assets\[@\]\}" --clobber/);
+  assert.doesNotMatch(publishRun, /gh release upload[^\n]*release\/github\/\*/);
+  const remoteValidation = publishRun.slice(publishRun.indexOf("gh release upload"));
   assert.match(remoteValidation, /gh release view "\$tag" --json assets --jq '\.assets\[\]\.name'/);
   assert.match(remoteValidation, /\[\[ "\$actual" == "\$expected" \]\]/);
   assert.match(remoteValidation, /release asset set is incomplete/);
   for (const asset of assetNames) assert.match(remoteValidation, new RegExp(asset.replaceAll(".", "\\.")));
-  assert.ok(workflow.indexOf("gh release upload") < workflow.indexOf("--draft=false"));
-  assert.ok(workflow.indexOf("sha256sum -c SHA256SUMS") < workflow.indexOf("gh release create"));
-  assert.ok(workflow.indexOf("gh release upload") < workflow.indexOf("gh release view \"$tag\" --json assets"));
-  assert.ok(workflow.indexOf("gh release view \"$tag\" --json assets") < workflow.indexOf("--draft=false"));
+  assert.ok(publishRun.indexOf("gh release upload") < publishRun.indexOf("--draft=false"));
+  assert.ok(localValidation.indexOf("sha256sum -c SHA256SUMS") < workflow.indexOf("gh release create"));
+  assert.ok(publishRun.indexOf("gh release upload") < publishRun.indexOf("gh release view \"$tag\" --json assets"));
+  assert.ok(publishRun.indexOf("gh release view \"$tag\" --json assets") < publishRun.indexOf("--draft=false"));
   for (const reference of workflow.matchAll(/uses:\s*([^\s#]+)/g)) {
     assert.match(reference[1], /@[0-9a-f]{40}$/, `Action is not pinned: ${reference[1]}`);
   }
@@ -95,6 +121,15 @@ test("Release workflow rejects a broader permission grant in a non-release job",
   assert.throws(() => assertReleaseWorkflowContract(mutated), /write-all|non-release job permissions/);
 });
 
+test("Release workflow rejects a new non-release job with release-write permission", () => {
+  const workflow = readFileSync(resolve(root, ".github/workflows/release.yml"), "utf8");
+  const mutated = workflow.replace(
+    "  release:\n",
+    "  rogue:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: write\n    steps: []\n\n  release:\n",
+  );
+  assert.throws(() => assertReleaseWorkflowContract(mutated), /job set|non-release job permissions/);
+});
+
 test("Release workflow rejects an upload after remote asset verification", () => {
   const workflow = readFileSync(resolve(root, ".github/workflows/release.yml"), "utf8");
   const mutated = workflow.replace(
@@ -102,4 +137,13 @@ test("Release workflow rejects an upload after remote asset verification", () =>
     '          gh release upload "$tag" "${assets[@]}" --clobber\n          gh release edit "$tag" --draft=false',
   );
   assert.throws(() => assertReleaseWorkflowContract(mutated), /release command sequence/);
+});
+
+test("Release workflow rejects a commented upload in place of the publish command", () => {
+  const workflow = readFileSync(resolve(root, ".github/workflows/release.yml"), "utf8");
+  const mutated = workflow.replace(
+    '          gh release upload "$tag" "${assets[@]}" --clobber',
+    '          # gh release upload "$tag" "${assets[@]}" --clobber\n          printf \'upload skipped\\n\'',
+  );
+  assert.throws(() => assertReleaseWorkflowContract(mutated), /publish step|release command sequence/);
 });
