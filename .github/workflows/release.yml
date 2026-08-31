@@ -123,7 +123,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           expected=$'SHA256SUMS\ndayorder-deploy.sh\ndayorder-server-linux-amd64.tar.gz\ndayorder-server-linux-arm64.tar.gz\ndayorder-web.tar.gz\ndayorder-worker-linux-amd64.tar.gz\ndayorder-worker-linux-arm64.tar.gz\nrelease-manifest.json'
-          actual="$(find release/github -maxdepth 1 -type f -printf '%f\n' | sort)"
+          actual="$(find release/github -maxdepth 1 -mindepth 1 -printf '%f\n' | sort)"
           [[ "$actual" == "$expected" ]] || {
             printf 'local release asset set is incomplete\n%s\n' "$actual" >&2
             exit 1
@@ -135,6 +135,16 @@ jobs:
           set -Eeuo pipefail
           tag="$GITHUB_REF_NAME"
           draft_state="$RUNNER_TEMP/dayorder-release-draft"
+          assets=(
+            "release/github/dayorder-web.tar.gz"
+            "release/github/dayorder-server-linux-amd64.tar.gz"
+            "release/github/dayorder-server-linux-arm64.tar.gz"
+            "release/github/dayorder-worker-linux-amd64.tar.gz"
+            "release/github/dayorder-worker-linux-arm64.tar.gz"
+            "release/github/dayorder-deploy.sh"
+            "release/github/release-manifest.json"
+            "release/github/SHA256SUMS"
+          )
           if gh release view "$tag" --json isDraft --jq .isDraft > "$draft_state" 2>/dev/null; then
             [[ "$(<"$draft_state")" == true ]] || {
               printf 'release %s is already public; refusing to replace it\n' "$tag" >&2
@@ -143,7 +153,7 @@ jobs:
           else
             gh release create "$tag" --verify-tag --draft --generate-notes --title "$tag"
           fi
-          gh release upload "$tag" release/github/* --clobber
+          gh release upload "$tag" "${assets[@]}" --clobber
           expected=$'SHA256SUMS\ndayorder-deploy.sh\ndayorder-server-linux-amd64.tar.gz\ndayorder-server-linux-arm64.tar.gz\ndayorder-web.tar.gz\ndayorder-worker-linux-amd64.tar.gz\ndayorder-worker-linux-arm64.tar.gz\nrelease-manifest.json'
           actual="$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)"
           [[ "$actual" == "$expected" ]] || {
