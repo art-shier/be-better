@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 die() { printf 'package-assets: %s\n' "$*" >&2; exit 1; }
 [[ $# -ge 1 ]] || die "usage: package-assets.sh <web|backend|metadata> ..."
-for command_name in tar gzip install mktemp sha256sum; do
+for command_name in tar gzip install mktemp sha256sum cp find chmod; do
   command -v "$command_name" >/dev/null 2>&1 || die "$command_name is required"
 done
 
@@ -57,6 +57,8 @@ package_web() {
   [[ -d "$source/assets" ]] || die "Web assets directory is missing: $source/assets"
   new_temporary_directory staging
   cp -a -- "$source/index.html" "$source/assets" "$staging/"
+  find "$staging" -type d -exec chmod 0755 -- {} +
+  find "$staging" -type f -exec chmod 0644 -- {} +
   make_archive "$staging" "$output_dir/dayorder-web.tar.gz"
 }
 

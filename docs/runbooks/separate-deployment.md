@@ -39,9 +39,31 @@ chmod 0755 dayorder-deploy.sh
     ├── migrate.env
     ├── worker.env
     └── secrets/
+        ├── api_database_url
+        ├── worker_database_url
+        ├── migration_database_url
+        ├── auth_hmac_key
+        ├── smtp_password
+        └── agent_http_key
 ```
 
 首次 Server 部署缺少 `api.env` 或 `migrate.env`、或首次 Worker 部署缺少 `worker.env` 时，脚本会创建权限受限的 `dayorder-config` 和 `secrets/`，从已校验产物复制缺失模板，然后在 migration、链接切换和服务启动之前停止。填写配置与密钥后重试同一命令。已有配置永不覆盖，历史版本不会自动删除。
+
+六个密钥的完整路径是 `secrets/api_database_url`、`secrets/worker_database_url`、`secrets/migration_database_url`、`secrets/auth_hmac_key`、`secrets/smtp_password` 和 `secrets/agent_http_key`。每个文件必须包含 exactly one non-empty single-line value；空文件、多行文件、符号链接、非部署用户拥有的文件或宽松权限都会在 migration 前被拒绝。首次填写后执行：
+
+```bash
+touch dayorder-config/secrets/api_database_url \
+  dayorder-config/secrets/worker_database_url \
+  dayorder-config/secrets/migration_database_url \
+  dayorder-config/secrets/auth_hmac_key \
+  dayorder-config/secrets/smtp_password \
+  dayorder-config/secrets/agent_http_key
+chmod 0700 dayorder-config dayorder-config/secrets
+chmod 0600 dayorder-config/api.env dayorder-config/migrate.env dayorder-config/worker.env \
+  dayorder-config/secrets/api_database_url dayorder-config/secrets/worker_database_url \
+  dayorder-config/secrets/migration_database_url dayorder-config/secrets/auth_hmac_key \
+  dayorder-config/secrets/smtp_password dayorder-config/secrets/agent_http_key
+```
 
 Server 与 Worker 需要可用的用户级 systemd 管理器。若脚本要求启用 linger，请执行一次：
 
@@ -63,11 +85,11 @@ sudo loginctl enable-linger "$USER"
 ./dayorder-deploy.sh all --version v0.3.0
 ```
 
-`all` 会先完成 Server migration 与就绪检查，再激活 Worker，最后切换 Web 链接。Server 或 Worker 激活失败时，应用链接会恢复到本次部署之前的版本并重新启动旧服务；`all` 后续步骤失败也会按逆序恢复本次已切换的应用链接。
+`all` 会先完成 Server migration 与就绪检查，再激活 Worker，最后切换 Web 链接。Server 或 Worker 激活失败时，应用链接会恢复到本次部署之前的版本并重新启动旧服务；`all` 后续步骤失败也会按逆序恢复本次已切换的应用链接。恢复旧 Server 后还会重新轮询 API 就绪端点；若旧 API 仍不健康，脚本会输出 `restored API failed readiness; manual intervention required` 并失败退出，运维必须检查链接、服务状态和日志。
 
 Web 只下载、校验并切换 `current-web`；Web 部署不安装、配置或启动 Nginx/Caddy，也不启动静态服务器。Nginx/Caddy 必须将站点根目录指向 `<root>/current-web`。Server 与 Worker 是两个独立的 `systemd --user` 服务，分别使用持久化的 `api.env`、`migrate.env` 与 `worker.env`。
 
-指定旧版本仅切换应用版本；数据库 migration 不会回退；指定旧版本只回退应用链接，因此版本必须使用 expand/contract migration 保持相邻版本兼容。
+指定旧版本仅切换应用版本；数据库 migration 不会回退。Migrator 与 API 拒绝 dirty schema 和低于二进制内嵌 migration floor 的版本，只在 expand/contract 约束下接受 clean schema at or above the embedded migration floor。这不是任意跨度的向前兼容：升级与应用回退均为 adjacent-release only，一次只能跨一个相邻 Release，不能跳过多个版本。
 
 ## 服务状态与日志
 
@@ -85,7 +107,7 @@ API 默认就绪检查地址为 `http://127.0.0.1:8080/health/ready`；可用 `D
 
 每个 Release 提供 Web、Linux `amd64`/`arm64` Server 与 Worker 压缩包，以及 `dayorder-deploy.sh`、`release-manifest.json` 和 `SHA256SUMS`。脚本在解压和激活前校验 HTTPS 下载、资产名、Manifest、SHA-256 和归档内容。
 
-Migration 只会在切换 Server 前向前执行并检查 schema；migration、下载、校验、解压或配置预检失败时不切换链接。请在确认不再需要的版本后自行清理 `releases/`，不要删除 `dayorder-config`。
+Migration 只会在切换 Server 前向前执行并检查 schema；migration、下载、校验、解压或配置预检失败时不切换链接。干净但高于当前二进制 floor 的 schema 仅因相邻 Release 的 expand/contract 保证而被接受，不能据此把旧二进制用于任意未来 schema。请在确认不再需要的版本后自行清理 `releases/`，不要删除 `dayorder-config`。
 
 ## 本地构建/离线传输
 

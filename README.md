@@ -139,9 +139,27 @@ chmod 0755 dayorder-deploy.sh
 ./dayorder-deploy.sh all
 ```
 
-首次运行 Server 或 Worker 时，脚本会创建 `~/a/dayorder-config/{api.env,migrate.env,worker.env,secrets/}` 并停止。填写这些文件和其中引用的密钥后重新运行 `./dayorder-deploy.sh all`。如果脚本要求启用用户级 systemd linger，只需执行一次 `sudo loginctl enable-linger "$USER"`，然后再次运行部署命令。
+首次运行 Server 或 Worker 时，脚本会创建 `~/a/dayorder-config/{api.env,migrate.env,worker.env,secrets/}` 并停止。必须创建以下六个组件专用密钥文件：`secrets/api_database_url`、`secrets/worker_database_url`、`secrets/migration_database_url`、`secrets/auth_hmac_key`、`secrets/smtp_password`、`secrets/agent_http_key`。每个文件必须是 exactly one non-empty single-line value，不能把多行值静默拼接。填写后按脚本输出限制权限，再重新运行 `./dayorder-deploy.sh all`：
+
+```bash
+touch ~/a/dayorder-config/secrets/api_database_url \
+  ~/a/dayorder-config/secrets/worker_database_url \
+  ~/a/dayorder-config/secrets/migration_database_url \
+  ~/a/dayorder-config/secrets/auth_hmac_key \
+  ~/a/dayorder-config/secrets/smtp_password \
+  ~/a/dayorder-config/secrets/agent_http_key
+chmod 0700 ~/a/dayorder-config ~/a/dayorder-config/secrets
+chmod 0600 ~/a/dayorder-config/api.env ~/a/dayorder-config/migrate.env ~/a/dayorder-config/worker.env \
+  ~/a/dayorder-config/secrets/api_database_url ~/a/dayorder-config/secrets/worker_database_url \
+  ~/a/dayorder-config/secrets/migration_database_url ~/a/dayorder-config/secrets/auth_hmac_key \
+  ~/a/dayorder-config/secrets/smtp_password ~/a/dayorder-config/secrets/agent_http_key
+```
+
+如果脚本要求启用用户级 systemd linger，只需执行一次 `sudo loginctl enable-linger "$USER"`，然后再次运行部署命令。
 
 Web 仅更新 `~/a/current-web` 的静态资源链接；请让 Nginx/Caddy 的站点根目录指向该链接。API 和 Worker 会作为两个独立的 `systemd --user` 服务运行。完整的首次安装、更新、日志、指定版本和回退限制见[前后端分离部署手册](docs/runbooks/separate-deployment.md)。
+
+Schema 检查拒绝 dirty schema 和低于二进制内嵌 migration floor 的版本；它只在 expand/contract 约束下接受 clean schema at or above the embedded migration floor。这不是无限向前兼容承诺：升级和应用回退均为 adjacent-release only，不得跨过多个 Release。恢复旧 Server 链接后，部署器会重启旧 API 并再次检查 `/health/ready`；若仍不健康，会输出 `restored API failed readiness; manual intervention required` 并以失败退出。
 
 ### 本地构建/离线传输
 

@@ -62,6 +62,13 @@ func RequireCurrent(databaseURL string) error {
 	return requireVersion(version, dirty, exists)
 }
 
+// RequireCompatibleVersion validates an already-read migration state. The
+// embedded version is a floor: adjacent releases may run briefly against a
+// clean schema migrated by the next release under the expand/contract policy.
+func RequireCompatibleVersion(version uint, dirty bool) error {
+	return requireVersion(version, dirty, true)
+}
+
 func open(databaseURL string) (*migrate.Migrate, error) {
 	if err := validateDatabaseURL(databaseURL); err != nil {
 		return nil, err
@@ -121,9 +128,6 @@ func requireVersion(version uint, dirty bool, exists bool) error {
 	}
 	if !exists || version < LatestVersion {
 		return fmt.Errorf("%w: have %d, require %d", ErrSchemaOutdated, version, LatestVersion)
-	}
-	if version > LatestVersion {
-		return fmt.Errorf("%w: have %d, support %d", ErrSchemaUnsupported, version, LatestVersion)
 	}
 	return nil
 }

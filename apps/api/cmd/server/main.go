@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -137,15 +136,12 @@ func main() {
 			if err := database.Ping(ctx, pool, configuration.Database.HealthTimeout); err != nil {
 				return err
 			}
-			var version int
+			var version uint
 			var dirty bool
 			if err := pool.QueryRow(ctx, "SELECT version, dirty FROM dayorder.schema_migrations LIMIT 1").Scan(&version, &dirty); err != nil {
 				return err
 			}
-			if dirty || version != int(dbmigrations.LatestVersion) {
-				return fmt.Errorf("database schema version is not current")
-			}
-			return nil
+			return validateReadySchema(version, dirty)
 		},
 	})
 	if err != nil {
@@ -187,4 +183,8 @@ func main() {
 	if err = metricsServer.Shutdown(ctx); err != nil {
 		logger.Error("graceful API metrics shutdown", "error", err)
 	}
+}
+
+func validateReadySchema(version uint, dirty bool) error {
+	return dbmigrations.RequireCompatibleVersion(version, dirty)
 }

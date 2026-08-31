@@ -121,14 +121,8 @@ jobs:
       - name: Validate local asset set
         shell: bash
         run: |
-          set -Eeuo pipefail
-          expected=$'SHA256SUMS\ndayorder-deploy.sh\ndayorder-server-linux-amd64.tar.gz\ndayorder-server-linux-arm64.tar.gz\ndayorder-web.tar.gz\ndayorder-worker-linux-amd64.tar.gz\ndayorder-worker-linux-arm64.tar.gz\nrelease-manifest.json'
-          actual="$(find release/github -maxdepth 1 -mindepth 1 -printf '%f\n' | sort)"
-          [[ "$actual" == "$expected" ]] || {
-            printf 'local release asset set is incomplete\n%s\n' "$actual" >&2
-            exit 1
-          }
-          (cd release/github && sha256sum -c SHA256SUMS)
+          bash deploy/release/validate-release.sh release/github \
+            "$GITHUB_REF_NAME" "${{ needs.validate.outputs.commit }}"
       - name: Publish verified GitHub Release
         shell: bash
         run: |

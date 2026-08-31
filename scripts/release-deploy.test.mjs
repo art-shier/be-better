@@ -53,8 +53,10 @@ function runPosix(command, args, options = {}) {
   const shellArgs = [command, ...args].map((argument) => (
     /^[A-Za-z]:\\/.test(argument) ? shellPath(argument) : argument
   ));
-  const prefix = options.cwd ? `cd ${JSON.stringify(shellPath(options.cwd))}; ` : "";
-  return spawnSync("C:\\Windows\\System32\\bash.exe", ["-c", `${prefix}exec ${shellArgs.map(JSON.stringify).join(" ")}`], {
+  const prefix = options.cwd ? `cd -- ${bashLiteral(shellPath(options.cwd))}; ` : "";
+  return spawnSync("C:\\Windows\\System32\\wsl.exe", [
+    "--exec", "/bin/bash", "-c", `${prefix}exec ${shellArgs.map(bashLiteral).join(" ")}`,
+  ], {
     encoding: "utf8",
     env: options.env,
   });
@@ -74,7 +76,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ "$url" == */health/ready ]]; then
-  [[ "\${DAYORDER_TEST_HEALTH_FAIL:-0}" != 1 ]]
+  target="$(readlink -f "$PWD/current-server" 2>/dev/null || true)"
+  [[ "\${DAYORDER_TEST_HEALTH_FAIL:-0}" != 1 ]] || exit 1
+  [[ -z "\${DAYORDER_TEST_HEALTH_FAIL_VERSION:-}" || "$target" != *"/releases/$DAYORDER_TEST_HEALTH_FAIL_VERSION/server" ]] || exit 1
   exit
 fi
 printf 'curl %s\\n' "$url" >> "$DAYORDER_TEST_LOG"
@@ -89,7 +93,16 @@ fi
 cp -- "$source" "$output"
 `);
   writeExecutable(resolve(directory, "uname"), `#!/usr/bin/env bash
-printf '%s\\n' "\${DAYORDER_TEST_UNAME:-x86_64}"
+printf '%s\\n' "\${DAYORDER_TEST_MACHINE:-x86_64}"
+`);
+  writeExecutable(resolve(directory, "id"), `#!/usr/bin/env bash
+case "$*" in
+  -u) printf '%s\\n' "\${DAYORDER_TEST_ID_UID:-1000}" ;;
+  -g) printf '%s\\n' "\${DAYORDER_TEST_ID_GID:-1000}" ;;
+  -G) printf '%s\\n' "\${DAYORDER_TEST_ID_GROUPS:-1000}" ;;
+  -un) printf '%s\\n' "\${DAYORDER_TEST_ID_USER:-dayorder-test}" ;;
+  *) exec /usr/bin/id "$@" ;;
+esac
 `);
   writeExecutable(resolve(directory, "loginctl"), `#!/usr/bin/env bash
 printf 'loginctl %s\\n' "$*" >> "$DAYORDER_TEST_LOG"
@@ -104,14 +117,50 @@ if [[ "$*" == *is-active*dayorder-worker.service* && "\${DAYORDER_TEST_WORKER_FA
 exit 0
 `);
   writeExecutable(resolve(directory, "mv"), `#!/usr/bin/env bash
-if [[ "\${DAYORDER_TEST_MV_FAIL_WEB:-0}" == 1 && "$*" == *"/.current-web."* ]]; then exit 1; fi
-if [[ "\${DAYORDER_TEST_MV_FAIL_SERVER_ROLLBACK:-0}" == 1 && "$*" == *"/.current-server."* && "$(readlink "\${@: -2:1}")" == *"/releases/v1.2.3/server" ]]; then exit 1; fi
+source="\${@: -2:1}"; destination="\${@: -1}"
+if [[ "\${DAYORDER_TEST_MV_FAIL_WEB:-0}" == 1 && "$source" == *"current-web"* && "$destination" == */current-web ]]; then exit 1; fi
+if [[ "\${DAYORDER_TEST_MV_FAIL_SERVER_ROLLBACK:-0}" == 1 && "$source" == *"current-server"* && "$(readlink "$source")" == *"/releases/v1.2.3/server" ]]; then exit 1; fi
 if [[ -n "\${DAYORDER_TEST_MODE_LOG:-}" ]]; then
-  source="\${@: -2:1}"; destination="\${@: -1}"
   mode="$(awk -F '\\t' -v path="$source" '$2 == path { value = $1 } END { print value }' "$DAYORDER_TEST_MODE_LOG")"
   [[ -z "$mode" ]] || printf '%s\\t%s\\n' "$mode" "$destination" >> "$DAYORDER_TEST_MODE_LOG"
 fi
 exec /bin/mv "$@"
+`);
+  writeExecutable(resolve(directory, "ln"), `#!/usr/bin/env bash
+destination="\${@: -1}"
+if [[ -n "\${DAYORDER_TEST_LN_FAIL_COMPONENT:-}" && "$destination" == *"current-$DAYORDER_TEST_LN_FAIL_COMPONENT"* ]]; then
+  /bin/ln -s -- "$DAYORDER_TEST_PREEXISTING_LINK_TARGET" "$destination"
+  exit 73
+fi
+if [[ "$*" != *" -s "* && "$1" != -s && -n "\${DAYORDER_TEST_MODE_LOG:-}" ]]; then
+  source="\${@: -2:1}"
+  mode="$(awk -F '\\t' -v path="$source" '$2 == path { value = $1 } END { print value }' "$DAYORDER_TEST_MODE_LOG")"
+  [[ -z "$mode" ]] || printf '%s\\t%s\\n' "$mode" "$destination" >> "$DAYORDER_TEST_MODE_LOG"
+fi
+exec /bin/ln "$@"
+`);
+  writeExecutable(resolve(directory, "tar"), `#!/usr/bin/env bash
+if [[ "\${DAYORDER_TEST_TAR_LIST_FAIL:-0}" == 1 && "$*" == *"-tzf"* ]]; then exit 74; fi
+exec /usr/bin/tar "$@"
+`);
+  writeExecutable(resolve(directory, "stat"), `#!/usr/bin/env bash
+format=""; path="\${@: -1}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in -c|--format) format="$2"; shift 2 ;; *) shift ;; esac
+done
+if [[ -n "\${DAYORDER_TEST_BAD_OWNER_PATH:-}" && "$path" == "$DAYORDER_TEST_BAD_OWNER_PATH" && "$format" == %u ]]; then
+  printf '999999\\n'
+  exit
+fi
+case "$format" in
+  %u) printf '%s\\n' "\${DAYORDER_TEST_ID_UID:-1000}" ;;
+  %g) printf '%s\\n' "\${DAYORDER_TEST_ID_GID:-1000}" ;;
+  %a)
+    mode="$(awk -F '\\t' -v target="$path" '$2 == target { value = $1 } END { print value }' "$DAYORDER_TEST_MODE_LOG")"
+    if [[ -n "$mode" ]]; then printf '%s\\n' "$mode"; else /usr/bin/stat -c %a -- "$path"; fi
+    ;;
+  *) exec /usr/bin/stat -c "$format" -- "$path" ;;
+esac
 `);
   writeExecutable(resolve(directory, "chmod"), `#!/usr/bin/env bash
 mode="$1"; shift
@@ -158,7 +207,7 @@ function shellPath(path) {
 
 function deploymentRealpath(path) {
   if (process.platform !== "win32") return realpathSync(path);
-  const result = spawnSync("C:\\Windows\\System32\\bash.exe", ["-c", `realpath -- ${JSON.stringify(shellPath(path))}`], { encoding: "utf8" });
+  const result = runPosix("realpath", ["--", path]);
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
 }
@@ -206,6 +255,15 @@ function deploymentPathExists(path) {
   }
 }
 
+function makeDeploymentSymlink(target, link) {
+  const result = runPosix("ln", ["-s", target, link]);
+  assert.equal(result.status, 0, result.stderr);
+}
+
+function recordDeploymentMode(fixture, path, mode) {
+  writeFileSync(fixture.modeLog, `${mode}\t${deploymentPath(path)}\n`, { flag: "a" });
+}
+
 function runDeploy(fixture, args, extraEnvironment = {}) {
   const commandPath = process.platform === "win32"
     ? `${shellPath(fixture.commands)}:/usr/bin:/bin`
@@ -220,7 +278,7 @@ function runDeploy(fixture, args, extraEnvironment = {}) {
     DAYORDER_TEST_LOG: shellPath(fixture.log),
     DAYORDER_TEST_MODE_LOG: shellPath(fixture.modeLog),
     HOME: shellPath(fixture.home),
-    USER: "dayorder-test",
+    USER: "untrusted-environment-user",
     XDG_CONFIG_HOME: shellPath(resolve(fixture.home, ".config")),
     ...extraEnvironment,
   };
@@ -315,14 +373,55 @@ test("deployment path existence detects valid and dangling POSIX symlinks", (t) 
   assert.equal(deploymentPathExists(resolve(f.base, "missing-entry")), false);
 });
 
+test("WSL launcher preserves special characters in commands, arguments, and working directories", {
+  skip: process.platform !== "win32",
+}, (t) => {
+  const f = fixture(t);
+  const workingDirectory = resolve(f.base, "working $() ; ' directory");
+  const command = resolve(f.base, "command $() ; ' script.sh");
+  const argument = "argument $() ; ' \" with spaces";
+  mkdirSync(workingDirectory);
+  writeExecutable(command, "#!/usr/bin/env bash\nprintf '%s\\n%s\\n' \"$PWD\" \"$1\"\n");
+
+  const result = runPosix(command, [argument], { cwd: workingDirectory });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, `${shellPath(workingDirectory)}\n${argument}\n`);
+  assert.equal(deploymentRealpath(workingDirectory), shellPath(workingDirectory));
+});
+
 test("deployer rejects invalid commands, versions, roots, and architectures", (t) => {
   const f = fixture(t);
   makeAssetRelease(f, "v1.2.3");
   assert.match(runDeploy(f, ["api"]).stderr, /web\|server\|worker\|all/);
   assert.match(runDeploy(f, ["web", "--version", "latest"]).stderr, /vX\.Y\.Z/);
   assert.match(runDeploy(f, ["web", "--root", f.home]).stderr, /home directory/);
-  const unsupported = runDeploy(f, ["server"], { DAYORDER_TEST_UNAME: "riscv64" });
+  const unsupported = runDeploy(f, ["server"], { DAYORDER_TEST_MACHINE: "riscv64" });
   assert.match(unsupported.stderr, /unsupported architecture/);
+});
+
+test("deployer derives architecture and operator identity from uname and id", (t) => {
+  const f = fixture(t);
+  makeAssetRelease(f, "v1.2.3");
+  const identityEnvironment = {
+    DAYORDER_TEST_UNAME: "riscv64",
+    DAYORDER_TEST_MACHINE: "aarch64",
+    DAYORDER_TEST_ID_USER: "dayorder-operator",
+    USER: "spoofed-user",
+  };
+  const first = runDeploy(f, ["all"], identityEnvironment);
+  assert.notEqual(first.status, 0);
+  assert.match(first.stderr, /configuration templates were created/);
+  writeFileSync(f.log, "", "utf8");
+
+  const linger = runDeploy(f, ["server"], { ...identityEnvironment, DAYORDER_TEST_LINGER: "no" });
+
+  assert.notEqual(linger.status, 0);
+  assert.match(linger.stderr, /loginctl enable-linger "dayorder-operator"/);
+  const log = readFileSync(f.log, "utf8");
+  assert.match(log, /dayorder-server-linux-arm64\.tar\.gz/);
+  assert.match(log, /loginctl show-user dayorder-operator/);
+  assert.doesNotMatch(log, /spoofed-user/);
 });
 
 test("Web deploy defaults to latest, uses the invocation directory, and is idempotent", (t) => {
@@ -369,6 +468,17 @@ test("checksum mismatch and unsafe tar members fail before current-web changes",
   assert.notEqual(unsafeResult.status, 0);
   assert.match(unsafeResult.stderr, /unsafe archive/);
   assert.equal(existsSync(resolve(f.runDirectory, "escape")), false);
+});
+
+test("archive listing errors fail closed before extraction or link switching", (t) => {
+  const f = fixture(t);
+  makeAssetRelease(f, "v1.2.3");
+
+  const result = runDeploy(f, ["web"], { DAYORDER_TEST_TAR_LIST_FAIL: "1" });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /list archive/i);
+  assert.equal(deploymentPathExists(resolve(f.runDirectory, "current-web")), false);
 });
 
 test("deployer rejects a noncanonical Manifest with assets outside the assets object", (t) => {
@@ -419,6 +529,36 @@ test("deployer rejects a managed releases path that resolves outside the root", 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /managed releases|symbolic link|escapes root/);
   assert.equal(existsSync(resolve(outside, "v1.2.3")), false);
+});
+
+test("deployment locking never follows a mutable lock symlink", (t) => {
+  const f = fixture(t);
+  makeAssetRelease(f, "v1.2.3");
+  const outside = resolve(f.base, "outside-lock");
+  writeFileSync(outside, "outside-lock-sentinel\n", "utf8");
+  makeDeploymentSymlink(outside, resolve(f.runDirectory, ".dayorder-deploy.lock"));
+
+  const result = runDeploy(f, ["web"]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /lock.*symbolic link/i);
+  assert.equal(readFileSync(outside, "utf8"), "outside-lock-sentinel\n");
+  assert.equal(deploymentPathExists(resolve(f.runDirectory, "current-web")), false);
+});
+
+test("configuration directory symlinks are rejected without external writes", (t) => {
+  const f = fixture(t);
+  makeAssetRelease(f, "v1.2.3");
+  const outside = resolve(f.base, "outside-config");
+  mkdirSync(outside);
+  makeDeploymentSymlink(outside, resolve(f.runDirectory, "dayorder-config"));
+
+  const result = runDeploy(f, ["all"]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /configuration directory.*symbolic link/i);
+  assert.deepEqual(readFileSync(f.log, "utf8").match(/migrate|systemctl/g), null);
+  assert.deepEqual(runPosix("find", [outside, "-mindepth", "1", "-print"]).stdout, "");
 });
 
 test("Server and Worker prepare verified architecture-specific release trees", (t) => {
@@ -479,6 +619,58 @@ test("first all deployment creates persistent templates and stops before migrati
   assert.doesNotMatch(readFileSync(f.log, "utf8"), /migrate|systemctl/);
 });
 
+test("first-run output names every one-line secret and exact permission commands", (t) => {
+  const f = fixture(t); makeAssetRelease(f, "v1.2.3");
+
+  const result = runDeploy(f, ["all"]);
+
+  assert.notEqual(result.status, 0);
+  for (const secret of [
+    "api_database_url", "worker_database_url", "migration_database_url",
+    "auth_hmac_key", "smtp_password", "agent_http_key",
+  ]) {
+    assert.match(result.stderr, new RegExp(`secrets/${secret}`));
+  }
+  assert.match(result.stderr, /single-line/i);
+  assert.match(result.stderr, /chmod 0700/);
+  assert.match(result.stderr, /chmod 0600/);
+});
+
+test("configuration file symlinks are rejected before migration", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const config = resolve(f.runDirectory, "dayorder-config/api.env");
+  const outside = resolve(f.base, "outside-api.env");
+  writeFileSync(outside, "outside-config-sentinel\n", "utf8");
+  assert.equal(runPosix("rm", ["-f", config]).status, 0);
+  makeDeploymentSymlink(outside, config);
+  writeFileSync(f.log, "", "utf8");
+
+  const result = runDeploy(f, ["server"]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /configuration file.*symbolic link/i);
+  assert.equal(readFileSync(outside, "utf8"), "outside-config-sentinel\n");
+  assert.doesNotMatch(readFileSync(f.log, "utf8"), /migrate|systemctl/);
+});
+
+test("existing configuration must be owned by the operator with mode 0600", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const config = resolve(f.runDirectory, "dayorder-config/api.env");
+  recordDeploymentMode(f, config, "0644");
+
+  const loose = runDeploy(f, ["server"]);
+
+  assert.notEqual(loose.status, 0);
+  assert.match(loose.stderr, /mode 0600/i);
+  assert.doesNotMatch(readFileSync(f.log, "utf8"), /migrate|systemctl/);
+
+  recordDeploymentMode(f, config, "0600");
+  const foreign = runDeploy(f, ["server"], { DAYORDER_TEST_BAD_OWNER_PATH: deploymentPath(config) });
+  assert.notEqual(foreign.status, 0);
+  assert.match(foreign.stderr, /owned by the deployment user/i);
+  assert.doesNotMatch(readFileSync(f.log, "utf8"), /migrate|systemctl/);
+});
+
 test("missing linger stops Server before migration and prints the enable command", (t) => {
   const f = configuredFixture(t, "v1.2.3");
   const result = runDeploy(f, ["server"], { DAYORDER_TEST_LINGER: "no" });
@@ -527,10 +719,23 @@ test("health failure restores the previous Server link and restarts the old API"
   assert.equal(initial.status, 0, initial.stderr);
   makeAssetRelease(f, "v1.2.4");
   writeFileSync(f.log, "", "utf8");
-  const failed = runDeploy(f, ["server", "--version", "v1.2.4"], { DAYORDER_TEST_HEALTH_FAIL: "1" });
+  const failed = runDeploy(f, ["server", "--version", "v1.2.4"], { DAYORDER_TEST_HEALTH_FAIL_VERSION: "v1.2.4" });
   assert.notEqual(failed.status, 0);
   assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-server")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.3/server")));
   assert.match(readFileSync(f.log, "utf8"), /systemctl --user restart dayorder-api\.service/);
+});
+
+test("restored API readiness failure reports manual intervention", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const initial = runDeploy(f, ["server", "--version", "v1.2.3"]);
+  assert.equal(initial.status, 0, initial.stderr);
+  makeAssetRelease(f, "v1.2.4");
+
+  const failed = runDeploy(f, ["server", "--version", "v1.2.4"], { DAYORDER_TEST_HEALTH_FAIL: "1" });
+
+  assert.notEqual(failed.status, 0);
+  assert.match(failed.stderr, /restored API.*readiness.*manual intervention/i);
+  assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-server")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.3/server")));
 });
 
 test("Worker failure during all restores Server and Worker while Web stays old", (t) => {
@@ -583,6 +788,41 @@ test("Web link failure during all restores Server and Worker while Web stays old
   const log = readFileSync(f.log, "utf8");
   assert.match(log, /systemctl --user restart dayorder-api\.service/);
   assert.match(log, /systemctl --user restart dayorder-worker\.service/);
+});
+
+test("failed temporary link creation never installs a pre-existing link", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const initial = runDeploy(f, ["all", "--version", "v1.2.3"]);
+  assert.equal(initial.status, 0, initial.stderr);
+  makeAssetRelease(f, "v1.2.4");
+  const attackerTarget = resolve(f.base, "attacker-link-target");
+  mkdirSync(attackerTarget);
+
+  const failed = runDeploy(f, ["all", "--version", "v1.2.4"], {
+    DAYORDER_TEST_LN_FAIL_COMPONENT: "web",
+    DAYORDER_TEST_PREEXISTING_LINK_TARGET: deploymentPath(attackerTarget),
+  });
+
+  assert.notEqual(failed.status, 0);
+  assert.match(failed.stderr, /create temporary web link/i);
+  assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-web")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.3/web")));
+});
+
+test("systemd unit symlinks are rejected without overwriting external files", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const unitDirectory = resolve(f.home, ".config/systemd/user");
+  const unit = resolve(unitDirectory, "dayorder-api.service");
+  const outside = resolve(f.base, "outside-api.service");
+  mkdirSync(unitDirectory, { recursive: true });
+  recordDeploymentMode(f, unitDirectory, "0700");
+  writeFileSync(outside, "outside-unit-sentinel\n", "utf8");
+  makeDeploymentSymlink(outside, unit);
+
+  const result = runDeploy(f, ["server"]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /systemd unit.*symbolic link/i);
+  assert.equal(readFileSync(outside, "utf8"), "outside-unit-sentinel\n");
 });
 
 test("rollback restart failure reports manual intervention while restoring the old Server link", (t) => {

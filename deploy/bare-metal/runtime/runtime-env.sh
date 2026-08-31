@@ -6,10 +6,41 @@ dayorder_die() {
   exit 1
 }
 
+dayorder_normalize_mode() {
+  local mode="$1"
+  while [[ "$mode" == 0* && "$mode" != 0 ]]; do mode="${mode#0}"; done
+  printf '%s' "$mode"
+}
+
+dayorder_validate_protected_file() {
+  local path="$1" label="$2" owner group mode current_uid current_groups
+  [[ ! -L "$path" ]] || dayorder_die "$label must not be a symbolic link: $path"
+  [[ -f "$path" && -r "$path" ]] || dayorder_die "$label is not a readable regular file: $path"
+
+  owner="$(stat -c %u -- "$path")" || dayorder_die "cannot read $label owner: $path"
+  group="$(stat -c %g -- "$path")" || dayorder_die "cannot read $label group: $path"
+  mode="$(stat -c %a -- "$path")" || dayorder_die "cannot read $label mode: $path"
+  mode="$(dayorder_normalize_mode "$mode")"
+  current_uid="$(id -u)" || dayorder_die "cannot determine the runtime user"
+
+  if [[ "$owner" == "$current_uid" ]]; then
+    [[ "$mode" == 400 || "$mode" == 600 ]] || \
+      dayorder_die "$label has unsafe mode $mode; current-user files must use mode 0400 or 0600: $path"
+    return
+  fi
+  [[ "$owner" == 0 ]] || dayorder_die "$label has an unapproved owner: $path"
+
+  current_groups="$(id -G)" || dayorder_die "cannot determine runtime groups"
+  [[ " $current_groups " == *" $group "* ]] || \
+    dayorder_die "$label is root-owned but its group is not assigned to the runtime user: $path"
+  [[ "$mode" == 440 || "$mode" == 640 ]] || \
+    dayorder_die "$label has unsafe mode $mode; root-owned group-readable files must use mode 0440 or 0640: $path"
+}
+
 dayorder_load_environment() {
   local environment_file="${1:-}"
-  [[ -n "$environment_file" && -f "$environment_file" && -r "$environment_file" ]] || \
-    dayorder_die "environment file is not readable: ${environment_file:-<missing>}"
+  [[ -n "$environment_file" ]] || dayorder_die "environment file is not readable: <missing>"
+  dayorder_validate_protected_file "$environment_file" "environment file"
   set -a
   # The environment file is an operator-controlled Bash-compatible key/value file.
   # shellcheck disable=SC1090
@@ -30,9 +61,16 @@ dayorder_load_secret() {
   if [[ -z "$file_path" ]]; then
     return
   fi
-  [[ -f "$file_path" && -r "$file_path" ]] || dayorder_die "$file_variable does not reference a readable file"
-  value="$(tr -d '\r\n' < "$file_path")"
-  [[ -n "$value" ]] || dayorder_die "$file_variable references an empty secret"
+  dayorder_validate_protected_file "$file_path" "secret file referenced by $file_variable"
+  local line_count
+  line_count="$(awk 'END { print NR }' "$file_path")" || dayorder_die "cannot read secret file referenced by $file_variable"
+  [[ "$line_count" == 1 ]] || dayorder_die "$file_variable secret file must contain exactly one non-empty line"
+  value=""
+  IFS= read -r value < "$file_path" || [[ -n "$value" ]] || \
+    dayorder_die "$file_variable secret file must contain exactly one non-empty line"
+  value="${value%$'\r'}"
+  [[ -n "$value" && "$value" != *$'\r'* ]] || \
+    dayorder_die "$file_variable secret file must contain exactly one non-empty line"
   printf -v "$variable" '%s' "$value"
   export "$variable"
 }

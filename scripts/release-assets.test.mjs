@@ -1,5 +1,15 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -7,6 +17,16 @@ import test from "node:test";
 
 const root = resolve(import.meta.dirname, "..");
 const packager = resolve(root, "deploy/release/package-assets.sh");
+const releaseAssetNames = [
+  "SHA256SUMS",
+  "dayorder-deploy.sh",
+  "dayorder-server-linux-amd64.tar.gz",
+  "dayorder-server-linux-arm64.tar.gz",
+  "dayorder-web.tar.gz",
+  "dayorder-worker-linux-amd64.tar.gz",
+  "dayorder-worker-linux-arm64.tar.gz",
+  "release-manifest.json",
+];
 
 function write(path, content, mode = 0o644) {
   mkdirSync(dirname(path), { recursive: true });
@@ -36,6 +56,7 @@ function archiveMode(path, entry) {
   assert.equal(result.status, 0, result.stderr);
   const line = result.stdout.split(/\r?\n/).find((candidate) => {
     const normalized = candidate.trimEnd();
+    if (entry === ".") return normalized.endsWith(" ./");
     return normalized.endsWith(` ${entry}`) || normalized.endsWith(` ./${entry}`);
   });
   assert.ok(line, `archive entry is missing: ${entry}`);
@@ -63,13 +84,101 @@ function fixture(t) {
   return { base, web, backend, assets };
 }
 
+function builderFixture(t) {
+  const base = mkdtempSync(resolve(tmpdir(), "dayorder-release-builder-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const deployRelease = resolve(base, "deploy/release");
+  const bareMetal = resolve(base, "deploy/bare-metal");
+  const commands = resolve(base, "commands");
+  const output = resolve(base, "release/github");
+  const log = resolve(base, "build.log");
+  mkdirSync(deployRelease, { recursive: true });
+  mkdirSync(bareMetal, { recursive: true });
+  mkdirSync(commands, { recursive: true });
+  copyFileSync(resolve(root, "deploy/release/build-release.sh"), resolve(deployRelease, "build-release.sh"));
+  chmodSync(resolve(deployRelease, "build-release.sh"), 0o755);
+  write(resolve(base, "package.json"), '{"version":"1.2.3"}\n');
+  write(resolve(deployRelease, "dayorder-deploy.sh"), "#!/usr/bin/env bash\nexit 0\n", 0o755);
+  write(resolve(commands, "git"), "#!/usr/bin/env bash\nprintf '0123456789abcdef0123456789abcdef01234567\\n'\n", 0o755);
+  write(resolve(bareMetal, "build-web.sh"), `#!/usr/bin/env bash
+printf 'web-builder\\t%s\\n' "$1" >> "$DAYORDER_TEST_BUILD_LOG"
+[[ "\${DAYORDER_TEST_FAIL_COMPONENT:-}" != web ]] || exit 71
+mkdir -p -- "$1/assets"
+printf 'web\\n' > "$1/index.html"
+printf 'asset\\n' > "$1/assets/app.js"
+`, 0o755);
+  write(resolve(bareMetal, "build-backend.sh"), `#!/usr/bin/env bash
+printf 'backend-%s\\t%s\\n' "$GOARCH" "$1" >> "$DAYORDER_TEST_BUILD_LOG"
+[[ "\${DAYORDER_TEST_FAIL_ARCH:-}" != "$GOARCH" ]] || exit 72
+mkdir -p -- "$1"
+printf '%s\\n' "$GOARCH" > "$1/architecture"
+`, 0o755);
+  write(resolve(deployRelease, "package-assets.sh"), `#!/usr/bin/env bash
+set -Eeuo pipefail
+command="$1"; output="\${@: -1}"
+printf 'package-%s\\t%s\\n' "$command" "$output" >> "$DAYORDER_TEST_BUILD_LOG"
+mkdir -p -- "$output"
+case "$command" in
+  web) printf 'new web\\n' > "$output/dayorder-web.tar.gz" ;;
+  backend)
+    arch="$2"
+    printf 'new server %s\\n' "$arch" > "$output/dayorder-server-linux-$arch.tar.gz"
+    printf 'new worker %s\\n' "$arch" > "$output/dayorder-worker-linux-$arch.tar.gz"
+    ;;
+  metadata)
+    printf 'new deployer\\n' > "$output/dayorder-deploy.sh"
+    printf '{"schemaVersion":1}\\n' > "$output/release-manifest.json"
+    printf 'new checksums\\n' > "$output/SHA256SUMS"
+    ;;
+  *) exit 64 ;;
+esac
+`, 0o755);
+  writeFileSync(log, "", "utf8");
+  return { base, builder: resolve(deployRelease, "build-release.sh"), commands, output, log };
+}
+
+function runBuilder(fixture, extraEnvironment = {}) {
+  return spawnSync("bash", [
+    "-c",
+    'PATH="$DAYORDER_TEST_COMMANDS:$PATH"; export PATH; exec bash "$@"',
+    "dayorder-release-builder-test",
+    tarPath(fixture.builder),
+    "all",
+  ], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      DAYORDER_RELEASE_OUTPUT: tarPath(fixture.output),
+      DAYORDER_TEST_BUILD_LOG: tarPath(fixture.log),
+      DAYORDER_TEST_COMMANDS: tarPath(fixture.commands),
+      ...extraEnvironment,
+    },
+  });
+}
+
+function directorySnapshot(directory) {
+  return Object.fromEntries(readdirSync(directory).sort().map((name) => [
+    name,
+    readFileSync(resolve(directory, name), "utf8"),
+  ]));
+}
+
 test("packager emits the exact Web, Server, and Worker archive contracts", (t) => {
   const f = fixture(t);
+  chmodSync(f.web, 0o700);
+  chmodSync(resolve(f.web, "index.html"), 0o700);
+  chmodSync(resolve(f.web, "assets"), 0o700);
+  chmodSync(resolve(f.web, "assets/app.js"), 0o755);
   for (const command of [["web", f.web, f.assets], ["backend", "amd64", f.backend, f.assets]]) {
     const result = run(command);
     assert.equal(result.status, 0, result.stderr);
   }
   assert.deepEqual(listArchive(resolve(f.assets, "dayorder-web.tar.gz")), ["assets/", "assets/app.js", "index.html"]);
+  assert.equal(archiveMode(resolve(f.assets, "dayorder-web.tar.gz"), "."), "drwxr-xr-x");
+  assert.equal(archiveMode(resolve(f.assets, "dayorder-web.tar.gz"), "assets/"), "drwxr-xr-x");
+  assert.equal(archiveMode(resolve(f.assets, "dayorder-web.tar.gz"), "assets/app.js"), "-rw-r--r--");
+  assert.equal(archiveMode(resolve(f.assets, "dayorder-web.tar.gz"), "index.html"), "-rw-r--r--");
   assert.deepEqual(listArchive(resolve(f.assets, "dayorder-server-linux-amd64.tar.gz")), [
     "bin/", "bin/dayorder-api", "bin/dayorder-migrate", "config/", "config/api.env.example",
     "config/migrate.env.example", "scripts/", "scripts/migrate.sh", "scripts/runtime-env.sh", "scripts/start-api.sh",
@@ -145,6 +254,37 @@ test("release builder exposes isolated CI targets and one complete local build",
   assert.match(builder, /web\|backend\|finalize\|all/);
   assert.equal(packageJson.scripts["build:release:assets"], "bash deploy/release/build-release.sh all");
   assert.equal(packageJson.scripts["test:release"], "node --test scripts/release-*.test.mjs");
+});
+
+test("aggregate release builder installs one exact staged asset set and removes stale output", (t) => {
+  const f = builderFixture(t);
+  mkdirSync(f.output, { recursive: true });
+  for (const name of releaseAssetNames) write(resolve(f.output, name), `previous ${name}\n`);
+  write(resolve(f.output, "stale-asset.txt"), "stale\n");
+
+  const result = runBuilder(f);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(readdirSync(f.output).sort(), releaseAssetNames);
+  assert.equal(readFileSync(resolve(f.output, "dayorder-web.tar.gz"), "utf8"), "new web\n");
+  const finalOutput = tarPath(f.output);
+  for (const line of readFileSync(f.log, "utf8").trim().split(/\r?\n/)) {
+    const operationOutput = line.split("\t").at(-1);
+    assert.notEqual(operationOutput, finalOutput, `aggregate build wrote directly to ${finalOutput}`);
+  }
+});
+
+test("aggregate release builder preserves the previous asset set when a component fails", (t) => {
+  const f = builderFixture(t);
+  mkdirSync(f.output, { recursive: true });
+  for (const name of releaseAssetNames) write(resolve(f.output, name), `preserved ${name}\n`);
+  write(resolve(f.output, "preserved-extra.txt"), "preserved extra\n");
+  const before = directorySnapshot(f.output);
+
+  const result = runBuilder(f, { DAYORDER_TEST_FAIL_ARCH: "arm64" });
+
+  assert.notEqual(result.status, 0);
+  assert.deepEqual(directorySnapshot(f.output), before);
 });
 
 test("release builder resolves package metadata from the repository working directory", (t) => {

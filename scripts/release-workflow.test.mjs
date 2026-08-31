@@ -88,11 +88,10 @@ function assertReleaseWorkflowContract(workflow) {
   assert.match(workflow, /cancel-in-progress:\s*false/);
   assert.match(workflow, /matrix:[\s\S]*arch:\s*\[amd64, arm64\]/);
   const localValidation = namedRunBlock(releaseJob, "Validate local asset set");
-  assert.match(localValidation, /find release\/github -maxdepth 1 -mindepth 1 -printf '%f\\n' \| sort/);
-  assert.doesNotMatch(localValidation, /-type f/);
-  assert.match(localValidation, /\[\[ "\$actual" == "\$expected" \]\]/);
-  assert.match(localValidation, /sha256sum -c SHA256SUMS/);
-  for (const asset of assetNames) assert.match(localValidation, new RegExp(asset.replaceAll(".", "\\.")));
+  assert.match(
+    localValidation,
+    /bash deploy\/release\/validate-release\.sh release\/github[\s\\]*"\$GITHUB_REF_NAME"[\s\\]*"\$\{\{ needs\.validate\.outputs\.commit \}\}"/,
+  );
 
   const publishRun = namedRunBlock(releaseJob, "Publish verified GitHub Release");
   assert.match(publishRun, /gh release create[\s\S]*--draft/);
@@ -120,7 +119,9 @@ function assertReleaseWorkflowContract(workflow) {
   assert.match(remoteValidation, /release asset set is incomplete/);
   for (const asset of assetNames) assert.match(remoteValidation, new RegExp(asset.replaceAll(".", "\\.")));
   assert.ok(publishRun.indexOf("gh release upload") < publishRun.indexOf("--draft=false"));
-  assert.ok(localValidation.indexOf("sha256sum -c SHA256SUMS") < workflow.indexOf("gh release create"));
+  const validatorCall = workflow.indexOf("bash deploy/release/validate-release.sh release/github");
+  assert.notEqual(validatorCall, -1, "workflow must invoke the reusable release validator");
+  assert.ok(validatorCall < workflow.indexOf("gh release create"), "release validation must precede draft creation");
   assert.ok(publishRun.indexOf("gh release upload") < publishRun.indexOf("gh release view \"$tag\" --json assets"));
   assert.ok(publishRun.indexOf("gh release view \"$tag\" --json assets") < publishRun.indexOf("--draft=false"));
   for (const reference of workflow.matchAll(/uses:\s*([^\s#]+)/g)) {
@@ -181,4 +182,28 @@ test("Release workflow rejects an inline-commented upload in place of the publis
     '          :; # gh release upload "$tag" "${assets[@]}" --clobber',
   );
   assert.throws(() => assertReleaseWorkflowContract(mutated), /publish step|release command sequence/);
+});
+
+test("Release workflow rejects a missing reusable validator call", () => {
+  const workflow = readFileSync(resolve(root, ".github/workflows/release.yml"), "utf8");
+  const mutated = workflow.replace(
+    /          bash deploy\/release\/validate-release\.sh release\/github \\\n+            "\$GITHUB_REF_NAME" "\$\{\{ needs\.validate\.outputs\.commit \}\}"\n/,
+    "          printf 'validation skipped\\n'\n",
+  );
+  assert.throws(() => assertReleaseWorkflowContract(mutated), /release validator|validate-release/);
+});
+
+test("Release workflow rejects moving reusable validation after draft creation", () => {
+  const workflow = readFileSync(resolve(root, ".github/workflows/release.yml"), "utf8");
+  const validatorLine = [
+    "          bash deploy/release/validate-release.sh release/github \\",
+    '            "$GITHUB_REF_NAME" "${{ needs.validate.outputs.commit }}"',
+    "",
+  ].join("\n");
+  const withoutValidator = workflow.replace(validatorLine, "          printf 'validation moved\\n'\n");
+  const mutated = withoutValidator.replace(
+    '            gh release create "$tag" --verify-tag --draft --generate-notes --title "$tag"\n',
+    `            gh release create "$tag" --verify-tag --draft --generate-notes --title "$tag"\n${validatorLine}`,
+  );
+  assert.throws(() => assertReleaseWorkflowContract(mutated), /release validator|validate-release|precede draft creation/);
 });

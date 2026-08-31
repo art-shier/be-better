@@ -33,15 +33,23 @@ home="$(realpath -m -- "${HOME:?HOME is required}")"
 mkdir -p -- "$root"
 [[ ! -L "$root" ]] || die "deployment root must not be a symbolic link"
 
-for command_name in bash curl tar sha256sum flock realpath awk sed grep find mktemp cmp; do require_command "$command_name"; done
+for command_name in bash curl tar sha256sum flock realpath awk sed grep find mktemp cmp id stat; do require_command "$command_name"; done
+deployment_uid="$(id -u)"
+deployment_user="$(id -un)"
+[[ "$deployment_uid" =~ ^[0-9]+$ && -n "$deployment_user" && ! "$deployment_user" =~ [[:cntrl:]] ]] || \
+  die "could not determine a safe deployment identity"
 if [[ "$component" != web ]]; then
-  machine="${DAYORDER_TEST_UNAME:-$(uname -m)}"
+  machine="$(uname -m)"
   case "$machine" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) die "unsupported architecture: $machine" ;; esac
 fi
 
-exec 9>"$root/.dayorder-deploy.lock"
+legacy_lock="$root/.dayorder-deploy.lock"
+[[ ! -L "$legacy_lock" ]] || die "lock path must not be a symbolic link: $legacy_lock"
+[[ ! -e "$legacy_lock" || -f "$legacy_lock" ]] || die "lock path is not a regular file: $legacy_lock"
+exec 9<"$root" || die "cannot open deployment root for locking: $root"
 flock -n 9 || die "another deployment is running for $root"
-work_dir="$(mktemp -d "$root/.dayorder-deploy.XXXXXX")"
+work_dir="$(mktemp -d "$root/.dayorder-deploy.XXXXXX")" || die "cannot create deployment workspace"
+chmod 0700 "$work_dir" || die "cannot restrict deployment workspace permissions"
 cleanup() { [[ ! -d "$work_dir" ]] || rm -rf -- "$work_dir"; }
 trap cleanup EXIT
 
@@ -171,16 +179,23 @@ asset_name() {
 }
 
 validate_archive() {
-  local archive="$1" entry listing normalized
+  local archive="$1" entry listing normalized entries listings
+  if ! entries="$(tar -tzf "$archive")"; then
+    die "could not list archive paths: $archive"
+  fi
   while IFS= read -r entry; do
     normalized="${entry#./}"
     [[ -n "$normalized" ]] || continue
     [[ -n "$normalized" && "$normalized" != /* ]] || die "unsafe archive path: $entry"
     case "/$normalized/" in *"/../"*) die "unsafe archive path: $entry" ;; esac
-  done < <(tar -tzf "$archive")
+  done <<< "$entries"
+  if ! listings="$(tar -tvzf "$archive")"; then
+    die "could not list archive member types: $archive"
+  fi
   while IFS= read -r listing; do
+    [[ -n "$listing" ]] || continue
     case "${listing:0:1}" in -|d) ;; *) die "unsafe archive member type" ;; esac
-  done < <(tar -tvzf "$archive")
+  done <<< "$listings"
 }
 
 validate_component_tree() {
@@ -276,26 +291,94 @@ current_target() {
 }
 
 switch_link() {
-  local name="$1" target="$2" link temporary releases
+  local name="$1" target="$2" link temporary releases staging
   releases="$(managed_releases_root)"
   target="$(realpath -m -- "$target")"
   [[ "$target" == "$releases/"* ]] || die "link target points outside the managed releases directory"
   link="$root/current-$name"
-  temporary="$root/.current-$name.$$"
-  ln -s -- "$target" "$temporary"
-  mv -Tf -- "$temporary" "$link"
+  staging="$(mktemp -d "$root/.dayorder-link-$name.XXXXXX")" || {
+    printf 'dayorder-deploy: failed to create secure %s link workspace\n' "$name" >&2
+    return 1
+  }
+  chmod 0700 "$staging" || {
+    rmdir -- "$staging" 2>/dev/null || true
+    printf 'dayorder-deploy: failed to restrict secure %s link workspace\n' "$name" >&2
+    return 1
+  }
+  temporary="$staging/current-$name"
+  if ! ln -s -- "$target" "$temporary"; then
+    rm -f -- "$temporary"
+    rmdir -- "$staging" 2>/dev/null || true
+    printf 'dayorder-deploy: failed to create temporary %s link\n' "$name" >&2
+    return 1
+  fi
+  if ! mv -Tf -- "$temporary" "$link"; then
+    rm -f -- "$temporary"
+    rmdir -- "$staging" 2>/dev/null || true
+    printf 'dayorder-deploy: failed to activate %s link\n' "$name" >&2
+    return 1
+  fi
+  rmdir -- "$staging" 2>/dev/null || printf 'dayorder-deploy: warning: could not remove secure %s link workspace\n' "$name" >&2
 }
 
 config_dir="$root/dayorder-config"
 config_created=0
 
+normalized_mode() {
+  local mode="$1"
+  mode="${mode#0}"
+  printf '%s' "${mode:-0}"
+}
+
+ensure_owned_directory() {
+  local path="$1" label="$2" expected_mode="$3" created=0 owner actual_mode logical physical
+  [[ ! -L "$path" ]] || die "$label must not be a symbolic link: $path"
+  logical="$(realpath -ms -- "$path")"
+  physical="$(realpath -m -- "$path")"
+  [[ "$logical" == "$physical" ]] || die "$label path must not traverse symbolic links: $path"
+  if [[ -e "$path" ]]; then
+    [[ -d "$path" ]] || die "$label is not a directory: $path"
+  else
+    mkdir -p -- "$path" || die "cannot create $label: $path"
+    chmod "0$expected_mode" "$path" || die "cannot restrict $label permissions: $path"
+    created=1
+  fi
+  [[ ! -L "$path" && -d "$path" ]] || die "$label must be a real directory: $path"
+  owner="$(stat -c %u -- "$path")" || die "cannot read $label ownership: $path"
+  [[ "$owner" == "$deployment_uid" ]] || die "$label must be owned by the deployment user: $path"
+  actual_mode="$(stat -c %a -- "$path")" || die "cannot read $label mode: $path"
+  actual_mode="$(normalized_mode "$actual_mode")"
+  [[ "$actual_mode" == "$expected_mode" ]] || die "$label must use mode 0$expected_mode: $path"
+  (( created == 0 )) || return 0
+}
+
+validate_owned_file() {
+  local path="$1" label="$2" expected_mode="$3" owner actual_mode
+  [[ ! -L "$path" ]] || die "$label must not be a symbolic link: $path"
+  [[ -f "$path" && -r "$path" ]] || die "$label is not a readable regular file: $path"
+  owner="$(stat -c %u -- "$path")" || die "cannot read $label ownership: $path"
+  [[ "$owner" == "$deployment_uid" ]] || die "$label must be owned by the deployment user: $path"
+  actual_mode="$(stat -c %a -- "$path")" || die "cannot read $label mode: $path"
+  actual_mode="$(normalized_mode "$actual_mode")"
+  [[ "$actual_mode" == "$expected_mode" ]] || die "$label must use mode 0$expected_mode: $path"
+}
+
+ensure_config_directories() {
+  ensure_owned_directory "$config_dir" "configuration directory" 700
+  ensure_owned_directory "$config_dir/secrets" "secrets directory" 700
+}
+
 ensure_config() {
   local name="$1" component_name="$2" template needle='/etc/dayorder/secrets' line remaining prefix output
   template="$root/releases/$version/$component_name/config/$name.env.example"
-  local destination="$config_dir/$name.env" temporary="$config_dir/.$name.env.$$"
-  [[ -f "$destination" ]] && return
-  mkdir -p -- "$config_dir/secrets"; chmod 0700 "$config_dir" "$config_dir/secrets"
-  while IFS= read -r line || [[ -n "$line" ]]; do
+  local destination="$config_dir/$name.env" temporary
+  ensure_config_directories
+  if [[ -e "$destination" || -L "$destination" ]]; then
+    validate_owned_file "$destination" "configuration file" 600
+    return
+  fi
+  temporary="$(mktemp "$config_dir/.$name.env.XXXXXX")" || die "cannot create temporary configuration file"
+  if ! while IFS= read -r line || [[ -n "$line" ]]; do
     remaining="$line"; output=""
     while [[ "$remaining" == *"$needle"* ]]; do
       prefix="${remaining%%"$needle"*}"
@@ -303,14 +386,51 @@ ensure_config() {
       remaining="${remaining#*"$needle"}"
     done
     printf '%s\n' "$output$remaining"
-  done < "$template" > "$temporary"
-  chmod 0600 "$temporary"; mv -- "$temporary" "$destination"
+  done < "$template" > "$temporary"; then
+    rm -f -- "$temporary"
+    die "cannot render configuration template: $template"
+  fi
+  chmod 0600 "$temporary" || { rm -f -- "$temporary"; die "cannot restrict temporary configuration permissions"; }
+  if ! ln -- "$temporary" "$destination"; then
+    rm -f -- "$temporary"
+    die "configuration destination appeared while installing: $destination"
+  fi
+  rm -f -- "$temporary" || die "cannot clean temporary configuration file"
+  validate_owned_file "$destination" "configuration file" 600
   config_created=1
   printf 'Created %s; fill it and the referenced secret files before retrying.\n' "$destination" >&2
 }
 
 require_config() {
-  [[ -f "$config_dir/$1.env" && -r "$config_dir/$1.env" ]] || die "configuration is not readable: $config_dir/$1.env"
+  ensure_config_directories
+  validate_owned_file "$config_dir/$1.env" "configuration file" 600
+}
+
+print_configuration_instructions() {
+  local -a environment_files=() secret_files=()
+  local path
+  case "$component" in
+    server)
+      environment_files=(api.env migrate.env)
+      secret_files=(api_database_url migration_database_url auth_hmac_key)
+      ;;
+    worker)
+      environment_files=(worker.env)
+      secret_files=(worker_database_url auth_hmac_key smtp_password agent_http_key)
+      ;;
+    all)
+      environment_files=(api.env migrate.env worker.env)
+      secret_files=(api_database_url worker_database_url migration_database_url auth_hmac_key smtp_password agent_http_key)
+      ;;
+  esac
+  printf 'Required secret files (each must contain exactly one non-empty single-line value):\n' >&2
+  for path in "${secret_files[@]}"; do printf '  %s/secrets/%s\n' "$config_dir" "$path" >&2; done
+  printf 'Create/edit the files, then enforce these permissions before retrying:\n  touch' >&2
+  for path in "${secret_files[@]}"; do printf ' %q' "$config_dir/secrets/$path" >&2; done
+  printf '\n  chmod 0700 %q %q\n  chmod 0600' "$config_dir" "$config_dir/secrets" >&2
+  for path in "${environment_files[@]}"; do printf ' %q' "$config_dir/$path" >&2; done
+  for path in "${secret_files[@]}"; do printf ' %q' "$config_dir/secrets/$path" >&2; done
+  printf '\n' >&2
 }
 
 systemd_quote() {
@@ -328,24 +448,48 @@ preflight_systemd() {
   local linger
   require_command systemctl; require_command loginctl
   systemctl --user show-environment >/dev/null || die "systemd --user manager is unavailable"
-  linger="$(loginctl show-user "${USER:?USER is required}" --property=Linger --value)"
+  linger="$(loginctl show-user "$deployment_user" --property=Linger --value)"
   if [[ "$linger" != yes ]]; then
-    die "linger is disabled; run: sudo loginctl enable-linger \"$USER\""
+    die "linger is disabled; run: sudo loginctl enable-linger \"$deployment_user\""
+  fi
+}
+
+unit_directory() {
+  printf '%s/systemd/user' "${XDG_CONFIG_HOME:-$HOME/.config}"
+}
+
+preflight_unit() {
+  local service="$1" unit_dir unit
+  unit_dir="$(unit_directory)"
+  [[ "$unit_dir" == /* && ! "$unit_dir" =~ [[:cntrl:]] ]] || die "systemd unit directory must be an absolute safe path"
+  ensure_owned_directory "$unit_dir" "systemd unit directory" 700
+  unit="$unit_dir/$service.service"
+  if [[ -e "$unit" || -L "$unit" ]]; then
+    validate_owned_file "$unit" "systemd unit file" 644
   fi
 }
 
 write_unit() {
   local service="$1" current="$2" script="$3" config="$4" timeout="$5"
-  local unit_dir unit
-  unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+  local unit_dir unit temporary
+  unit_dir="$(unit_directory)"
   unit="$unit_dir/$service.service"
-  mkdir -p -- "$unit_dir"
-  {
+  [[ ! -L "$unit" ]] || { printf 'dayorder-deploy: systemd unit file became a symbolic link: %s\n' "$unit" >&2; return 1; }
+  temporary="$(mktemp "$unit_dir/.$service.service.XXXXXX")" || return 1
+  if ! {
     printf '[Unit]\nDescription=DayOrder %s\nAfter=network-online.target\nWants=network-online.target\n\n' "$service"
     printf '[Service]\nType=simple\nWorkingDirectory=%s\n' "$(systemd_quote "$current")"
     printf 'ExecStart=%s %s\n' "$(systemd_quote "$current/scripts/$script")" "$(systemd_quote "$config")"
     printf 'Restart=on-failure\nRestartSec=5\nTimeoutStopSec=%s\n\n[Install]\nWantedBy=default.target\n' "$timeout"
-  } > "$unit"
+  } > "$temporary"; then
+    rm -f -- "$temporary"
+    return 1
+  fi
+  chmod 0644 "$temporary" || { rm -f -- "$temporary"; return 1; }
+  if ! mv -Tf -- "$temporary" "$unit"; then
+    rm -f -- "$temporary"
+    return 1
+  fi
 }
 
 server_changed=0; worker_changed=0; web_changed=0
@@ -383,6 +527,10 @@ restore_link() {
   if [[ -n "$service" ]]; then
     if [[ -n "$old" ]]; then
       systemctl --user restart "$service.service" || { printf 'dayorder-deploy: rollback failed to restart %s\n' "$service" >&2; return 1; }
+      if [[ "$service" == dayorder-api ]] && ! wait_for_api; then
+        printf 'dayorder-deploy: restored API failed readiness; manual intervention required\n' >&2
+        return 1
+      fi
     else
       systemctl --user stop "$service.service" || { printf 'dayorder-deploy: rollback failed to stop %s\n' "$service" >&2; return 1; }
     fi
@@ -450,17 +598,19 @@ case "$component" in
     ;;
 esac
 if (( config_created != 0 )); then
+  print_configuration_instructions
   die "configuration templates were created; complete them and rerun the same deployment command"
 fi
 case "$component" in
   server)
-    require_config api; require_config migrate; preflight_systemd; validate_systemd_value "$root"
+    require_config api; require_config migrate; preflight_systemd; validate_systemd_value "$root"; preflight_unit dayorder-api
     ;;
   worker)
-    require_config worker; preflight_systemd; validate_systemd_value "$root"
+    require_config worker; preflight_systemd; validate_systemd_value "$root"; preflight_unit dayorder-worker
     ;;
   all)
     require_config api; require_config migrate; require_config worker; preflight_systemd; validate_systemd_value "$root"
+    preflight_unit dayorder-api; preflight_unit dayorder-worker
     ;;
 esac
 rollback_failed=0

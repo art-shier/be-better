@@ -41,6 +41,57 @@ finalize() {
   "$packager" metadata "$version" "$revision" "$script_dir/dayorder-deploy.sh" "$output"
 }
 
+validate_complete_asset_set() {
+  local directory="$1" expected actual name
+  expected=$'SHA256SUMS\ndayorder-deploy.sh\ndayorder-server-linux-amd64.tar.gz\ndayorder-server-linux-arm64.tar.gz\ndayorder-web.tar.gz\ndayorder-worker-linux-amd64.tar.gz\ndayorder-worker-linux-arm64.tar.gz\nrelease-manifest.json'
+  actual="$(find "$directory" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)"
+  [[ "$actual" == "$expected" ]] || die "aggregate build did not produce the exact eight-asset contract"
+  while IFS= read -r name; do
+    [[ -f "$directory/$name" && ! -L "$directory/$name" ]] || \
+      die "aggregate build produced a non-regular asset: $name"
+  done <<< "$expected"
+}
+
+replace_output_directory() {
+  local staged="$1" parent backup=""
+  parent="$(dirname -- "$output")"
+  if [[ -e "$output" || -L "$output" ]]; then
+    [[ -d "$output" && ! -L "$output" ]] || die "release output must be a real directory: $output"
+    backup="$(mktemp -d "$parent/.dayorder-release-backup.XXXXXX")"
+    rmdir -- "$backup"
+    mv -- "$output" "$backup" || die "could not preserve the previous release output"
+  fi
+  if ! mv -- "$staged" "$output"; then
+    if [[ -n "$backup" ]]; then
+      mv -- "$backup" "$output" || die "could not install the new release output or restore the previous output"
+    fi
+    die "could not install the complete release output"
+  fi
+  if [[ -n "$backup" ]]; then
+    rm -rf -- "$backup" || printf 'build-release: warning: could not remove previous release backup: %s\n' "$backup" >&2
+  fi
+}
+
+build_all() {
+  local version revision final_output parent staged
+  version="v$(cd -- "$root_dir" && node -p "require('./package.json').version")"
+  revision="$(git -C "$root_dir" rev-parse HEAD)"
+  final_output="$output"
+  [[ -n "$final_output" && "$final_output" != / ]] || die "release output must not be empty or the filesystem root"
+  parent="$(dirname -- "$final_output")"
+  mkdir -p -- "$parent"
+  staged="$(mktemp -d "$parent/.dayorder-release-staging.XXXXXX")"
+  temporary_directories+=("$staged")
+  output="$staged"
+  build_web
+  build_backend amd64
+  build_backend arm64
+  finalize "$version" "$revision"
+  validate_complete_asset_set "$staged"
+  output="$final_output"
+  replace_output_directory "$staged"
+}
+
 command="${1:-}"
 case "$command" in
   web) [[ $# -eq 1 ]] || die "usage: build-release.sh web"; build_web ;;
@@ -48,12 +99,7 @@ case "$command" in
   finalize) [[ $# -eq 3 ]] || die "usage: build-release.sh finalize <version> <revision>"; finalize "$2" "$3" ;;
   all)
     [[ $# -eq 1 ]] || die "usage: build-release.sh all"
-    version="v$(cd -- "$root_dir" && node -p "require('./package.json').version")"
-    revision="$(git -C "$root_dir" rev-parse HEAD)"
-    build_web
-    build_backend amd64
-    build_backend arm64
-    finalize "$version" "$revision"
+    build_all
     ;;
   *) die "usage: build-release.sh <web|backend|finalize|all>" ;;
 esac

@@ -33,7 +33,7 @@ func TestCurrentVersionMapsNilVersionToEmptyDatabase(t *testing.T) {
 	}
 }
 
-func TestRequireCurrentRejectsDirtyAndOutdatedSchemas(t *testing.T) {
+func TestRequireCurrentAcceptsCleanSchemasAtOrAboveTheEmbeddedFloor(t *testing.T) {
 	tests := []struct {
 		name    string
 		version uint
@@ -45,6 +45,7 @@ func TestRequireCurrentRejectsDirtyAndOutdatedSchemas(t *testing.T) {
 		{name: "outdated", version: LatestVersion - 1, exists: true, want: ErrSchemaOutdated},
 		{name: "dirty", version: LatestVersion, dirty: true, exists: true, want: ErrSchemaDirty},
 		{name: "current", version: LatestVersion, exists: true},
+		{name: "clean newer", version: LatestVersion + 1, exists: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
