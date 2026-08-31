@@ -285,17 +285,172 @@ switch_link() {
   mv -Tf -- "$temporary" "$link"
 }
 
+config_dir="$root/dayorder-config"
+config_created=0
+
+ensure_config() {
+  local name="$1" component_name="$2" template
+  template="$root/releases/$version/$component_name/config/$name.env.example"
+  local destination="$config_dir/$name.env" temporary="$config_dir/.$name.env.$$"
+  [[ -f "$destination" ]] && return
+  mkdir -p -- "$config_dir/secrets"; chmod 0700 "$config_dir" "$config_dir/secrets"
+  sed "s#/etc/dayorder/secrets#$config_dir/secrets#g" "$template" > "$temporary"
+  chmod 0600 "$temporary"; mv -- "$temporary" "$destination"
+  config_created=1
+  printf 'Created %s; fill it and the referenced secret files before retrying.\n' "$destination" >&2
+}
+
+require_config() {
+  [[ -f "$config_dir/$1.env" && -r "$config_dir/$1.env" ]] || die "configuration is not readable: $config_dir/$1.env"
+}
+
+systemd_quote() {
+  local value="$1"
+  value="${value//\\/\\\\}"; value="${value//\"/\\\"}"; value="${value//%/%%}"
+  printf '"%s"' "$value"
+}
+
+preflight_systemd() {
+  local linger
+  require_command systemctl; require_command loginctl
+  systemctl --user show-environment >/dev/null || die "systemd --user manager is unavailable"
+  linger="$(loginctl show-user "${USER:?USER is required}" --property=Linger --value)"
+  if [[ "$linger" != yes ]]; then
+    die "linger is disabled; run: sudo loginctl enable-linger \"$USER\""
+  fi
+}
+
+write_unit() {
+  local service="$1" current="$2" script="$3" config="$4" timeout="$5"
+  local unit_dir unit
+  unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+  unit="$unit_dir/$service.service"
+  mkdir -p -- "$unit_dir"
+  {
+    printf '[Unit]\nDescription=DayOrder %s\nAfter=network-online.target\nWants=network-online.target\n\n' "$service"
+    printf '[Service]\nType=simple\nWorkingDirectory=%s\n' "$(systemd_quote "$current")"
+    printf 'ExecStart=%s %s\n' "$(systemd_quote "$current/scripts/$script")" "$(systemd_quote "$config")"
+    printf 'Restart=on-failure\nRestartSec=5\nTimeoutStopSec=%s\n\n[Install]\nWantedBy=default.target\n' "$timeout"
+  } > "$unit"
+}
+
+server_changed=0; worker_changed=0; web_changed=0
+server_old=""; worker_old=""; web_old=""
+
+activate_service() {
+  local service="$1"
+  systemctl --user daemon-reload || return 1
+  systemctl --user enable "$service.service" || return 1
+  if systemctl --user is-active --quiet "$service.service"; then
+    systemctl --user restart "$service.service" || return 1
+  else
+    systemctl --user start "$service.service" || return 1
+  fi
+}
+
+wait_for_api() {
+  local url="${DAYORDER_DEPLOY_HEALTH_URL:-http://127.0.0.1:8080/health/ready}" attempt
+  for attempt in $(seq 1 30); do
+    if curl --fail --silent --show-error --max-time 5 "$url" >/dev/null; then return 0; fi
+    sleep 2
+  done
+  return 1
+}
+
+restore_link() {
+  local name="$1" old="$2" service="${3:-}"
+  if [[ -n "$old" ]]; then switch_link "$name" "$old"; else rm -f -- "$root/current-$name"; fi
+  if [[ -n "$service" ]]; then
+    if [[ -n "$old" ]]; then systemctl --user restart "$service.service"; else systemctl --user stop "$service.service" || true; fi
+  fi
+}
+
+deploy_server() {
+  local destination="$root/releases/$version/server"
+  server_old="$(current_target server)" || return 1
+  if [[ "$server_old" == "$destination" ]]; then printf 'Server %s is already deployed\n' "$version"; return 0; fi
+  "$destination/scripts/migrate.sh" up "$config_dir/migrate.env" || return 1
+  "$destination/scripts/migrate.sh" check "$config_dir/migrate.env" || return 1
+  switch_link server "$destination" || return 1; server_changed=1
+  if ! write_unit dayorder-api "$root/current-server" start-api.sh "$config_dir/api.env" 30 || \
+    ! activate_service dayorder-api || ! wait_for_api; then
+    restore_link server "$server_old" dayorder-api; server_changed=0; return 1
+  fi
+  printf 'Server %s deployed\n' "$version"
+}
+
+deploy_worker() {
+  local destination="$root/releases/$version/worker"
+  worker_old="$(current_target worker)" || return 1
+  if [[ "$worker_old" == "$destination" ]]; then printf 'Worker %s is already deployed\n' "$version"; return 0; fi
+  switch_link worker "$destination" || return 1; worker_changed=1
+  if ! write_unit dayorder-worker "$root/current-worker" start-worker.sh "$config_dir/worker.env" 60 || \
+    ! activate_service dayorder-worker || ! systemctl --user is-active --quiet dayorder-worker.service; then
+    restore_link worker "$worker_old" dayorder-worker; worker_changed=0; return 1
+  fi
+  printf 'Worker %s deployed\n' "$version"
+}
+
 deploy_web() {
-  local destination="$root/releases/$version/web" old
-  old="$(current_target web)"
-  if [[ "$old" == "$destination" ]]; then printf 'Web %s is already deployed\n' "$version"; return; fi
+  local destination="$root/releases/$version/web"
+  web_old="$(current_target web)" || return 1
+  if [[ "$web_old" == "$destination" ]]; then printf 'Web %s is already deployed\n' "$version"; return 0; fi
   switch_link web "$destination"
+  web_changed=1
   printf 'Web %s deployed at %s/current-web; configure Nginx/Caddy/CDN separately\n' "$version" "$root"
 }
 
+# Schema migrations are deliberately not rolled back; compatible releases use expand/contract migrations.
 case "$component" in
-  web) install_component web; deploy_web ;;
-  server) install_component server ;;
-  worker) install_component worker ;;
-  all) die "all deployment is not available until service preflights are configured" ;;
+  web)
+    install_component web
+    ;;
+  server)
+    install_component server
+    ensure_config api server
+    ensure_config migrate server
+    ;;
+  worker)
+    install_component worker
+    ensure_config worker worker
+    ;;
+  all)
+    install_component server
+    install_component worker
+    install_component web
+    ensure_config api server
+    ensure_config migrate server
+    ensure_config worker worker
+    ;;
+esac
+if (( config_created != 0 )); then
+  die "configuration templates were created; complete them and rerun the same deployment command"
+fi
+case "$component" in
+  server)
+    require_config api; require_config migrate; preflight_systemd
+    ;;
+  worker)
+    require_config worker; preflight_systemd
+    ;;
+  all)
+    require_config api; require_config migrate; require_config worker; preflight_systemd
+    ;;
+esac
+case "$component" in
+  server) deploy_server || die "Server deployment failed; the previous application link was restored" ;;
+  worker) deploy_worker || die "Worker deployment failed; the previous application link was restored" ;;
+  web) deploy_web ;;
+  all)
+    if ! deploy_server; then die "Server deployment failed before later components were activated"; fi
+    if ! deploy_worker; then
+      (( server_changed == 0 )) || restore_link server "$server_old" dayorder-api
+      die "Worker deployment failed; activated application links were restored"
+    fi
+    if ! deploy_web; then
+      (( worker_changed == 0 )) || restore_link worker "$worker_old" dayorder-worker
+      (( server_changed == 0 )) || restore_link server "$server_old" dayorder-api
+      die "Web deployment failed; activated application links were restored"
+    fi
+    ;;
 esac

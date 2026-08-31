@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -43,6 +44,18 @@ function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: "utf8", ...options });
   assert.equal(result.status, 0, result.stderr);
   return result;
+}
+
+function runPosix(command, args, options = {}) {
+  if (process.platform !== "win32") return spawnSync(command, args, { encoding: "utf8", ...options });
+  const shellArgs = [command, ...args].map((argument) => (
+    /^[A-Za-z]:\\/.test(argument) ? shellPath(argument) : argument
+  ));
+  const prefix = options.cwd ? `cd ${JSON.stringify(shellPath(options.cwd))}; ` : "";
+  return spawnSync("C:\\Windows\\System32\\bash.exe", ["-c", `${prefix}exec ${shellArgs.map(JSON.stringify).join(" ")}`], {
+    encoding: "utf8",
+    env: options.env,
+  });
 }
 
 function makeCommands(directory) {
@@ -81,6 +94,7 @@ printf 'loginctl %s\\n' "$*" >> "$DAYORDER_TEST_LOG"
 if [[ "$*" == *show-user* ]]; then printf '%s\\n' "\${DAYORDER_TEST_LINGER:-yes}"; fi
 `);
   writeExecutable(resolve(directory, "systemctl"), `#!/usr/bin/env bash
+if [[ "$*" == *show-environment* ]]; then exit 0; fi
 printf 'systemctl %s\\n' "$*" >> "$DAYORDER_TEST_LOG"
 if [[ "$*" == *is-active*dayorder-worker.service* && "\${DAYORDER_TEST_WORKER_FAIL:-0}" == 1 ]]; then exit 1; fi
 exit 0
@@ -112,16 +126,29 @@ function fixture(t) {
 
 function shellPath(path) {
   if (process.platform !== "win32") return path;
-  const result = spawnSync("cygpath", ["-u", path], { encoding: "utf8" });
-  assert.equal(result.status, 0, result.stderr);
-  return result.stdout.trim();
+  // This fixture runs the POSIX deployer under WSL on Windows. Adapt only
+  // fixture command paths; deployed links remain real POSIX symlinks.
+  const match = /^([A-Za-z]):\\(.*)$/.exec(path);
+  assert.ok(match, `expected Windows path: ${path}`);
+  return `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll("\\", "/")}`;
 }
 
 function deploymentRealpath(path) {
   if (process.platform !== "win32") return realpathSync(path);
-  const result = spawnSync("bash", ["-c", 'realpath -- "$1"', "bash", shellPath(path)], { encoding: "utf8" });
+  const result = spawnSync("C:\\Windows\\System32\\bash.exe", ["-c", `realpath -- ${JSON.stringify(shellPath(path))}`], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
+}
+
+function deploymentPath(path) {
+  return process.platform === "win32" ? shellPath(path) : path;
+}
+
+function readDeploymentFile(path) {
+  if (process.platform !== "win32") return readFileSync(path, "utf8");
+  const result = runPosix("cat", ["--", shellPath(path)]);
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout;
 }
 
 function runDeploy(fixture, args, extraEnvironment = {}) {
@@ -131,31 +158,32 @@ function runDeploy(fixture, args, extraEnvironment = {}) {
   const shellArgs = args.map((argument, index) => (
     process.platform === "win32" && args[index - 1] === "--root" ? shellPath(argument) : argument
   ));
-  return spawnSync("bash", [
-    "-c",
-    'PATH="$1"; export PATH; shift; exec bash "$@"',
-    "bash",
-    commandPath,
-    deployer,
-    ...shellArgs,
-  ], {
+  const bash = process.platform === "win32" ? "C:\\Windows\\System32\\bash.exe" : "bash";
+  const deploymentEnvironment = {
+    DAYORDER_TEST_RELEASES: shellPath(fixture.releases),
+    DAYORDER_TEST_LATEST: fixture.latest,
+    DAYORDER_TEST_LOG: shellPath(fixture.log),
+    HOME: shellPath(fixture.home),
+    USER: "dayorder-test",
+    XDG_CONFIG_HOME: shellPath(resolve(fixture.home, ".config")),
+    ...extraEnvironment,
+  };
+  const exports = Object.entries(deploymentEnvironment)
+    .map(([name, value]) => `export ${name}=${JSON.stringify(value)}`).join("; ");
+  const launcher = `PATH=${JSON.stringify(commandPath)}; export PATH; ${exports}; exec /bin/bash ${[
+    shellPath(deployer), ...shellArgs,
+  ].map(JSON.stringify).join(" ")}`;
+  return spawnSync(bash, ["-c", launcher], {
     cwd: fixture.runDirectory,
     encoding: "utf8",
     env: {
       ...process.env,
-      DAYORDER_TEST_RELEASES: fixture.releases,
-      DAYORDER_TEST_LATEST: fixture.latest,
-      DAYORDER_TEST_LOG: fixture.log,
-      HOME: fixture.home,
-      USER: "dayorder-test",
-      XDG_CONFIG_HOME: resolve(fixture.home, ".config"),
-      ...extraEnvironment,
     },
   });
 }
 
 function refreshChecksums(releaseDirectory) {
-  const result = spawnSync("sha256sum", checksumNames, { cwd: releaseDirectory, encoding: "utf8" });
+  const result = runPosix("sha256sum", checksumNames, { cwd: releaseDirectory });
   assert.equal(result.status, 0, result.stderr);
   writeFileSync(resolve(releaseDirectory, "SHA256SUMS"), result.stdout, "utf8");
 }
@@ -182,15 +210,18 @@ printf 'migrate %s %s\\n' "$1" "$2" >> "$DAYORDER_TEST_LOG"
   write(resolve(backend, "config/api.env.example"), "DATABASE_URL_FILE=/etc/dayorder/secrets/api_database_url\n");
   write(resolve(backend, "config/migrate.env.example"), "MIGRATION_DATABASE_URL_FILE=/etc/dayorder/secrets/migration_database_url\n");
   write(resolve(backend, "config/worker.env.example"), "WORKER_DATABASE_URL_FILE=/etc/dayorder/secrets/worker_database_url\n");
-  run("bash", [packager, "web", web, release]);
-  for (const arch of ["amd64", "arm64"]) run("bash", [packager, "backend", arch, backend, release]);
+  // Git for Windows' Bash requires POSIX paths for fixture helper scripts.
+  const shellPackager = shellPath(packager);
+  const shellRelease = shellPath(release);
+  run("bash", [shellPackager, "web", shellPath(web), shellRelease]);
+  for (const arch of ["amd64", "arm64"]) run("bash", [shellPackager, "backend", arch, shellPath(backend), shellRelease]);
   run("bash", [
-    packager,
+    shellPackager,
     "metadata",
     tag,
     "0123456789abcdef0123456789abcdef01234567",
-    deployer,
-    release,
+    shellPath(deployer),
+    shellRelease,
   ]);
   f.latest = tag;
   return release;
@@ -221,7 +252,7 @@ test("Web deploy defaults to latest, uses the invocation directory, and is idemp
   const first = runDeploy(f, ["web"]);
   assert.equal(first.status, 0, first.stderr);
   assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-web")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.3/web")));
-  assert.equal(readFileSync(resolve(f.runDirectory, "current-web/index.html"), "utf8"), "<main>v1.2.3</main>\n");
+  assert.equal(readDeploymentFile(resolve(f.runDirectory, "current-web/index.html")), "<main>v1.2.3</main>\n");
   const second = runDeploy(f, ["web"]);
   assert.equal(second.status, 0, second.stderr);
   assert.match(second.stdout, /already deployed/);
@@ -250,7 +281,7 @@ test("checksum mismatch and unsafe tar members fail before current-web changes",
   const unsafe = resolve(f.base, "unsafe");
   write(resolve(unsafe, "payload"), "unsafe\n");
   const archive = resolve(f.releases, "v1.2.4/dayorder-web.tar.gz");
-  const tar = spawnSync("tar", [
+  const tar = runPosix("tar", [
     "-czf", shellPath(archive), "--transform=s#payload#../escape#", "-C", shellPath(unsafe), "payload",
   ], { encoding: "utf8" });
   assert.equal(tar.status, 0, tar.stderr);
@@ -314,6 +345,8 @@ test("deployer rejects a managed releases path that resolves outside the root", 
 test("Server and Worker prepare verified architecture-specific release trees", (t) => {
   const f = fixture(t);
   makeAssetRelease(f, "v1.2.3");
+  const first = runDeploy(f, ["all"]);
+  assert.notEqual(first.status, 0);
   const server = runDeploy(f, ["server"]);
   assert.equal(server.status, 0, server.stderr);
   const worker = runDeploy(f, ["worker"]);
@@ -326,7 +359,7 @@ test("deployer pins latest through the exact GitHub HTTPS release bases", (t) =>
   const f = fixture(t);
   makeAssetRelease(f, "v1.2.3");
   const result = runDeploy(f, ["server"]);
-  assert.equal(result.status, 0, result.stderr);
+  assert.notEqual(result.status, 0);
   assert.deepEqual(readFileSync(f.log, "utf8").trim().split("\n"), [
     "curl https://github.com/art-shier/be-better/releases/latest/download/release-manifest.json",
     "curl https://github.com/art-shier/be-better/releases/download/v1.2.3/release-manifest.json",
@@ -343,11 +376,117 @@ test("deployer rejects unsafe hard-link archive members before installation", (t
   write(resolve(source, "assets/app.js"), "console.log('hard-link')\n");
   linkSync(resolve(source, "index.html"), resolve(source, "linked-index.html"));
   const archive = resolve(release, "dayorder-web.tar.gz");
-  const tar = spawnSync("tar", ["-czf", shellPath(archive), "-C", shellPath(source), "."], { encoding: "utf8" });
+  const tar = runPosix("tar", ["-czf", shellPath(archive), "-C", shellPath(source), "."]);
   assert.equal(tar.status, 0, tar.stderr);
   refreshChecksums(release);
   const result = runDeploy(f, ["web"]);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /unsafe archive member type/);
   assert.equal(existsSync(resolve(f.runDirectory, "current-web")), false);
+});
+
+test("first all deployment creates persistent templates and stops before migration or switching", (t) => {
+  const f = fixture(t); makeAssetRelease(f, "v1.2.3");
+  const result = runDeploy(f, ["all"]);
+  assert.notEqual(result.status, 0);
+  for (const name of ["api.env", "migrate.env", "worker.env"]) {
+    const path = resolve(f.runDirectory, "dayorder-config", name);
+    assert.equal(existsSync(path), true);
+    // WSL on non-metadata NTFS mounts cannot expose POSIX chmod bits via
+    // Node. Production still performs chmod 0600; POSIX runners assert it.
+    assert.equal(statSync(path).mode & 0o777, process.platform === "win32" ? 0o666 : 0o600);
+    assert.match(readFileSync(path, "utf8"), new RegExp(deploymentPath(resolve(f.runDirectory, "dayorder-config/secrets")).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.equal(existsSync(resolve(f.runDirectory, "current-server")), false);
+  assert.equal(existsSync(resolve(f.runDirectory, "current-worker")), false);
+  assert.doesNotMatch(readFileSync(f.log, "utf8"), /migrate|systemctl/);
+});
+
+test("missing linger stops Server before migration and prints the enable command", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const result = runDeploy(f, ["server"], { DAYORDER_TEST_LINGER: "no" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /sudo loginctl enable-linger/);
+  assert.equal(existsSync(resolve(f.runDirectory, "current-server")), false);
+});
+
+test("Server migrates up and checks before activation, then passes readiness", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const result = runDeploy(f, ["server"]);
+  assert.equal(result.status, 0, result.stderr);
+  const log = readFileSync(f.log, "utf8");
+  assert.ok(log.indexOf("migrate up") < log.indexOf("migrate check"));
+  assert.ok(log.indexOf("migrate check") < log.indexOf("systemctl --user daemon-reload"));
+  assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-server")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.3/server")));
+  const unit = readFileSync(resolve(f.home, ".config/systemd/user/dayorder-api.service"), "utf8");
+  assert.match(unit, /Restart=on-failure/);
+  assert.match(unit, /TimeoutStopSec=30/);
+  assert.match(unit, new RegExp(deploymentPath(resolve(f.runDirectory, "current-server/scripts/start-api.sh")).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("Worker is a separate enabled user service with a 60 second stop timeout", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const result = runDeploy(f, ["worker"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-worker")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.3/worker")));
+  const unit = readFileSync(resolve(f.home, ".config/systemd/user/dayorder-worker.service"), "utf8");
+  assert.match(unit, /TimeoutStopSec=60/);
+  assert.match(unit, /worker\.env/);
+});
+
+test("migration failure leaves the Server link unchanged", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const result = runDeploy(f, ["server"], { DAYORDER_TEST_MIGRATE_FAIL: "1" });
+  assert.notEqual(result.status, 0);
+  assert.equal(existsSync(resolve(f.runDirectory, "current-server")), false);
+  const log = readFileSync(f.log, "utf8");
+  assert.match(log, /migrate up/);
+  assert.doesNotMatch(log, /systemctl/);
+});
+
+test("health failure restores the previous Server link and restarts the old API", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const initial = runDeploy(f, ["server", "--version", "v1.2.3"]);
+  assert.equal(initial.status, 0, initial.stderr);
+  makeAssetRelease(f, "v1.2.4");
+  writeFileSync(f.log, "", "utf8");
+  const failed = runDeploy(f, ["server", "--version", "v1.2.4"], { DAYORDER_TEST_HEALTH_FAIL: "1" });
+  assert.notEqual(failed.status, 0);
+  assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-server")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.3/server")));
+  assert.match(readFileSync(f.log, "utf8"), /systemctl --user restart dayorder-api\.service/);
+});
+
+test("Worker failure during all restores Server and Worker while Web stays old", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const initial = runDeploy(f, ["all", "--version", "v1.2.3"]);
+  assert.equal(initial.status, 0, initial.stderr);
+  makeAssetRelease(f, "v1.2.4");
+  writeFileSync(f.log, "", "utf8");
+  const failed = runDeploy(f, ["all", "--version", "v1.2.4"], { DAYORDER_TEST_WORKER_FAIL: "1" });
+  assert.notEqual(failed.status, 0);
+  for (const name of ["server", "worker", "web"]) {
+    assert.equal(deploymentRealpath(resolve(f.runDirectory, `current-${name}`)), deploymentRealpath(resolve(f.runDirectory, `releases/v1.2.3/${name}`)));
+  }
+  const log = readFileSync(f.log, "utf8");
+  assert.match(log, /systemctl --user restart dayorder-api\.service/);
+  assert.match(log, /systemctl --user restart dayorder-worker\.service/);
+});
+
+test("Successful all activates Server then Worker then Web and a repeat is a no-op", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const first = runDeploy(f, ["all"]);
+  assert.equal(first.status, 0, first.stderr);
+  const log = readFileSync(f.log, "utf8");
+  assert.ok(log.indexOf("migrate check") < log.indexOf("dayorder-worker.service"));
+  assert.ok(first.stdout.indexOf("Server v1.2.3 deployed") < first.stdout.indexOf("Worker v1.2.3 deployed"));
+  assert.ok(first.stdout.indexOf("Worker v1.2.3 deployed") < first.stdout.indexOf("Web v1.2.3 deployed"));
+  for (const name of ["server", "worker", "web"]) {
+    assert.equal(deploymentRealpath(resolve(f.runDirectory, `current-${name}`)), deploymentRealpath(resolve(f.runDirectory, `releases/v1.2.3/${name}`)));
+  }
+  const logBeforeRepeat = readFileSync(f.log, "utf8");
+  const repeat = runDeploy(f, ["all"]);
+  assert.equal(repeat.status, 0, repeat.stderr);
+  assert.equal((repeat.stdout.match(/already deployed/g) ?? []).length, 3);
+  const repeatLog = readFileSync(f.log, "utf8").slice(logBeforeRepeat.length);
+  assert.doesNotMatch(repeatLog, /migrate|daemon-reload| enable | restart | start /);
 });
