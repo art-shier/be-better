@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,6 +62,7 @@ if [[ "$url" == */health/ready ]]; then
   [[ "\${DAYORDER_TEST_HEALTH_FAIL:-0}" != 1 ]]
   exit
 fi
+printf 'curl %s\\n' "$url" >> "$DAYORDER_TEST_LOG"
 name="\${url##*/}"
 if [[ "$url" == */releases/latest/download/* ]]; then
   source="$DAYORDER_TEST_RELEASES/$DAYORDER_TEST_LATEST/$name"
@@ -256,4 +259,95 @@ test("checksum mismatch and unsafe tar members fail before current-web changes",
   assert.notEqual(unsafeResult.status, 0);
   assert.match(unsafeResult.stderr, /unsafe archive/);
   assert.equal(existsSync(resolve(f.runDirectory, "escape")), false);
+});
+
+test("deployer rejects a noncanonical Manifest with assets outside the assets object", (t) => {
+  const f = fixture(t);
+  const release = makeAssetRelease(f, "v1.2.3");
+  writeFileSync(resolve(release, "release-manifest.json"), [
+    "{",
+    '  "schemaVersion": 1,',
+    '  "version": "v1.2.3",',
+    '  "revision": "0123456789abcdef0123456789abcdef01234567",',
+    '  "deployScriptVersion": 1,',
+    '  "assets": {},',
+    '  "web": "dayorder-web.tar.gz",',
+    '  "serverAmd64": "dayorder-server-linux-amd64.tar.gz",',
+    '  "serverArm64": "dayorder-server-linux-arm64.tar.gz",',
+    '  "workerAmd64": "dayorder-worker-linux-amd64.tar.gz",',
+    '  "workerArm64": "dayorder-worker-linux-arm64.tar.gz"',
+    "}\n",
+  ].join("\n"), "utf8");
+  refreshChecksums(release);
+  const result = runDeploy(f, ["web"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /manifest/i);
+  assert.equal(existsSync(resolve(f.runDirectory, "current-web")), false);
+});
+
+test("deployer rejects checksum records with trailing fields", (t) => {
+  const f = fixture(t);
+  const release = makeAssetRelease(f, "v1.2.3");
+  const sums = readFileSync(resolve(release, "SHA256SUMS"), "utf8");
+  writeFileSync(resolve(release, "SHA256SUMS"), sums.replace(
+    /^([0-9a-f]{64}) [ *]release-manifest\.json$/m,
+    "$1  release-manifest.json trailing-junk",
+  ), "utf8");
+  const result = runDeploy(f, ["web"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /SHA-256/);
+  assert.equal(existsSync(resolve(f.runDirectory, "current-web")), false);
+});
+
+test("deployer rejects a managed releases path that resolves outside the root", (t) => {
+  const f = fixture(t);
+  makeAssetRelease(f, "v1.2.3");
+  const outside = resolve(f.base, "outside");
+  mkdirSync(outside);
+  symlinkSync(outside, resolve(f.runDirectory, "releases"), process.platform === "win32" ? "junction" : "dir");
+  const result = runDeploy(f, ["web"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /managed releases|symbolic link|escapes root/);
+  assert.equal(existsSync(resolve(outside, "v1.2.3")), false);
+});
+
+test("Server and Worker prepare verified architecture-specific release trees", (t) => {
+  const f = fixture(t);
+  makeAssetRelease(f, "v1.2.3");
+  const server = runDeploy(f, ["server"]);
+  assert.equal(server.status, 0, server.stderr);
+  const worker = runDeploy(f, ["worker"]);
+  assert.equal(worker.status, 0, worker.stderr);
+  assert.equal(existsSync(resolve(f.runDirectory, "releases/v1.2.3/server/bin/dayorder-api")), true);
+  assert.equal(existsSync(resolve(f.runDirectory, "releases/v1.2.3/worker/bin/dayorder-worker")), true);
+});
+
+test("deployer pins latest through the exact GitHub HTTPS release bases", (t) => {
+  const f = fixture(t);
+  makeAssetRelease(f, "v1.2.3");
+  const result = runDeploy(f, ["server"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(readFileSync(f.log, "utf8").trim().split("\n"), [
+    "curl https://github.com/art-shier/be-better/releases/latest/download/release-manifest.json",
+    "curl https://github.com/art-shier/be-better/releases/download/v1.2.3/release-manifest.json",
+    "curl https://github.com/art-shier/be-better/releases/download/v1.2.3/SHA256SUMS",
+    "curl https://github.com/art-shier/be-better/releases/download/v1.2.3/dayorder-server-linux-amd64.tar.gz",
+  ]);
+});
+
+test("deployer rejects unsafe hard-link archive members before installation", (t) => {
+  const f = fixture(t);
+  const release = makeAssetRelease(f, "v1.2.3");
+  const source = resolve(f.base, "hard-link-web");
+  write(resolve(source, "index.html"), "<main>hard-link</main>\n");
+  write(resolve(source, "assets/app.js"), "console.log('hard-link')\n");
+  linkSync(resolve(source, "index.html"), resolve(source, "linked-index.html"));
+  const archive = resolve(release, "dayorder-web.tar.gz");
+  const tar = spawnSync("tar", ["-czf", shellPath(archive), "-C", shellPath(source), "."], { encoding: "utf8" });
+  assert.equal(tar.status, 0, tar.stderr);
+  refreshChecksums(release);
+  const result = runDeploy(f, ["web"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /unsafe archive member type/);
+  assert.equal(existsSync(resolve(f.runDirectory, "current-web")), false);
 });

@@ -32,7 +32,7 @@ home="$(realpath -m -- "${HOME:?HOME is required}")"
 mkdir -p -- "$root"
 [[ ! -L "$root" ]] || die "deployment root must not be a symbolic link"
 
-for command_name in bash curl tar sha256sum flock realpath awk sed grep find mktemp; do require_command "$command_name"; done
+for command_name in bash curl tar sha256sum flock realpath awk sed grep find mktemp cmp; do require_command "$command_name"; done
 if [[ "$component" != web ]]; then
   machine="${DAYORDER_TEST_UNAME:-$(uname -m)}"
   case "$machine" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) die "unsupported architecture: $machine" ;; esac
@@ -50,27 +50,40 @@ download() {
   curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --output "$output" "$url"
 }
 
-manifest_value() {
-  local key="$1" file="$2"
-  sed -nE "s/^[[:space:]]*\"$key\":[[:space:]]*(\"[^\"]*\"|[0-9]+),?$/\\1/p" "$file" | tr -d '"'
+canonical_manifest() {
+  local manifest_version="$1" revision="$2"
+  printf '%s\n' \
+    '{' \
+    '  "schemaVersion": 1,' \
+    "  \"version\": \"$manifest_version\"," \
+    "  \"revision\": \"$revision\"," \
+    '  "deployScriptVersion": 1,' \
+    '  "assets": {' \
+    '    "web": "dayorder-web.tar.gz",' \
+    '    "server": {' \
+    '      "amd64": "dayorder-server-linux-amd64.tar.gz",' \
+    '      "arm64": "dayorder-server-linux-arm64.tar.gz"' \
+    '    },' \
+    '    "worker": {' \
+    '      "amd64": "dayorder-worker-linux-amd64.tar.gz",' \
+    '      "arm64": "dayorder-worker-linux-arm64.tar.gz"' \
+    '    }' \
+    '  }' \
+    '}'
 }
 
 validate_manifest() {
   local file="$1" expected_version="$2" schema script_version manifest_version revision
-  schema="$(manifest_value schemaVersion "$file")"
-  script_version="$(manifest_value deployScriptVersion "$file")"
-  manifest_version="$(manifest_value version "$file")"
-  revision="$(manifest_value revision "$file")"
+  schema="$(sed -nE 's/^  "schemaVersion": ([0-9]+),$/\1/p' "$file")"
+  script_version="$(sed -nE 's/^  "deployScriptVersion": ([0-9]+),$/\1/p' "$file")"
+  manifest_version="$(sed -nE 's/^  "version": "([^"]+)",$/\1/p' "$file")"
+  revision="$(sed -nE 's/^  "revision": "([^"]+)",$/\1/p' "$file")"
   [[ "$schema" == 1 ]] || die "unsupported manifest schema: ${schema:-missing}"
   [[ "$script_version" == "$DEPLOY_SCRIPT_VERSION" ]] || die "unsupported deployment script compatibility version"
   [[ "$manifest_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "manifest version is invalid"
   [[ -z "$expected_version" || "$manifest_version" == "$expected_version" ]] || die "manifest version does not match requested version"
   [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || die "manifest revision is invalid"
-  grep -Fq '"web": "dayorder-web.tar.gz"' "$file" || die "manifest Web asset is invalid"
-  for expected in dayorder-server-linux-amd64.tar.gz dayorder-server-linux-arm64.tar.gz \
-    dayorder-worker-linux-amd64.tar.gz dayorder-worker-linux-arm64.tar.gz; do
-    grep -Fq "\"$expected\"" "$file" || die "manifest asset is missing: $expected"
-  done
+  canonical_manifest "$manifest_version" "$revision" | cmp -s "$file" - || die "manifest must use the canonical schema"
   printf '%s' "$manifest_version"
 }
 
@@ -87,13 +100,56 @@ else
 fi
 download "$release_base/SHA256SUMS" "$work_dir/SHA256SUMS"
 
+readonly CHECKSUM_NAMES=(
+  dayorder-web.tar.gz
+  dayorder-server-linux-amd64.tar.gz
+  dayorder-server-linux-arm64.tar.gz
+  dayorder-worker-linux-amd64.tar.gz
+  dayorder-worker-linux-arm64.tar.gz
+  dayorder-deploy.sh
+  release-manifest.json
+)
+
+is_checksum_name() {
+  case "$1" in
+    dayorder-web.tar.gz|dayorder-server-linux-amd64.tar.gz|dayorder-server-linux-arm64.tar.gz|dayorder-worker-linux-amd64.tar.gz|dayorder-worker-linux-arm64.tar.gz|dayorder-deploy.sh|release-manifest.json) ;;
+    *) return 1 ;;
+  esac
+}
+
 checksum_for() {
-  local name="$1" count checksum
-  count="$(awk -v name="$name" '$2 == name || $2 == "*" name { count++ } END { print count + 0 }' "$work_dir/SHA256SUMS")"
+  local name="$1" record checksum="" record_checksum record_name count=0
+  while IFS= read -r record || [[ -n "$record" ]]; do
+    if [[ "$record" =~ ^([0-9a-f]{64})\ \ (.+)$ ]]; then
+      record_checksum="${BASH_REMATCH[1]}"; record_name="${BASH_REMATCH[2]}"
+    elif [[ "$record" =~ ^([0-9a-f]{64})\ \*(.+)$ ]]; then
+      record_checksum="${BASH_REMATCH[1]}"; record_name="${BASH_REMATCH[2]}"
+    else
+      die "invalid SHA-256 record"
+    fi
+    [[ "$record_name" == "$name" ]] || continue
+    count=$((count + 1))
+    checksum="$record_checksum"
+  done < "$work_dir/SHA256SUMS"
   [[ "$count" == 1 ]] || die "SHA-256 entry must appear exactly once: $name"
-  checksum="$(awk -v name="$name" '$2 == name || $2 == "*" name { print $1 }' "$work_dir/SHA256SUMS")"
-  [[ "$checksum" =~ ^[0-9a-f]{64}$ ]] || die "invalid SHA-256 entry: $name"
   printf '%s' "$checksum"
+}
+
+validate_checksums() {
+  local record record_name count=0 name
+  while IFS= read -r record || [[ -n "$record" ]]; do
+    if [[ "$record" =~ ^[0-9a-f]{64}\ \ (.+)$ ]]; then
+      record_name="${BASH_REMATCH[1]}"
+    elif [[ "$record" =~ ^[0-9a-f]{64}\ \*(.+)$ ]]; then
+      record_name="${BASH_REMATCH[1]}"
+    else
+      die "invalid SHA-256 record"
+    fi
+    is_checksum_name "$record_name" || die "unexpected SHA-256 entry: $record_name"
+    count=$((count + 1))
+  done < "$work_dir/SHA256SUMS"
+  [[ "$count" == "${#CHECKSUM_NAMES[@]}" ]] || die "SHA-256 file must contain exactly seven records"
+  for name in "${CHECKSUM_NAMES[@]}"; do checksum_for "$name" >/dev/null; done
 }
 
 verify_file() {
@@ -102,6 +158,7 @@ verify_file() {
   printf '%s  %s\n' "$expected" "$name" | (cd -- "$work_dir" && sha256sum -c - >/dev/null) || \
     die "SHA-256 verification failed: $name"
 }
+validate_checksums
 verify_file release-manifest.json
 
 asset_name() {
@@ -127,12 +184,12 @@ validate_archive() {
 
 validate_component_tree() {
   local name="$1" directory="$2" actual expected
+  if find "$directory" -type l -o -type b -o -type c -o -type p | grep -q .; then
+    die "archive contains unsafe nodes"
+  fi
   case "$name" in
     web)
       [[ -f "$directory/index.html" && -d "$directory/assets" ]] || die "Web archive is missing index.html or assets"
-      if find "$directory" -type l -o -type b -o -type c -o -type p | grep -q .; then
-        die "Web archive contains unsafe nodes"
-      fi
       ;;
     server)
       expected=$'bin/dayorder-api\nbin/dayorder-migrate\nconfig/api.env.example\nconfig/migrate.env.example\nscripts/migrate.sh\nscripts/runtime-env.sh\nscripts/start-api.sh'
@@ -147,15 +204,53 @@ validate_component_tree() {
   esac
 }
 
+managed_releases_root() {
+  local releases="$root/releases" canonical
+  [[ ! -L "$releases" ]] || die "managed releases directory must not be a symbolic link"
+  if [[ -e "$releases" ]]; then
+    [[ -d "$releases" ]] || die "managed releases path is not a directory"
+  else
+    mkdir -- "$releases"
+  fi
+  [[ ! -L "$releases" ]] || die "managed releases directory must not be a symbolic link"
+  canonical="$(realpath -m -- "$releases")"
+  [[ "$canonical" == "$root/releases" ]] || die "managed releases path escapes root"
+  printf '%s' "$canonical"
+}
+
+managed_destination() {
+  local name="$1" releases version_directory destination canonical
+  releases="$(managed_releases_root)"
+  version_directory="$releases/$version"
+  [[ ! -L "$version_directory" ]] || die "managed version directory must not be a symbolic link"
+  if [[ -e "$version_directory" ]]; then
+    [[ -d "$version_directory" ]] || die "managed version path is not a directory"
+  else
+    mkdir -- "$version_directory"
+  fi
+  [[ ! -L "$version_directory" ]] || die "managed version directory must not be a symbolic link"
+  canonical="$(realpath -m -- "$version_directory")"
+  [[ "$canonical" == "$releases/$version" ]] || die "managed version path escapes root"
+  destination="$canonical/$name"
+  [[ ! -L "$destination" ]] || die "managed component directory must not be a symbolic link"
+  if [[ -e "$destination" ]]; then [[ -d "$destination" ]] || die "managed component path is not a directory"; fi
+  canonical="$(realpath -m -- "$destination")"
+  [[ "$canonical" == "$releases/$version/$name" ]] || die "managed component path escapes root"
+  printf '%s' "$canonical"
+}
+
 install_component() {
   local name="$1" asset archive checksum destination staging marker
   asset="$(asset_name "$name")"; archive="$work_dir/$asset"
   download "$release_base/$asset" "$archive"; verify_file "$asset"; checksum="$(checksum_for "$asset")"
-  destination="$root/releases/$version/$name"; marker="$destination/.dayorder-release"
+  destination="$(managed_destination "$name")"; marker="$destination/.dayorder-release"
   if [[ -d "$destination" ]]; then
-    [[ -f "$marker" ]] || die "existing version directory has no release marker: $destination"
+    [[ ! -L "$marker" && -f "$marker" ]] || die "existing version directory has no release marker: $destination"
     grep -Fxq "asset=$asset" "$marker" && grep -Fxq "sha256=$checksum" "$marker" || \
       die "existing version directory does not match the Release asset"
+    if find "$destination" -type l -o -type b -o -type c -o -type p | grep -q .; then
+      die "existing version directory contains unsafe nodes"
+    fi
     return
   fi
   staging="$work_dir/unpack-$name"; mkdir -p -- "$staging"
@@ -163,22 +258,27 @@ install_component() {
   tar --extract --gzip --no-same-owner --no-same-permissions --file "$archive" --directory "$staging"
   validate_component_tree "$name" "$staging"
   printf 'asset=%s\nsha256=%s\n' "$asset" "$checksum" > "$staging/.dayorder-release"
-  mkdir -p -- "$root/releases/$version"
-  mv -- "$staging" "$destination"
+  destination="$(managed_destination "$name")"
+  [[ ! -e "$destination" && ! -L "$destination" ]] || die "managed component destination appeared during deployment"
+  mv -T -- "$staging" "$destination"
 }
 
 current_target() {
-  local link="$root/current-$1" target
+  local link="$root/current-$1" target releases
+  releases="$(managed_releases_root)"
   [[ ! -e "$link" || -L "$link" ]] || die "$link exists and is not a symbolic link"
   if [[ -L "$link" ]]; then
     target="$(realpath -m -- "$link")"
-    [[ "$target" == "$root/releases/"* ]] || die "$link points outside the managed releases directory"
+    [[ "$target" == "$releases/"* ]] || die "$link points outside the managed releases directory"
     printf '%s' "$target"
   fi
 }
 
 switch_link() {
-  local name="$1" target="$2" link temporary
+  local name="$1" target="$2" link temporary releases
+  releases="$(managed_releases_root)"
+  target="$(realpath -m -- "$target")"
+  [[ "$target" == "$releases/"* ]] || die "link target points outside the managed releases directory"
   link="$root/current-$name"
   temporary="$root/.current-$name.$$"
   ln -s -- "$target" "$temporary"
