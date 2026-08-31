@@ -4,6 +4,7 @@ import {
   copyFileSync,
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -191,6 +192,20 @@ function deploymentFileExists(path) {
   return runPosix("test", ["-f", shellPath(path)]).status === 0;
 }
 
+function deploymentPathExists(path) {
+  if (process.platform === "win32") {
+    return runPosix("test", ["-e", shellPath(path)]).status === 0
+      || runPosix("test", ["-L", shellPath(path)]).status === 0;
+  }
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
 function runDeploy(fixture, args, extraEnvironment = {}) {
   const commandPath = process.platform === "win32"
     ? `${shellPath(fixture.commands)}:/usr/bin:/bin`
@@ -276,6 +291,29 @@ function configuredFixture(t, tag) {
   writeFileSync(f.log, "", "utf8");
   return f;
 }
+
+test("deployment path existence detects valid and dangling POSIX symlinks", (t) => {
+  const f = fixture(t);
+  const target = resolve(f.base, "target");
+  const validLink = resolve(f.base, "valid-link");
+  const danglingLink = resolve(f.base, "dangling-link");
+  mkdirSync(target);
+  for (const [source, link] of [
+    [target, validLink],
+    [resolve(f.base, "missing-target"), danglingLink],
+  ]) {
+    const created = runPosix("ln", ["-s", source, link]);
+    assert.equal(created.status, 0, created.stderr);
+  }
+
+  if (process.platform === "win32") {
+    assert.equal(existsSync(validLink), false, "native Node cannot see the WSL-created valid symlink");
+  }
+  assert.equal(existsSync(danglingLink), false, "native existence follows a dangling symlink target");
+  assert.equal(deploymentPathExists(validLink), true);
+  assert.equal(deploymentPathExists(danglingLink), true);
+  assert.equal(deploymentPathExists(resolve(f.base, "missing-entry")), false);
+});
 
 test("deployer rejects invalid commands, versions, roots, and architectures", (t) => {
   const f = fixture(t);
@@ -622,9 +660,9 @@ test("real generated assets install without privilege and stop at first configur
   for (const name of ["api.env", "migrate.env", "worker.env"]) {
     assert.equal(existsSync(resolve(f.runDirectory, "dayorder-config", name)), true);
   }
-  assert.equal(existsSync(resolve(f.runDirectory, "current-server")), false);
-  assert.equal(existsSync(resolve(f.runDirectory, "current-worker")), false);
-  assert.equal(existsSync(resolve(f.runDirectory, "current-web")), false);
+  assert.equal(deploymentPathExists(resolve(f.runDirectory, "current-server")), false);
+  assert.equal(deploymentPathExists(resolve(f.runDirectory, "current-worker")), false);
+  assert.equal(deploymentPathExists(resolve(f.runDirectory, "current-web")), false);
   assert.doesNotMatch(readFileSync(f.log, "utf8"), /migrate|systemctl/);
 
   const web = runDeploy(f, ["web"]);
