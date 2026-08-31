@@ -18,8 +18,15 @@ function run(args, cwd = root) {
   return spawnSync("bash", [packager, ...args], { cwd, encoding: "utf8" });
 }
 
+function tarPath(path) {
+  if (process.platform !== "win32") return path;
+  const converted = spawnSync("cygpath", ["-u", path], { encoding: "utf8" });
+  assert.equal(converted.status, 0, converted.stderr);
+  return converted.stdout.trim();
+}
+
 function listArchive(path) {
-  const result = spawnSync("tar", ["-tzf", path], { encoding: "utf8" });
+  const result = spawnSync("tar", ["-tzf", tarPath(path)], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim().split("\n").map((entry) => entry.replace(/^\.\//, "")).filter(Boolean).sort();
 }
@@ -61,7 +68,7 @@ test("packager emits the exact Web, Server, and Worker archive contracts", (t) =
   ]);
   const extracted = resolve(f.base, "extracted-server");
   mkdirSync(extracted);
-  const unpack = spawnSync("tar", ["-xzf", resolve(f.assets, "dayorder-server-linux-amd64.tar.gz"), "-C", extracted], { encoding: "utf8" });
+  const unpack = spawnSync("tar", ["-xzf", tarPath(resolve(f.assets, "dayorder-server-linux-amd64.tar.gz")), "-C", tarPath(extracted)], { encoding: "utf8" });
   assert.equal(unpack.status, 0, unpack.stderr);
   assert.equal(statSync(resolve(extracted, "bin/dayorder-api")).mode & 0o777, 0o755);
   assert.equal(statSync(resolve(extracted, "scripts/start-api.sh")).mode & 0o777, 0o755);
