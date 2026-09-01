@@ -77,16 +77,21 @@ INSERT INTO dayorder.users (
     id, email, normalized_email, display_name, password_hash, status, email_verified_at
 ) VALUES
     ($1::uuid, 'a@example.test', 'a@example.test', 'User A', 'hash-a', 'active', now()),
-    ($2::uuid, 'b@example.test', 'b@example.test', 'User B', 'hash-b', 'active', now());
+    ($2::uuid, 'b@example.test', 'b@example.test', 'User B', 'hash-b', 'active', now())
+`, userA, userB)
+	if err != nil {
+		t.Fatalf("seed tenant users: %v", err)
+	}
+	_, err = pool.Exec(ctx, `
 INSERT INTO dayorder.goals (
     id, user_id, title, why, area, metric_type, target_value, current_value,
     unit, start_date, status, health
 ) VALUES
-    ($3::uuid, $1::uuid, 'Goal A', '', 'work', 'project', 100, 0, '%', current_date, 'active', 'normal'),
-    ($4::uuid, $2::uuid, 'Goal B', '', 'life', 'project', 100, 0, '%', current_date, 'active', 'normal');
-`, userA, userB, goalA, goalB)
+    ($1::uuid, $2::uuid, 'Goal A', '', 'work', 'project', 100, 0, '%', current_date, 'active', 'normal'),
+    ($3::uuid, $4::uuid, 'Goal B', '', 'life', 'project', 100, 0, '%', current_date, 'active', 'normal')
+`, goalA, userA, goalB, userB)
 	if err != nil {
-		t.Fatalf("seed tenant rows: %v", err)
+		t.Fatalf("seed tenant goals: %v", err)
 	}
 }
 

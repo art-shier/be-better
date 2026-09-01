@@ -45,9 +45,11 @@ func TestAgentRepositoryPersistsNestedRunAndEnforcesOwnership(t *testing.T) {
 		email := "agent-" + userID.String() + "@example.com"
 		if _, err = migrationPool.Exec(ctx, `
 INSERT INTO dayorder.users (id, email, normalized_email, display_name, password_hash, status, email_verified_at)
-VALUES ($1, $2, $2, 'Agent User', 'test-password-hash', 'active', now());
-INSERT INTO dayorder.user_settings (user_id) VALUES ($1);
+VALUES ($1, $2, $2, 'Agent User', 'test-password-hash', 'active', now())
 `, userID, email); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = migrationPool.Exec(ctx, `INSERT INTO dayorder.user_settings (user_id) VALUES ($1)`, userID); err != nil {
 			t.Fatal(err)
 		}
 	}

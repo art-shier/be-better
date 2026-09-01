@@ -45,8 +45,12 @@ func TestDatabaseRolesHaveMinimumPrivileges(t *testing.T) {
 	if _, err := apiPool.Exec(ctx, "SELECT * FROM dayorder.login_throttles"); err == nil {
 		t.Fatal("dayorder_api unexpectedly read authentication throttle storage directly")
 	}
-	if _, err := workerPool.Exec(ctx, "SELECT * FROM dayorder.goals"); err == nil {
-		t.Fatal("dayorder_worker unexpectedly scanned a tenant business table")
+	var visibleGoals int
+	if err := workerPool.QueryRow(ctx, "SELECT count(*) FROM dayorder.goals").Scan(&visibleGoals); err != nil {
+		t.Fatalf("dayorder_worker cannot query a tenant business table through RLS: %v", err)
+	}
+	if visibleGoals != 0 {
+		t.Fatalf("dayorder_worker visible goals without tenant context = %d, want 0", visibleGoals)
 	}
 
 	var claimed int

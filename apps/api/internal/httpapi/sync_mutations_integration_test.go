@@ -50,11 +50,17 @@ func TestSyncMutationsUseIndependentPostgresTransactionsAndEnforceDeviceAndRLS(t
 		email := "sync-http-" + identity.userID.String() + "@example.com"
 		if _, err = migrationPool.Exec(ctx, `
 INSERT INTO dayorder.users (id, email, normalized_email, display_name, password_hash, status, email_verified_at)
-VALUES ($1, $2, $2, $3, 'unused', 'active', now());
-INSERT INTO dayorder.user_settings (user_id) VALUES ($1);
+VALUES ($1, $2, $2, $3, 'unused', 'active', now())
+`, identity.userID, email, "Sync User "+string(rune('A'+index))); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = migrationPool.Exec(ctx, `INSERT INTO dayorder.user_settings (user_id) VALUES ($1)`, identity.userID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = migrationPool.Exec(ctx, `
 INSERT INTO dayorder.user_devices (id, user_id, device_name, platform)
-VALUES ($4, $1, 'integration-test', 'web');
-`, identity.userID, email, "Sync User "+string(rune('A'+index)), identity.deviceID); err != nil {
+VALUES ($1, $2, 'integration-test', 'web')
+`, identity.deviceID, identity.userID); err != nil {
 			t.Fatal(err)
 		}
 	}

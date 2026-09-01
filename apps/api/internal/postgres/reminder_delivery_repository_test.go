@@ -54,10 +54,14 @@ VALUES ($1, $2, $2, '日序用户', 'test-password-hash', 'active', now())
 	}
 	if _, err = migrationPool.Exec(ctx, `
 INSERT INTO dayorder.calendar_events (id, user_id, title, start_at, end_at, timezone, kind)
-VALUES ($1, $2, '复盘', $3, $3 + interval '1 hour', 'Asia/Shanghai', 'personal');
+VALUES ($1, $2, '复盘', $3, $3 + interval '1 hour', 'Asia/Shanghai', 'personal')
+`, eventID, userID, startAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = migrationPool.Exec(ctx, `
 INSERT INTO dayorder.calendar_event_reminders (id, user_id, event_id, offset_minutes, channel, scheduled_at)
-VALUES ($4, $2, $1, 60, 'email', $5);
-`, eventID, userID, startAt, reminderID, scheduledAt); err != nil {
+VALUES ($1, $2, $3, 60, 'email', $4)
+`, reminderID, userID, eventID, scheduledAt); err != nil {
 		t.Fatal(err)
 	}
 
