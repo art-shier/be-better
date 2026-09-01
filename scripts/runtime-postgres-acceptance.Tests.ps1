@@ -51,6 +51,22 @@ if ($caught.Exception.Message -ne "simulated transport failure") {
 
 Write-Host "PASS: Invoke-Json preserves transport exceptions without an HTTP response."
 
+$newMutationHeadersDefinition = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "New-MutationHeaders"
+}, $true)
+if ($null -eq $newMutationHeadersDefinition) {
+    throw "New-MutationHeaders was not found in runtime PostgreSQL acceptance script"
+}
+Invoke-Expression $newMutationHeadersDefinition.Extent.Text
+
+$mutationHeaders = New-MutationHeaders ([guid]::NewGuid().ToString()) 7
+if ($mutationHeaders["If-Match"] -ne '"7"') {
+    throw "New-MutationHeaders emitted an invalid If-Match entity tag: $($mutationHeaders["If-Match"])"
+}
+
+Write-Host "PASS: mutation versions use quoted If-Match entity tags."
+
 $writeProcessLogsDefinition = $ast.Find({
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Write-ProcessLogs"

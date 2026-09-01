@@ -137,7 +137,7 @@ function Invoke-Json {
 function New-MutationHeaders {
     param([string]$DeviceID, [int]$Version = 0)
     $headers = @{ "X-Device-ID" = $DeviceID; "Idempotency-Key" = [guid]::NewGuid().ToString() }
-    if ($Version -gt 0) { $headers["If-Match"] = [string]$Version }
+    if ($Version -gt 0) { $headers["If-Match"] = '"{0}"' -f $Version }
     return $headers
 }
 
