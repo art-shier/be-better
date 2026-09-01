@@ -34,6 +34,11 @@ requireMatch(compose, /internal:\s*true/, "the data network must be internal");
 requireMatch(compose, /read_only:\s*true/g, "runtime containers must use a read-only root filesystem");
 requireMatch(compose, /cap_drop:\s*\n\s*-\s*ALL/g, "runtime containers must drop Linux capabilities");
 rejectMatch(compose, /postgres:[\s\S]{0,900}?ports:/, "PostgreSQL must not publish a host port");
+requireMatch(
+  compose,
+  /pg_isready\s+-h\s+127\.0\.0\.1\s+-p\s+5432\s+-U\s+\$\$\{POSTGRES_USER\}\s+-d\s+\$\$\{POSTGRES_DB\}/,
+  "PostgreSQL health check must wait for the final TCP listener",
+);
 rejectMatch(compose, /(?:password|secret|token):[ \t]*(?!\$|\/run\/secrets|\{)[^\s#]+/i, "Compose must not contain inline secret values");
 requireMatch(caddy, /Strict-Transport-Security/i, "Caddy must emit HSTS");
 requireMatch(caddy, /reverse_proxy\s+api:8080/, "Caddy must proxy API traffic");
