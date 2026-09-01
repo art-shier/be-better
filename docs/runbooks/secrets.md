@@ -18,8 +18,11 @@ openssl rand -hex 32 > secrets/agent_http_key
 printf 'postgres://dayorder_migrator:%s@postgres:5432/dayorder?sslmode=disable&search_path=dayorder' "$(cat secrets/migrator_db_password)" > secrets/migration_database_url
 printf 'postgres://dayorder_api:%s@postgres:5432/dayorder?sslmode=disable' "$(cat secrets/api_db_password)" > secrets/api_database_url
 printf 'postgres://dayorder_worker:%s@postgres:5432/dayorder?sslmode=disable' "$(cat secrets/worker_db_password)" > secrets/worker_database_url
-chmod 600 secrets/*
+sudo chown "$(id -u):10001" secrets/*
+chmod 640 secrets/*
 ```
+
+`10001` 是 Compose 应用容器使用的只读密钥组；PostgreSQL 容器只额外加入该组。密钥仍由当前部署用户拥有并且只有所有者可写，其他宿主机用户不得拥有 GID 10001，也不得读取这些文件。
 
 把 `smtp_password` 和 `agent_http_key` 替换为供应商实际签发的值。以上数据库密码使用十六进制字符，因此放入 URL 时不需要额外转义。内部数据库流量只走 Docker 的 `data` 网络，PostgreSQL 没有主机端口；公网 TLS 在 Caddy 终止。
 
@@ -48,7 +51,7 @@ docker compose --env-file deploy/.env.production -f deploy/compose.yaml config
 数据库密码采用“数据库先接受新密码，再更新文件并重启消费者”的顺序：
 
 1. 使用管理员连接执行 `ALTER ROLE ... PASSWORD ...`。
-2. 原子替换对应密码文件和数据库 URL 文件，权限保持 `0600`。
+2. 原子替换对应密码文件和数据库 URL 文件，所有者保持为部署用户、组保持为 GID `10001`，权限保持 `0640`。
 3. 只重建受影响的 `api`、`worker` 或 `migrate` 容器。
 4. 验证 `/health/ready`、Worker 指标和登录流程。
 5. 观察 15 分钟日志与告警后关闭变更窗口。

@@ -6,7 +6,7 @@
 
 - DNS 已指向服务器，云防火墙只开放受限 SSH、TCP 80/443 和 UDP 443。
 - Docker Engine、Docker Compose v2、Git 与 PowerShell 7（`pwsh`）已安装。
-- `deploy/.env.production` 只包含公开配置，`deploy/secrets/*` 已按 [密钥手册](secrets.md) 创建并设为 `0600`。
+- `deploy/.env.production` 只包含公开配置，`deploy/secrets/*` 已按 [密钥手册](secrets.md) 创建，归当前部署用户和 GID `10001` 所有并设为 `0640`。
 - 要发布的 Git commit 已通过 CI；发布版本、commit SHA 和构建时间已经写入环境文件。
 - pgBackRest 同机仓库可用，并有异地加密副本。
 

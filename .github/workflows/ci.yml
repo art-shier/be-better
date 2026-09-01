@@ -85,7 +85,9 @@ jobs:
           printf '%s' 'postgres://dayorder_migrator:ci-migrator_db_password-0123456789abcdef0123456789abcdef@postgres:5432/dayorder?sslmode=disable&search_path=dayorder' > deploy/secrets/migration_database_url
           printf '%s' 'postgres://dayorder_api:ci-api_db_password-0123456789abcdef0123456789abcdef@postgres:5432/dayorder?sslmode=disable' > deploy/secrets/api_database_url
           printf '%s' 'postgres://dayorder_worker:ci-worker_db_password-0123456789abcdef0123456789abcdef@postgres:5432/dayorder?sslmode=disable' > deploy/secrets/worker_database_url
-          chmod 600 deploy/secrets/* deploy/.env.production
+          sudo chown "$(id -u):10001" deploy/secrets/*
+          chmod 640 deploy/secrets/*
+          chmod 600 deploy/.env.production
       - name: Validate Compose model
         run: docker compose --env-file deploy/.env.production -f deploy/compose.yaml config --quiet
       - name: Build immutable targets
