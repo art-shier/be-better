@@ -63,7 +63,7 @@ const deviceId = crypto.randomUUID();
 await request(`/api/v1/users/me/devices/${deviceId}`, {
   method: "PUT",
   expected: [201],
-  body: JSON.stringify({ deviceName: "Load smoke", platform: "node" }),
+  body: JSON.stringify({ deviceName: "Load smoke", platform: process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux" }),
 });
 
 let nextCycle = 0;

@@ -61,6 +61,8 @@ jobs:
       - name: Test runtime acceptance diagnostics
         shell: pwsh
         run: ./scripts/runtime-postgres-acceptance.Tests.ps1
+      - name: Test load smoke client
+        run: node --test ./scripts/load-smoke.test.mjs
       - name: Run PostgreSQL resource and synchronization acceptance
         shell: pwsh
         run: ./scripts/runtime-postgres-acceptance.ps1 -RequireDocker
