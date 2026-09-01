@@ -30,6 +30,11 @@ for (const image of ["NODE_IMAGE", "GO_IMAGE", "RUNTIME_IMAGE", "CADDY_IMAGE", "
 requireMatch(compose, /prom\/prometheus:[^\s]+@sha256:[a-f0-9]{64}/i, "Prometheus must be pinned by digest");
 requireMatch(compose, /prom\/node-exporter:[^\s]+@sha256:[a-f0-9]{64}/i, "Node Exporter must be pinned by digest");
 requireMatch(dockerfile, /^USER\s+[^0]/m, "runtime images must declare a non-root user");
+requireMatch(
+  dockerfile,
+  /setcap\s+-r\s+\/usr\/bin\/caddy/,
+  "the unprivileged Caddy image must remove its inherited bind-service capability",
+);
 requireMatch(compose, /internal:\s*true/, "the data network must be internal");
 requireMatch(compose, /read_only:\s*true/g, "runtime containers must use a read-only root filesystem");
 requireMatch(compose, /cap_drop:\s*\n\s*-\s*ALL/g, "runtime containers must drop Linux capabilities");

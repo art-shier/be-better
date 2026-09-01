@@ -82,7 +82,8 @@ LABEL org.opencontainers.image.title="DayOrder Web" \
 USER root
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
 COPY --from=web-build --chown=10001:10001 /source/apps/web/dist /srv
-RUN chown -R 10001:10001 /data /config /srv
+RUN setcap -r /usr/bin/caddy && \
+    chown -R 10001:10001 /data /config /srv
 USER 10001:10001
 EXPOSE 8080 8081 8443 2019
 
