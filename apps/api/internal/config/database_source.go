@@ -141,7 +141,7 @@ func ResolveDatabaseURL(lookup LookupFunc, environment Environment, explicitKey 
 
 	source, err := LoadConfigHubDatabaseSource(lookup)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s or ConfigHub database source: %w", explicitKey, err)
 	}
 	return source.RoleURL(environment, role)
 }

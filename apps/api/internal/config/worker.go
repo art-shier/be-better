@@ -38,7 +38,14 @@ type WorkerConfig struct {
 	Agent          WorkerAgentConfig
 }
 
-func LoadWorker() (WorkerConfig, error) { return LoadWorkerFrom(os.LookupEnv) }
+func LoadWorker() (WorkerConfig, error) {
+	config, err := LoadWorkerFrom(os.LookupEnv)
+	if err != nil {
+		return WorkerConfig{}, err
+	}
+	ScrubConfigHubDatabaseEnvironment()
+	return config, nil
+}
 
 func LoadWorkerFrom(lookup LookupFunc) (WorkerConfig, error) {
 	if lookup == nil {
@@ -48,10 +55,9 @@ func LoadWorkerFrom(lookup LookupFunc) (WorkerConfig, error) {
 	if environment != Development && environment != Test && environment != Production {
 		return WorkerConfig{}, errors.New("DAYORDER_ENV must be development, test, or production")
 	}
-	databaseURL := strings.TrimSpace(valueOr(lookup, "WORKER_DATABASE_URL", ""))
-	parsedDatabaseURL, err := url.Parse(databaseURL)
-	if databaseURL == "" || err != nil || parsedDatabaseURL.Host == "" || (parsedDatabaseURL.Scheme != "postgres" && parsedDatabaseURL.Scheme != "postgresql") {
-		return WorkerConfig{}, errors.New("WORKER_DATABASE_URL must be a valid PostgreSQL URL")
+	databaseURL, err := ResolveDatabaseURL(lookup, environment, "WORKER_DATABASE_URL", DatabaseRoleWorker)
+	if err != nil {
+		return WorkerConfig{}, err
 	}
 	maxConns, err := parseInt32(lookup, "DAYORDER_WORKER_DB_MAX_CONNS", 5)
 	if err != nil || maxConns < 1 {

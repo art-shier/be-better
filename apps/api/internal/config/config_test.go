@@ -1,15 +1,81 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
+func TestLoadFallsBackToConfigHubAPIURL(t *testing.T) {
+	values := validConfigHubValues()
+
+	cfg, err := LoadFrom(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPostgresURL(t, cfg.Database.URL, "dayorder_api", "api-secret", "dayorder-test", false)
+}
+
+func TestLoadKeepsNativeURLPriorityOverInvalidConfigHubFields(t *testing.T) {
+	const nativeURL = "postgresql://native-api:native-secret@native.example:5432/native-db"
+	values := map[string]string{
+		"DATABASE_URL": nativeURL,
+		"db_address":   "invalid/address",
+	}
+
+	cfg, err := LoadFrom(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Database.URL != nativeURL {
+		t.Fatal("native API URL did not retain priority")
+	}
+}
+
+func TestLoadScrubsConfigHubDatabaseEnvironmentAfterSuccess(t *testing.T) {
+	setConfigHubDatabaseEnvironment(t, validConfigHubValues())
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("DAYORDER_ENV", "development")
+
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range configHubDatabaseKeysForTest() {
+		if _, ok := os.LookupEnv(key); ok {
+			t.Fatalf("%s remained in the process environment", key)
+		}
+	}
+}
+
+func TestLoadDoesNotScrubConfigHubDatabaseEnvironmentAfterFailure(t *testing.T) {
+	values := validConfigHubValues()
+	values["db_port"] = "invalid"
+	setConfigHubDatabaseEnvironment(t, values)
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("DAYORDER_ENV", "development")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("invalid ConfigHub database source unexpectedly loaded")
+	}
+	for _, key := range configHubDatabaseKeysForTest() {
+		if _, ok := os.LookupEnv(key); !ok {
+			t.Fatalf("%s was scrubbed after a failed load", key)
+		}
+	}
+}
+
 func mapLookup(values map[string]string) LookupFunc {
 	return func(key string) (string, bool) {
 		value, ok := values[key]
 		return value, ok
+	}
+}
+
+func setConfigHubDatabaseEnvironment(t *testing.T, values map[string]string) {
+	t.Helper()
+	for _, key := range configHubDatabaseKeysForTest() {
+		t.Setenv(key, values[key])
 	}
 }
 

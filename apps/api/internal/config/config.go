@@ -44,7 +44,12 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	return LoadFrom(os.LookupEnv)
+	config, err := LoadFrom(os.LookupEnv)
+	if err != nil {
+		return Config{}, err
+	}
+	ScrubConfigHubDatabaseEnvironment()
+	return config, nil
 }
 
 func LoadFrom(lookup LookupFunc) (Config, error) {
@@ -56,13 +61,9 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 		return Config{}, fmt.Errorf("DAYORDER_ENV must be development, test, or production")
 	}
 
-	databaseURL := strings.TrimSpace(valueOr(lookup, "DATABASE_URL", ""))
-	if databaseURL == "" {
-		return Config{}, errors.New("DATABASE_URL is required")
-	}
-	parsedDatabaseURL, err := url.Parse(databaseURL)
-	if err != nil || (parsedDatabaseURL.Scheme != "postgres" && parsedDatabaseURL.Scheme != "postgresql") || parsedDatabaseURL.Host == "" {
-		return Config{}, errors.New("DATABASE_URL must be a valid PostgreSQL URL")
+	databaseURL, err := ResolveDatabaseURL(lookup, environment, "DATABASE_URL", DatabaseRoleAPI)
+	if err != nil {
+		return Config{}, err
 	}
 
 	maxConns, err := parseInt32(lookup, "DAYORDER_DB_MAX_CONNS", 20)

@@ -1,9 +1,51 @@
 package config
 
 import (
+	"os"
 	"testing"
 	"time"
 )
+
+func TestLoadWorkerFallsBackToConfigHubWorkerURL(t *testing.T) {
+	values := validConfigHubValues()
+
+	cfg, err := LoadWorkerFrom(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPostgresURL(t, cfg.Database.URL, "dayorder_worker", "worker-secret", "dayorder-test", false)
+}
+
+func TestLoadWorkerKeepsNativeURLPriorityOverInvalidConfigHubFields(t *testing.T) {
+	const nativeURL = "postgresql://native-worker:native-secret@native.example:5432/native-db"
+	values := map[string]string{
+		"WORKER_DATABASE_URL": nativeURL,
+		"db_address":          "invalid/address",
+	}
+
+	cfg, err := LoadWorkerFrom(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Database.URL != nativeURL {
+		t.Fatal("native Worker URL did not retain priority")
+	}
+}
+
+func TestLoadWorkerScrubsConfigHubDatabaseEnvironmentAfterSuccess(t *testing.T) {
+	setConfigHubDatabaseEnvironment(t, validConfigHubValues())
+	t.Setenv("WORKER_DATABASE_URL", "")
+	t.Setenv("DAYORDER_ENV", "development")
+
+	if _, err := LoadWorker(); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range configHubDatabaseKeysForTest() {
+		if _, ok := os.LookupEnv(key); ok {
+			t.Fatalf("%s remained in the process environment", key)
+		}
+	}
+}
 
 func TestLoadWorkerConfigRequiresProductionSMTPAndSecureTransport(t *testing.T) {
 	base := map[string]string{
