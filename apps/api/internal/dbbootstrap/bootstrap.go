@@ -178,13 +178,19 @@ func databaseAccessStatements(database string) []sqlStatement {
 	}
 }
 
-func schemaStatements() []sqlStatement {
-	return []sqlStatement{
-		{query: "CREATE SCHEMA dayorder AUTHORIZATION dayorder_migrator"},
-		{query: "REVOKE CREATE ON SCHEMA public FROM PUBLIC"},
-		{query: "REVOKE ALL ON SCHEMA dayorder FROM PUBLIC"},
-		{query: "GRANT USAGE, CREATE ON SCHEMA dayorder TO dayorder_migrator"},
+func administratorSchemaStatements() []sqlStatement {
+	return []sqlStatement{{query: "REVOKE CREATE ON SCHEMA public FROM PUBLIC"}}
+}
+
+func migratorSchemaStatements(schemaExists bool) []sqlStatement {
+	statements := make([]sqlStatement, 0, 3)
+	if !schemaExists {
+		statements = append(statements, sqlStatement{query: "CREATE SCHEMA dayorder AUTHORIZATION dayorder_migrator"})
 	}
+	return append(statements,
+		sqlStatement{query: "REVOKE ALL ON SCHEMA dayorder FROM PUBLIC"},
+		sqlStatement{query: "GRANT USAGE, CREATE ON SCHEMA dayorder TO dayorder_migrator"},
+	)
 }
 
 func inspectAdministrator(ctx context.Context, connection *pgx.Conn) (string, error) {
@@ -313,32 +319,45 @@ func ensureDatabase(ctx context.Context, connection *pgx.Conn, database, adminis
 }
 
 func configureDatabase(ctx context.Context, source config.ConfigHubDatabaseSource, database string) error {
-	connection, err := pgx.Connect(ctx, source.AdminURL(database))
+	administrator, err := pgx.Connect(ctx, source.AdminURL(database))
 	if err != nil {
 		return safeDatabaseError("connect to database "+database, err)
 	}
-	defer func() { _ = connection.Close(context.Background()) }()
+	defer func() { _ = administrator.Close(context.Background()) }()
 
 	for _, statement := range databaseAccessStatements(database) {
-		if _, err = connection.Exec(ctx, statement.query, statement.arguments...); err != nil {
+		if _, err = administrator.Exec(ctx, statement.query, statement.arguments...); err != nil {
 			return safeDatabaseError("configure database access for "+database, err)
 		}
 	}
+	for _, statement := range administratorSchemaStatements() {
+		if _, err = administrator.Exec(ctx, statement.query, statement.arguments...); err != nil {
+			return safeDatabaseError("configure public schema in database "+database, err)
+		}
+	}
 
-	owner, exists, err := inspectSchemaOwner(ctx, connection)
+	owner, exists, err := inspectSchemaOwner(ctx, administrator)
 	if err != nil {
 		return err
 	}
-	statements := schemaStatements()
-	if !exists {
-		if _, err = connection.Exec(ctx, statements[0].query); err != nil {
-			return safeDatabaseError("create dayorder schema in database "+database, err)
-		}
-	} else if owner != string(config.DatabaseRoleMigrator) {
+	if exists && owner != string(config.DatabaseRoleMigrator) {
 		return fmt.Errorf("database %s has a dayorder schema ownership conflict", database)
 	}
-	for _, statement := range statements[1:] {
-		if _, err = connection.Exec(ctx, statement.query, statement.arguments...); err != nil {
+	environment, err := environmentForDatabase(database)
+	if err != nil {
+		return err
+	}
+	migratorURL, err := source.RoleURL(environment, config.DatabaseRoleMigrator)
+	if err != nil {
+		return err
+	}
+	migrator, err := pgx.Connect(ctx, migratorURL)
+	if err != nil {
+		return safeDatabaseError("connect to database "+database+" as "+string(config.DatabaseRoleMigrator), err)
+	}
+	defer func() { _ = migrator.Close(context.Background()) }()
+	for _, statement := range migratorSchemaStatements(exists) {
+		if _, err = migrator.Exec(ctx, statement.query, statement.arguments...); err != nil {
 			return safeDatabaseError("configure dayorder schema in database "+database, err)
 		}
 	}

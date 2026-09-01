@@ -33,6 +33,17 @@ func TestLoadKeepsNativeURLPriorityOverInvalidConfigHubFields(t *testing.T) {
 	}
 }
 
+func TestLoadKeepsPathlessNativeURLCompatibility(t *testing.T) {
+	const nativeURL = "postgresql://native-api@native.example:5432"
+	cfg, err := LoadFrom(mapLookup(map[string]string{"DATABASE_URL": nativeURL}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Database.URL != nativeURL {
+		t.Fatal("pathless native API URL was not returned unchanged")
+	}
+}
+
 func TestLoadScrubsConfigHubDatabaseEnvironmentAfterSuccess(t *testing.T) {
 	setConfigHubDatabaseEnvironment(t, validConfigHubValues())
 	t.Setenv("DATABASE_URL", "")

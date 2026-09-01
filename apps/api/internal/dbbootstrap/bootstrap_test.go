@@ -100,7 +100,8 @@ func TestBootstrapGeneratedSQLContainsNoDestructiveOperations(t *testing.T) {
 		statements = append(statements, sqlStatement{query: createDatabaseStatement(database)})
 		statements = append(statements, databaseAccessStatements(database)...)
 	}
-	statements = append(statements, schemaStatements()...)
+	statements = append(statements, administratorSchemaStatements()...)
+	statements = append(statements, migratorSchemaStatements(false)...)
 
 	forbidden := regexp.MustCompile(`(?i)\b(DROP\s+(DATABASE|SCHEMA|ROLE)|TRUNCATE)\b`)
 	for _, statement := range statements {
@@ -127,6 +128,30 @@ func TestDatabaseStatementsUseOnlyFixedQuotedTargetsAndRoles(t *testing.T) {
 		if strings.Contains(joined, "dayorder_backup") || strings.Contains(joined, "dayorder_monitor") {
 			t.Fatalf("database access SQL for %s included an out-of-scope role", database)
 		}
+	}
+}
+
+func TestSchemaStatementsKeepOwnerOperationsOnMigratorConnection(t *testing.T) {
+	administratorSQL := joinQueries(administratorSchemaStatements())
+	if !strings.Contains(administratorSQL, "REVOKE CREATE ON SCHEMA public FROM PUBLIC") {
+		t.Fatal("administrator schema SQL does not secure the public schema")
+	}
+	if strings.Contains(administratorSQL, "SCHEMA dayorder") {
+		t.Fatal("administrator schema SQL attempts an owner-only dayorder schema operation")
+	}
+
+	newSchemaSQL := joinQueries(migratorSchemaStatements(false))
+	for _, expected := range []string{
+		"CREATE SCHEMA dayorder AUTHORIZATION dayorder_migrator",
+		"REVOKE ALL ON SCHEMA dayorder FROM PUBLIC",
+		"GRANT USAGE, CREATE ON SCHEMA dayorder TO dayorder_migrator",
+	} {
+		if !strings.Contains(newSchemaSQL, expected) {
+			t.Fatalf("new-schema Migrator SQL is missing %q", expected)
+		}
+	}
+	if existingSchemaSQL := joinQueries(migratorSchemaStatements(true)); strings.Contains(existingSchemaSQL, "CREATE SCHEMA") {
+		t.Fatal("existing-schema Migrator SQL attempts to recreate the schema")
 	}
 }
 

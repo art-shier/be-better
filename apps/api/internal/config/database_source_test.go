@@ -108,6 +108,50 @@ func TestLoadConfigHubDatabaseSourceRejectsEmptyCredentials(t *testing.T) {
 	}
 }
 
+func TestLoadConfigHubDatabaseSourceRejectsReusedPasswordsWithoutEchoingValues(t *testing.T) {
+	tests := []struct {
+		first  string
+		second string
+	}{
+		{first: "db_password", second: "db_migrator_password"},
+		{first: "db_password", second: "db_api_password"},
+		{first: "db_password", second: "db_worker_password"},
+		{first: "db_migrator_password", second: "db_api_password"},
+		{first: "db_migrator_password", second: "db_worker_password"},
+		{first: "db_api_password", second: "db_worker_password"},
+	}
+	for _, test := range tests {
+		t.Run(test.first+"_and_"+test.second, func(t *testing.T) {
+			values := validConfigHubValues()
+			const reusedPassword = "reused-password-must-not-appear"
+			values[test.first] = reusedPassword
+			values[test.second] = reusedPassword
+
+			_, err := LoadConfigHubDatabaseSource(mapLookup(values))
+			if err == nil || !strings.Contains(err.Error(), test.first) || !strings.Contains(err.Error(), test.second) {
+				t.Fatalf("reused password keys returned error %v", err)
+			}
+			if strings.Contains(err.Error(), reusedPassword) {
+				t.Fatal("reused password value was echoed in the error")
+			}
+		})
+	}
+}
+
+func TestLoadConfigHubDatabaseSourceRejectsRuntimeRoleAdministrator(t *testing.T) {
+	for _, username := range []string{"dayorder_migrator", "dayorder_api", "dayorder_worker", "DAYORDER_API"} {
+		t.Run(username, func(t *testing.T) {
+			values := validConfigHubValues()
+			values["db_username"] = username
+
+			_, err := LoadConfigHubDatabaseSource(mapLookup(values))
+			if err == nil || !strings.Contains(err.Error(), "db_username") {
+				t.Fatalf("reserved administrator username returned error %v", err)
+			}
+		})
+	}
+}
+
 func TestLoadConfigHubDatabaseSourceRejectsInvalidPortsWithoutEchoingValues(t *testing.T) {
 	for _, value := range []string{"not-a-port", "0", "65536", "-1"} {
 		t.Run(value, func(t *testing.T) {
@@ -167,7 +211,7 @@ func TestResolveDatabaseURLPrefersValidExplicitURL(t *testing.T) {
 
 func TestResolveDatabaseURLRejectsInvalidExplicitURLWithoutFallingBack(t *testing.T) {
 	values := validConfigHubValues()
-	values["DATABASE_URL"] = "postgresql://should-not-leak"
+	values["DATABASE_URL"] = "postgresql:///should-not-leak"
 
 	_, err := ResolveDatabaseURL(mapLookup(values), Development, "DATABASE_URL", DatabaseRoleAPI)
 	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {

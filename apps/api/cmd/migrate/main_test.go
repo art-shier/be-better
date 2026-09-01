@@ -36,6 +36,26 @@ func TestResolveDatabaseURLPrefersNativeEnvironmentURL(t *testing.T) {
 	}
 }
 
+func TestResolveDatabaseURLKeepsPathlessExplicitURLCompatibility(t *testing.T) {
+	const flagURL = "postgresql://flag-user@flag.example:5432"
+	got, err := resolveDatabaseURL(flagURL, lookupFromMap(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != flagURL {
+		t.Fatal("pathless migration flag URL was not returned unchanged")
+	}
+
+	const nativeURL = "postgresql://native-user@native.example:5432"
+	got, err = resolveDatabaseURL("", lookupFromMap(map[string]string{"MIGRATION_DATABASE_URL": nativeURL}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nativeURL {
+		t.Fatal("pathless native Migrator URL was not returned unchanged")
+	}
+}
+
 func TestResolveDatabaseURLFallsBackToConfigHubMigrator(t *testing.T) {
 	got, err := resolveDatabaseURL("", lookupFromMap(validConfigHubValuesForMigration()))
 	if err != nil {

@@ -111,7 +111,7 @@ PostgreSQL 不发布主机端口；公网只开放 Caddy 的 80/443。上线、�
 
 ## ConfigHub PostgreSQL 配置
 
-ConfigHub CLI 在当前接入中是只读客户端：配置值需要在 ConfigHub Web 中维护，CLI 只负责读取并注入当前进程。数据库配置固定存放在项目/环境 `shier/prod`，需要以下七个键：`db_address`、`db_port`、`db_username`、`db_password`、`db_migrator_password`、`db_api_password`、`db_worker_password`。本地 `.confighub.yaml` 包含 Machine Token，已被 Git 忽略，不得复制到其他项目文件。
+ConfigHub CLI 在当前接入中是只读客户端：配置值需要在 ConfigHub Web 中维护，CLI 只负责读取并注入当前进程。数据库配置固定存放在项目/环境 `shier/prod`，需要以下七个键：`db_address`、`db_port`、`db_username`、`db_password`、`db_migrator_password`、`db_api_password`、`db_worker_password`。`db_username` 不得使用三个固定运行时角色名，四个数据库密码必须彼此不同。本地 `.confighub.yaml` 包含 Machine Token，已被 Git 忽略，不得复制到其他项目文件。
 
 首次初始化或角色密码轮换时执行：
 
@@ -143,9 +143,9 @@ npm run config:dev:worker
 
 | 变量 | 作用 |
 | --- | --- |
-| `DATABASE_URL` | API 受限角色 PostgreSQL URL，必填 |
-| `MIGRATION_DATABASE_URL` | Migration 角色 PostgreSQL URL |
-| `WORKER_DATABASE_URL` | Worker 受限角色 PostgreSQL URL |
+| `DATABASE_URL` | API PostgreSQL URL 显式覆盖；未设置时开发/生产环境回退到 ConfigHub |
+| `MIGRATION_DATABASE_URL` | Migration PostgreSQL URL 显式覆盖；未设置时开发/生产环境回退到 ConfigHub |
+| `WORKER_DATABASE_URL` | Worker PostgreSQL URL 显式覆盖；未设置时开发/生产环境回退到 ConfigHub |
 | `DAYORDER_ENV` | `development`、`test` 或 `production` |
 | `DAYORDER_ADDR` | API 监听地址 |
 | `DAYORDER_PUBLIC_URL` | 邮件链接和公开服务根地址；生产必须 HTTPS |

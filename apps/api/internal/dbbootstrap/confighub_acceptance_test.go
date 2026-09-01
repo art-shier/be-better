@@ -68,11 +68,11 @@ func TestConfigHubAcceptance(t *testing.T) {
 	assertAcceptanceAPIRegistrationGraph(t, ctx, apiPool)
 	assertAcceptanceWorkerCanReadOutboxMetrics(t, ctx, source)
 
-	admin, err := pgx.Connect(ctx, source.AdminURL("dayorder-test"))
+	migrator, err := pgx.Connect(ctx, migrationURL)
 	if err != nil {
-		t.Fatal("connect to dayorder-test for acceptance cleanup")
+		t.Fatal("connect to dayorder-test as Migrator for acceptance inspection and cleanup")
 	}
-	defer func() { _ = admin.Close(context.Background()) }()
+	defer func() { _ = migrator.Close(context.Background()) }()
 
 	server := httptest.NewServer(handler)
 	defer server.Close()
@@ -95,7 +95,7 @@ func TestConfigHubAcceptance(t *testing.T) {
 	defer func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cleanupCancel()
-		if _, cleanupErr := admin.Exec(cleanupCtx, `
+		if _, cleanupErr := migrator.Exec(cleanupCtx, `
 DELETE FROM dayorder.users
 WHERE id = $1 OR normalized_email = lower(btrim($2))`, accountID, email); cleanupErr != nil {
 			t.Errorf("clean unique dayorder-test acceptance account: %v", cleanupErr)
@@ -115,7 +115,7 @@ WHERE id = $1 OR normalized_email = lower(btrim($2))`, accountID, email); cleanu
 	accountID = registered.User.ID
 
 	var verificationToken string
-	if err = admin.QueryRow(ctx, `
+	if err = migrator.QueryRow(ctx, `
 SELECT payload ->> 'token'
 FROM dayorder.outbox_events
 WHERE user_id = $1 AND event_type = 'email.verification.requested'
@@ -308,9 +308,18 @@ func assertAcceptanceAPICannotCreateTables(t *testing.T, ctx context.Context, po
 
 func assertAcceptanceAPIRegistrationGraph(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	var canSelectUsers bool
+	var canSelectUsers, canInsertOutbox, canSelectOutbox bool
 	if err := pool.QueryRow(ctx, "SELECT pg_catalog.has_table_privilege(current_user, 'dayorder.users', 'SELECT')").Scan(&canSelectUsers); err != nil || !canSelectUsers {
 		t.Fatalf("dayorder_api users SELECT privilege = %t", canSelectUsers)
+	}
+	if err := pool.QueryRow(ctx, `
+SELECT
+    pg_catalog.has_table_privilege(current_user, 'dayorder.outbox_events', 'INSERT'),
+    pg_catalog.has_table_privilege(current_user, 'dayorder.outbox_events', 'SELECT')`).Scan(&canInsertOutbox, &canSelectOutbox); err != nil {
+		t.Fatal("inspect dayorder_api Outbox privileges")
+	}
+	if !canInsertOutbox || canSelectOutbox {
+		t.Fatalf("dayorder_api Outbox privileges: insert=%t select=%t", canInsertOutbox, canSelectOutbox)
 	}
 	transaction, err := pool.Begin(ctx)
 	if err != nil {

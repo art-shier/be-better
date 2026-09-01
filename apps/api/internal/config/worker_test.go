@@ -32,6 +32,17 @@ func TestLoadWorkerKeepsNativeURLPriorityOverInvalidConfigHubFields(t *testing.T
 	}
 }
 
+func TestLoadWorkerKeepsPathlessNativeURLCompatibility(t *testing.T) {
+	const nativeURL = "postgresql://native-worker@native.example:5432"
+	cfg, err := LoadWorkerFrom(mapLookup(map[string]string{"WORKER_DATABASE_URL": nativeURL}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Database.URL != nativeURL {
+		t.Fatal("pathless native Worker URL was not returned unchanged")
+	}
+}
+
 func TestLoadWorkerScrubsConfigHubDatabaseEnvironmentAfterSuccess(t *testing.T) {
 	setConfigHubDatabaseEnvironment(t, validConfigHubValues())
 	t.Setenv("WORKER_DATABASE_URL", "")

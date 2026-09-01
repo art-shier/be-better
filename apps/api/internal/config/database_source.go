@@ -76,6 +76,27 @@ func LoadConfigHubDatabaseSource(lookup LookupFunc) (ConfigHubDatabaseSource, er
 	if err != nil {
 		return ConfigHubDatabaseSource{}, err
 	}
+	for _, role := range []DatabaseRole{DatabaseRoleMigrator, DatabaseRoleAPI, DatabaseRoleWorker} {
+		if strings.EqualFold(username, string(role)) {
+			return ConfigHubDatabaseSource{}, errors.New("db_username must not match a DayOrder runtime role")
+		}
+	}
+	passwords := []struct {
+		key   string
+		value string
+	}{
+		{key: "db_password", value: adminPassword},
+		{key: "db_migrator_password", value: migratorPassword},
+		{key: "db_api_password", value: apiPassword},
+		{key: "db_worker_password", value: workerPassword},
+	}
+	for first := range passwords {
+		for second := first + 1; second < len(passwords); second++ {
+			if passwords[first].value == passwords[second].value {
+				return ConfigHubDatabaseSource{}, fmt.Errorf("%s and %s must use different values", passwords[first].key, passwords[second].key)
+			}
+		}
+	}
 
 	return ConfigHubDatabaseSource{
 		Address:          address,
@@ -133,7 +154,7 @@ func ResolveDatabaseURL(lookup LookupFunc, environment Environment, explicitKey 
 	if value, ok := lookup(explicitKey); ok && strings.TrimSpace(value) != "" {
 		candidate := strings.TrimSpace(value)
 		parsed, err := url.Parse(candidate)
-		if err != nil || parsed.Host == "" || parsed.Path == "" || parsed.Path == "/" || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") {
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") {
 			return "", fmt.Errorf("%s must be a valid PostgreSQL URL", explicitKey)
 		}
 		return candidate, nil
