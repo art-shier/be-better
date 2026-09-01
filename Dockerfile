@@ -81,9 +81,9 @@ LABEL org.opencontainers.image.title="DayOrder Web" \
       org.opencontainers.image.created="${CREATED}"
 USER root
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
-COPY --from=web-build --chown=caddy:caddy /source/apps/web/dist /srv
-RUN chown -R caddy:caddy /data /config /srv
-USER caddy
+COPY --from=web-build --chown=10001:10001 /source/apps/web/dist /srv
+RUN chown -R 10001:10001 /data /config /srv
+USER 10001:10001
 EXPOSE 8080 8081 8443 2019
 
 FROM ${POSTGRES_IMAGE} AS postgres
