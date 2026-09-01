@@ -46,6 +46,23 @@ function Stop-ProcessSafe {
 function Stop-Api { Stop-ProcessSafe $script:apiProcess; $script:apiProcess = $null }
 function Stop-Worker { Stop-ProcessSafe $script:workerProcess; $script:workerProcess = $null }
 
+function Write-ProcessLogs {
+    param([string]$LogRoot)
+    foreach ($fileName in @("api.stdout.log", "api.stderr.log", "worker.stdout.log", "worker.stderr.log")) {
+        $path = Join-Path $LogRoot $fileName
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        Write-Host "::group::Runtime process log: $fileName"
+        $content = Get-Content -LiteralPath $path -Raw
+        if ([string]::IsNullOrWhiteSpace($content)) {
+            Write-Host "<empty>"
+        }
+        else {
+            Write-Host $content.TrimEnd()
+        }
+        Write-Host "::endgroup::"
+    }
+}
+
 function Start-Api {
     param([string]$Binary)
     $arguments = @{
@@ -103,9 +120,11 @@ function Invoke-Json {
         $responseHeaders = $response.Headers
     }
     catch {
-        if ($null -eq $_.Exception.Response) { throw }
-        $status = [int]$_.Exception.Response.StatusCode
-        $responseHeaders = $_.Exception.Response.Headers
+        $responseProperty = $_.Exception.PSObject.Properties["Response"]
+        if ($null -eq $responseProperty -or $null -eq $responseProperty.Value) { throw }
+        $errorResponse = $responseProperty.Value
+        $status = [int]$errorResponse.StatusCode
+        $responseHeaders = $errorResponse.Headers
         $content = [string]$_.ErrorDetails.Message
     }
     $parsed = $null
@@ -341,6 +360,17 @@ try {
     Assert-True $true "Worker restarts cleanly against the persistent queue"
 
     Write-Host "PostgreSQL runtime acceptance passed: $checks checks."
+}
+catch {
+    $failure = $_
+    Write-Host "PostgreSQL runtime acceptance failed: $($failure.Exception.Message)"
+    try {
+        Write-ProcessLogs $tempRoot
+    }
+    catch {
+        Write-Warning "Failed to emit runtime process logs: $($_.Exception.Message)"
+    }
+    throw $failure
 }
 finally {
     Stop-Worker

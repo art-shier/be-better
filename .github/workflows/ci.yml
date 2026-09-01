@@ -58,6 +58,9 @@ jobs:
         with:
           go-version: "1.25.0"
           cache-dependency-path: apps/api/go.sum
+      - name: Test runtime acceptance diagnostics
+        shell: pwsh
+        run: ./scripts/runtime-postgres-acceptance.Tests.ps1
       - name: Run PostgreSQL resource and synchronization acceptance
         shell: pwsh
         run: ./scripts/runtime-postgres-acceptance.ps1 -RequireDocker
