@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -74,6 +75,14 @@ requireAbsentText(
   /type:\s*"undo"|\bwithAudit\b|function\s+audit\s*\(/,
   "guest AppData must not maintain a second local audit/undo system",
 );
+
+const configHubIgnoreCheck = spawnSync("git", ["check-ignore", "-q", "--", ".confighub.yaml"], {
+  cwd: root,
+  stdio: "ignore",
+});
+if (configHubIgnoreCheck.status !== 0) {
+  failures.push(".confighub.yaml: local ConfigHub Machine Token file must be ignored by Git");
+}
 
 if (failures.length > 0) {
   console.error("Architecture validation failed:\n");
