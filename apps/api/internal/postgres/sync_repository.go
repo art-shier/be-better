@@ -115,8 +115,16 @@ func (*SyncRepository) Resolve(
 		note, err = repository.GetNote(ctx, tx, userID, change.EntityID)
 		if err == nil {
 			note.Tags, err = repository.ListNoteTags(ctx, tx, userID, change.EntityID)
-			value = note
 		}
+		if err == nil {
+			var links []model.EntityLink
+			links, err = repository.ListNoteLinks(ctx, tx, userID, change.EntityID)
+			note.LinkedEntityIDs = make([]uuid.UUID, 0, len(links))
+			for _, link := range links {
+				note.LinkedEntityIDs = append(note.LinkedEntityIDs, link.TargetID)
+			}
+		}
+		value = note
 	case "daily_review":
 		value, err = NewContentRepository().GetReview(ctx, tx, userID, change.EntityID)
 	case "tag":
