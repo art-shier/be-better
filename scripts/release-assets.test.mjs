@@ -256,6 +256,17 @@ test("release builder exposes isolated CI targets and one complete local build",
   assert.equal(packageJson.scripts["test:release"], "node --test scripts/release-*.test.mjs");
 });
 
+test("release build entrypoints are executable after a Git checkout", () => {
+  for (const path of ["deploy/bare-metal/build-web.sh", "deploy/bare-metal/build-backend.sh"]) {
+    const result = spawnSync("git", ["ls-files", "--stage", "--", path], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^100755\s/, `${path} is not executable in the Git index`);
+  }
+});
+
 test("aggregate release builder installs one exact staged asset set and removes stale output", (t) => {
   const f = builderFixture(t);
   mkdirSync(f.output, { recursive: true });
