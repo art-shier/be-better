@@ -38,7 +38,12 @@ deployment_uid="$(id -u)"
 deployment_user="$(id -un)"
 [[ "$deployment_uid" =~ ^[0-9]+$ && -n "$deployment_user" && ! "$deployment_user" =~ [[:cntrl:]] ]] || \
   die "could not determine a safe deployment identity"
+confighub_path=""
 if [[ "$component" != web ]]; then
+  confighub_path="$(type -P confighub)" || die "confighub is required"
+  confighub_path="$(realpath -e -- "$confighub_path")" || die "cannot resolve the ConfigHub executable"
+  [[ "$confighub_path" == /* && -f "$confighub_path" && -x "$confighub_path" && ! "$confighub_path" =~ [[:cntrl:]] ]] || \
+    die "ConfigHub executable must be an absolute executable file"
   machine="$(uname -m)"
   case "$machine" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) die "unsupported architecture: $machine" ;; esac
 fi
@@ -416,17 +421,18 @@ print_configuration_instructions() {
   case "$component" in
     server)
       environment_files=(api.env migrate.env)
-      secret_files=(api_database_url migration_database_url auth_hmac_key)
+      secret_files=(auth_hmac_key)
       ;;
     worker)
       environment_files=(worker.env)
-      secret_files=(worker_database_url auth_hmac_key smtp_password agent_http_key)
+      secret_files=(auth_hmac_key smtp_password agent_http_key)
       ;;
     all)
       environment_files=(api.env migrate.env worker.env)
-      secret_files=(api_database_url worker_database_url migration_database_url auth_hmac_key smtp_password agent_http_key)
+      secret_files=(auth_hmac_key smtp_password agent_http_key)
       ;;
   esac
+  printf 'ConfigHub CLI reads %s/.confighub.yaml; ConfigHub errors stop deployment.\n' "$config_dir" >&2
   printf 'Required secret files (each must contain exactly one non-empty single-line value):\n' >&2
   for path in "${secret_files[@]}"; do printf '  %s/secrets/%s\n' "$config_dir" "$path" >&2; done
   printf 'Create/edit the files, then enforce these permissions before retrying:\n  touch' >&2
@@ -435,6 +441,12 @@ print_configuration_instructions() {
   for path in "${environment_files[@]}"; do printf ' %q' "$config_dir/$path" >&2; done
   for path in "${secret_files[@]}"; do printf ' %q' "$config_dir/secrets/$path" >&2; done
   printf '\n' >&2
+}
+
+preflight_confighub() {
+  if ! (cd -- "$config_dir" && "$confighub_path" run --project shier --env prod -- true); then
+    die "ConfigHub preflight failed"
+  fi
 }
 
 systemd_quote() {
@@ -483,6 +495,7 @@ write_unit() {
   if ! {
     printf '[Unit]\nDescription=DayOrder %s\nAfter=network-online.target\nWants=network-online.target\n\n' "$service"
     printf '[Service]\nType=simple\nWorkingDirectory=%s\n' "$(systemd_quote "$current")"
+    printf 'Environment=%s\n' "$(systemd_quote "DAYORDER_CONFIGHUB_EXECUTABLE=$confighub_path")"
     printf 'ExecStart=%s %s\n' "$(systemd_quote "$current/scripts/$script")" "$(systemd_quote "$config")"
     printf 'Restart=on-failure\nRestartSec=5\nTimeoutStopSec=%s\n\n[Install]\nWantedBy=default.target\n' "$timeout"
   } > "$temporary"; then
@@ -607,13 +620,13 @@ if (( config_created != 0 )); then
 fi
 case "$component" in
   server)
-    require_config api; require_config migrate; preflight_systemd; validate_systemd_value "$root"; preflight_unit dayorder-api
+    require_config api; require_config migrate; preflight_confighub; preflight_systemd; validate_systemd_value "$root"; preflight_unit dayorder-api
     ;;
   worker)
-    require_config worker; preflight_systemd; validate_systemd_value "$root"; preflight_unit dayorder-worker
+    require_config worker; preflight_confighub; preflight_systemd; validate_systemd_value "$root"; preflight_unit dayorder-worker
     ;;
   all)
-    require_config api; require_config migrate; require_config worker; preflight_systemd; validate_systemd_value "$root"
+    require_config api; require_config migrate; require_config worker; preflight_confighub; preflight_systemd; validate_systemd_value "$root"
     preflight_unit dayorder-api; preflight_unit dayorder-worker
     ;;
 esac

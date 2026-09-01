@@ -17,6 +17,9 @@ import test from "node:test";
 
 const root = resolve(import.meta.dirname, "..");
 const runtimeSource = resolve(root, "deploy/bare-metal/runtime");
+const bash = process.platform === "win32"
+  ? resolve(process.env.ProgramFiles ?? "C:\\Program Files", "Git/bin/bash.exe")
+  : "bash";
 
 function writeExecutable(path, content) {
   mkdirSync(dirname(path), { recursive: true });
@@ -35,9 +38,11 @@ function createRuntimeFixture() {
   const scripts = resolve(fixture, "scripts");
   const bin = resolve(fixture, "bin");
   const commands = resolve(fixture, "commands");
+  const configHubCommands = resolve(fixture, "confighub-commands");
   mkdirSync(scripts, { recursive: true });
   mkdirSync(bin, { recursive: true });
   mkdirSync(commands, { recursive: true });
+  mkdirSync(configHubCommands, { recursive: true });
   for (const name of ["runtime-env.sh", "start-api.sh", "start-worker.sh", "migrate.sh"]) {
     const source = resolve(runtimeSource, name);
     assert.equal(existsSync(source), true, `${name} must exist`);
@@ -71,6 +76,23 @@ case "$format" in
   *) exit 64 ;;
 esac
 `);
+  writeExecutable(resolve(configHubCommands, "confighub"), `#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ -n "\${DAYORDER_TEST_CONFIGHUB_LOG:-}" ]]; then
+  printf '%s\t%s\n' "$PWD" "$*" >> "$DAYORDER_TEST_CONFIGHUB_LOG"
+fi
+if [[ "\${DAYORDER_TEST_CONFIGHUB_FAIL:-0}" == 1 ]]; then
+  printf 'confighub: access denied for shier/prod\n' >&2
+  exit 77
+fi
+[[ "$1" == run && "$2" == --project && "$3" == shier && "$4" == --env && "$5" == prod && "$6" == -- ]] || exit 64
+[[ -f "$PWD/api.env" || -f "$PWD/worker.env" || -f "$PWD/migrate.env" ]] || exit 65
+shift 6
+export db_address=db.example.invalid db_port=5432 db_username=dayorder_admin
+export db_password=admin-password db_migrator_password=migrator-password
+export db_api_password=api-password db_worker_password=worker-password
+exec "$@"
+`);
   return fixture;
 }
 
@@ -78,11 +100,19 @@ function runScript(script, args, environment = {}) {
   const fixture = resolve(dirname(script), "..");
   const useFakeMetadata = process.platform === "win32" || environment.DAYORDER_TEST_USE_FAKE_METADATA === "1";
   const childEnvironment = { ...process.env, ...environment };
-  const command = useFakeMetadata
-    ? ["-c", 'PATH="$DAYORDER_TEST_COMMANDS:$PATH"; export PATH; exec bash "$@"', "dayorder-runtime-test", script, ...args]
-    : [script, ...args];
+  const pathPrefix = useFakeMetadata
+    ? "$DAYORDER_TEST_COMMANDS:$DAYORDER_TEST_CONFIGHUB_COMMANDS"
+    : "$DAYORDER_TEST_CONFIGHUB_COMMANDS";
+  const command = [
+    "-c",
+    `PATH="${pathPrefix}:$PATH"; export PATH; exec bash "$@"`,
+    "dayorder-runtime-test",
+    script,
+    ...args,
+  ];
+  childEnvironment.DAYORDER_TEST_CONFIGHUB_COMMANDS = gitShellPath(resolve(fixture, "confighub-commands"));
   if (useFakeMetadata) childEnvironment.DAYORDER_TEST_COMMANDS = gitShellPath(resolve(fixture, "commands"));
-  return spawnSync("bash", command, {
+  return spawnSync(bash, command, {
     cwd: root,
     encoding: "utf8",
     env: childEnvironment,
@@ -116,33 +146,41 @@ function makeRuntimeSymlink(target, link) {
 
 test("runtime scripts pass Bash syntax validation", () => {
   for (const name of ["runtime-env.sh", "start-api.sh", "start-worker.sh", "migrate.sh"]) {
-    const result = spawnSync("bash", ["-n", resolve(runtimeSource, name)], { encoding: "utf8" });
+    const result = spawnSync(bash, ["-n", resolve(runtimeSource, name)], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
   }
 });
 
-test("API wrapper loads a secret file and execs the API binary without leaking the secret", (t) => {
+test("API wrapper loads non-database secrets and launches through ConfigHub from the configuration directory", (t) => {
   const fixture = createRuntimeFixture();
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   const secret = "api-hmac-secret-with-at-least-32-bytes";
   const secretPath = resolve(fixture, "secrets/api_hmac");
   const capturePath = resolve(fixture, "api.capture");
+  const configHubLog = resolve(fixture, "confighub.log");
   mkdirSync(dirname(secretPath), { recursive: true });
   writeProtected(secretPath, `${secret}\n`);
   const envPath = resolve(fixture, "api.env");
   writeProtected(
     envPath,
-    `DATABASE_URL='postgres://api@db/dayorder'\nDAYORDER_AUTH_HMAC_KEY_FILE='${secretPath}'\n`,
+    `DATABASE_URL='postgres://legacy-api@db/dayorder'\nDAYORDER_AUTH_HMAC_KEY_FILE='${secretPath}'\n`,
   );
   writeExecutable(
     resolve(fixture, "bin/dayorder-api"),
-    "#!/usr/bin/env bash\nprintf '%s\\n%s\\n' \"$DATABASE_URL\" \"$DAYORDER_AUTH_HMAC_KEY\" > \"$CAPTURE_PATH\"\n",
+    "#!/usr/bin/env bash\nprintf '%s\\n%s\\n%s\\n' \"$db_address\" \"${DATABASE_URL-unset}\" \"$DAYORDER_AUTH_HMAC_KEY\" > \"$CAPTURE_PATH\"\n",
   );
 
-  const result = runScript(resolve(fixture, "scripts/start-api.sh"), [envPath], { CAPTURE_PATH: capturePath });
+  const result = runScript(resolve(fixture, "scripts/start-api.sh"), [envPath], {
+    CAPTURE_PATH: capturePath,
+    DAYORDER_TEST_CONFIGHUB_LOG: configHubLog,
+  });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(readFileSync(capturePath, "utf8"), `postgres://api@db/dayorder\n${secret}\n`);
+  assert.equal(readFileSync(capturePath, "utf8"), `db.example.invalid\nunset\n${secret}\n`);
+  assert.match(
+    readFileSync(configHubLog, "utf8"),
+    /\trun --project shier --env prod -- .*\/scripts\/\.\.\/bin\/dayorder-api\n$/,
+  );
   assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(secret));
 });
 
@@ -151,46 +189,149 @@ test("Worker wrapper selects the Worker binary", (t) => {
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   const envPath = resolve(fixture, "worker.env");
   const capturePath = resolve(fixture, "worker.capture");
+  const configHubLog = resolve(fixture, "confighub.log");
   writeProtected(
     envPath,
-    "WORKER_DATABASE_URL='postgres://worker@db/dayorder'\nDAYORDER_AUTH_HMAC_KEY='worker-hmac-secret-with-at-least-32-bytes'\n",
+    "WORKER_DATABASE_URL='postgres://legacy-worker@db/dayorder'\nDAYORDER_AUTH_HMAC_KEY='worker-hmac-secret-with-at-least-32-bytes'\n",
   );
   writeExecutable(
     resolve(fixture, "bin/dayorder-worker"),
-    "#!/usr/bin/env bash\nprintf '%s' worker > \"$CAPTURE_PATH\"\n",
+    "#!/usr/bin/env bash\nprintf '%s\\n%s\\n' \"$db_address\" \"${WORKER_DATABASE_URL-unset}\" > \"$CAPTURE_PATH\"\n",
   );
 
-  const result = runScript(resolve(fixture, "scripts/start-worker.sh"), [envPath], { CAPTURE_PATH: capturePath });
+  const result = runScript(resolve(fixture, "scripts/start-worker.sh"), [envPath], {
+    CAPTURE_PATH: capturePath,
+    DAYORDER_TEST_CONFIGHUB_LOG: configHubLog,
+  });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(readFileSync(capturePath, "utf8"), "worker");
+  assert.equal(readFileSync(capturePath, "utf8"), "db.example.invalid\nunset\n");
+  assert.match(
+    readFileSync(configHubLog, "utf8"),
+    /\trun --project shier --env prod -- .*\/scripts\/\.\.\/bin\/dayorder-worker\n$/,
+  );
 });
 
 test("migration wrapper maps up and check to the embedded migrator", (t) => {
   const fixture = createRuntimeFixture();
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   const envPath = resolve(fixture, "migrate.env");
-  writeProtected(envPath, "MIGRATION_DATABASE_URL='postgres://migrator@db/dayorder'\n");
+  const configHubLog = resolve(fixture, "confighub.log");
+  writeProtected(
+    envPath,
+    "DAYORDER_ENV=production\nMIGRATION_DATABASE_URL='postgres://legacy-migrator@db/dayorder'\n",
+  );
   writeExecutable(
     resolve(fixture, "bin/dayorder-migrate"),
-    "#!/usr/bin/env bash\nprintf '%s' \"$*\" > \"$CAPTURE_PATH\"\n",
+    "#!/usr/bin/env bash\nprintf '%s\\n%s\\n%s\\n' \"$*\" \"$db_address\" \"${MIGRATION_DATABASE_URL-unset}\" > \"$CAPTURE_PATH\"\n",
   );
 
   const upCapture = resolve(fixture, "up.capture");
-  const up = runScript(resolve(fixture, "scripts/migrate.sh"), ["up", envPath], { CAPTURE_PATH: upCapture });
+  const up = runScript(resolve(fixture, "scripts/migrate.sh"), ["up", envPath], {
+    CAPTURE_PATH: upCapture,
+    DAYORDER_TEST_CONFIGHUB_LOG: configHubLog,
+  });
   assert.equal(up.status, 0, up.stderr);
-  assert.equal(readFileSync(upCapture, "utf8"), "");
+  assert.equal(readFileSync(upCapture, "utf8"), "\ndb.example.invalid\nunset\n");
 
   const checkCapture = resolve(fixture, "check.capture");
   const check = runScript(resolve(fixture, "scripts/migrate.sh"), ["check", envPath], {
     CAPTURE_PATH: checkCapture,
+    DAYORDER_TEST_CONFIGHUB_LOG: configHubLog,
   });
   assert.equal(check.status, 0, check.stderr);
-  assert.equal(readFileSync(checkCapture, "utf8"), "-check");
+  assert.equal(readFileSync(checkCapture, "utf8"), "-check\ndb.example.invalid\nunset\n");
+  const configHubInvocations = readFileSync(configHubLog, "utf8").trimEnd().split("\n");
+  assert.equal(configHubInvocations.length, 2);
+  assert.match(configHubInvocations[0], /\trun --project shier --env prod -- .*\/scripts\/\.\.\/bin\/dayorder-migrate$/);
+  assert.match(configHubInvocations[1], /\trun --project shier --env prod -- .*\/scripts\/\.\.\/bin\/dayorder-migrate -check$/);
 
   const invalid = runScript(resolve(fixture, "scripts/migrate.sh"), ["down", envPath]);
   assert.notEqual(invalid.status, 0);
   assert.match(invalid.stderr, /usage/i);
+});
+
+test("migration wrapper rejects a missing or non-production environment before ConfigHub", (t) => {
+  const fixture = createRuntimeFixture();
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const envPath = resolve(fixture, "migrate.env");
+  const capturePath = resolve(fixture, "migrate.capture");
+  const configHubLog = resolve(fixture, "confighub.log");
+  writeExecutable(
+    resolve(fixture, "bin/dayorder-migrate"),
+    "#!/usr/bin/env bash\nprintf started > \"$CAPTURE_PATH\"\n",
+  );
+
+  for (const content of [
+    "MIGRATION_DATABASE_URL='postgres://legacy-migrator@db/dayorder'\n",
+    "DAYORDER_ENV=development\n",
+  ]) {
+    writeProtected(envPath, content);
+    const result = runScript(resolve(fixture, "scripts/migrate.sh"), ["up", envPath], {
+      CAPTURE_PATH: capturePath,
+      DAYORDER_TEST_CONFIGHUB_LOG: configHubLog,
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /DAYORDER_ENV.*production/i);
+    assert.equal(existsSync(capturePath), false);
+    assert.equal(existsSync(configHubLog), false);
+  }
+});
+
+test("runtime wrapper preserves ConfigHub authorization errors and does not start the binary", (t) => {
+  const fixture = createRuntimeFixture();
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const envPath = resolve(fixture, "api.env");
+  const capturePath = resolve(fixture, "api.capture");
+  writeProtected(
+    envPath,
+    "DATABASE_URL='postgres://legacy-api@db/dayorder'\nDAYORDER_AUTH_HMAC_KEY='direct-secret-with-at-least-32-bytes'\n",
+  );
+  writeExecutable(
+    resolve(fixture, "bin/dayorder-api"),
+    "#!/usr/bin/env bash\nprintf started > \"$CAPTURE_PATH\"\n",
+  );
+
+  const result = runScript(resolve(fixture, "scripts/start-api.sh"), [envPath], {
+    CAPTURE_PATH: capturePath,
+    DAYORDER_TEST_CONFIGHUB_FAIL: "1",
+  });
+
+  assert.equal(result.status, 77);
+  assert.match(result.stderr, /confighub: access denied for shier\/prod/i);
+  assert.equal(existsSync(capturePath), false);
+});
+
+test("runtime wrapper uses the pinned ConfigHub executable instead of PATH", (t) => {
+  const fixture = createRuntimeFixture();
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const envPath = resolve(fixture, "api.env");
+  const capturePath = resolve(fixture, "api.capture");
+  const pinnedConfigHub = resolve(fixture, "pinned/confighub");
+  writeProtected(
+    envPath,
+    "DAYORDER_ENV=production\nDAYORDER_CONFIGHUB_EXECUTABLE=confighub\nDAYORDER_AUTH_HMAC_KEY='direct-secret-with-at-least-32-bytes'\n",
+  );
+  writeExecutable(
+    resolve(fixture, "bin/dayorder-api"),
+    "#!/usr/bin/env bash\nprintf started > \"$CAPTURE_PATH\"\n",
+  );
+  writeExecutable(pinnedConfigHub, `#!/usr/bin/env bash
+set -Eeuo pipefail
+[[ "$1" == run && "$2" == --project && "$3" == shier && "$4" == --env && "$5" == prod && "$6" == -- ]] || exit 64
+shift 6
+exec "$@"
+`);
+
+  const result = runScript(resolve(fixture, "scripts/start-api.sh"), [envPath], {
+    CAPTURE_PATH: capturePath,
+    DAYORDER_CONFIGHUB_EXECUTABLE: gitShellPath(pinnedConfigHub),
+    DAYORDER_TEST_CONFIGHUB_FAIL: "1",
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(capturePath, "utf8"), "started");
 });
 
 test("runtime wrappers reject missing configuration, conflicting secrets, and missing binaries", (t) => {
@@ -366,26 +507,20 @@ test("release build scripts and package commands expose the agreed contract", ()
   assert.match(ignore, /^release\/$/m);
 });
 
-test("service configuration templates keep database roles isolated", () => {
+test("service configuration templates delegate database configuration to ConfigHub", () => {
   const api = readFileSync(resolve(root, "deploy/bare-metal/config/api.env.example"), "utf8");
   const worker = readFileSync(resolve(root, "deploy/bare-metal/config/worker.env.example"), "utf8");
   const migrate = readFileSync(resolve(root, "deploy/bare-metal/config/migrate.env.example"), "utf8");
 
-  assert.match(api, /^DATABASE_URL_FILE=/m);
   assert.match(api, /^DAYORDER_AUTH_HMAC_KEY_FILE=/m);
-  assert.doesNotMatch(api, /^WORKER_DATABASE_URL(?:_FILE)?=/m);
-  assert.doesNotMatch(api, /^MIGRATION_DATABASE_URL(?:_FILE)?=/m);
+  assert.doesNotMatch(api, /^(?:DATABASE_URL|WORKER_DATABASE_URL|MIGRATION_DATABASE_URL)(?:_FILE)?=/m);
 
-  assert.match(worker, /^WORKER_DATABASE_URL_FILE=/m);
   assert.match(worker, /^DAYORDER_AUTH_HMAC_KEY_FILE=/m);
   assert.match(worker, /^DAYORDER_SMTP_PASSWORD_FILE=/m);
   assert.match(worker, /^DAYORDER_AGENT_HTTP_KEY_FILE=/m);
-  assert.doesNotMatch(worker, /^DATABASE_URL(?:_FILE)?=/m);
-  assert.doesNotMatch(worker, /^MIGRATION_DATABASE_URL(?:_FILE)?=/m);
+  assert.doesNotMatch(worker, /^(?:DATABASE_URL|WORKER_DATABASE_URL|MIGRATION_DATABASE_URL)(?:_FILE)?=/m);
 
-  assert.match(migrate, /^MIGRATION_DATABASE_URL_FILE=/m);
-  assert.doesNotMatch(migrate, /^DATABASE_URL(?:_FILE)?=/m);
-  assert.doesNotMatch(migrate, /^WORKER_DATABASE_URL(?:_FILE)?=/m);
+  assert.doesNotMatch(migrate, /^(?:DATABASE_URL|WORKER_DATABASE_URL|MIGRATION_DATABASE_URL)(?:_FILE)?=/m);
   assert.doesNotMatch(`${api}\n${worker}\n${migrate}`, /development-only|replace-with|change-me/i);
 });
 
@@ -424,20 +559,22 @@ test("project documentation covers the Docker-independent release path", () => {
   assert.match(runbook, /Server.*Worker.*独立/s);
 });
 
-test("release documentation states the secret, schema, and rollback safety contract", () => {
+test("release documentation states the ConfigHub, remaining secret, schema, and rollback safety contract", () => {
   const documents = [
     readFileSync(resolve(root, "README.md"), "utf8"),
     readFileSync(resolve(root, "docs/runbooks/separate-deployment.md"), "utf8"),
   ];
   for (const document of documents) {
     for (const secret of [
-      "api_database_url",
-      "worker_database_url",
-      "migration_database_url",
       "auth_hmac_key",
       "smtp_password",
       "agent_http_key",
     ]) assert.match(document, new RegExp(`secrets/${secret}`));
+    for (const removed of ["api_database_url", "worker_database_url", "migration_database_url"]) {
+      assert.doesNotMatch(document, new RegExp(`secrets/${removed}`));
+    }
+    assert.match(document, /\.confighub\.yaml/);
+    assert.match(document, /confighub run --project shier --env prod/);
     assert.match(document, /exactly one non-empty single-line value/);
     assert.match(document, /chmod 0700/);
     assert.match(document, /chmod 0600/);

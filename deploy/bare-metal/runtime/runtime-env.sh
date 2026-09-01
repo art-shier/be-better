@@ -39,6 +39,7 @@ dayorder_validate_protected_file() {
 
 dayorder_load_environment() {
   local environment_file="${1:-}"
+  local pinned_confighub_executable="${DAYORDER_CONFIGHUB_EXECUTABLE-}"
   [[ -n "$environment_file" ]] || dayorder_die "environment file is not readable: <missing>"
   dayorder_validate_protected_file "$environment_file" "environment file"
   set -a
@@ -46,6 +47,10 @@ dayorder_load_environment() {
   # shellcheck disable=SC1090
   source "$environment_file"
   set +a
+  if [[ -n "$pinned_confighub_executable" ]]; then
+    DAYORDER_CONFIGHUB_EXECUTABLE="$pinned_confighub_executable"
+    export DAYORDER_CONFIGHUB_EXECUTABLE
+  fi
 }
 
 dayorder_load_secret() {
@@ -83,6 +88,23 @@ dayorder_load_runtime_secrets() {
   do
     dayorder_load_secret "$variable"
   done
+}
+
+dayorder_clear_database_overrides() {
+  unset DATABASE_URL DATABASE_URL_FILE
+  unset WORKER_DATABASE_URL WORKER_DATABASE_URL_FILE
+  unset MIGRATION_DATABASE_URL MIGRATION_DATABASE_URL_FILE
+}
+
+dayorder_run_with_confighub() {
+  local environment_file="$1"
+  shift
+  local configuration_directory confighub_executable
+  configuration_directory="$(cd -- "$(dirname -- "$environment_file")" && pwd -P)" || \
+    dayorder_die "cannot enter the configuration directory"
+  confighub_executable="${DAYORDER_CONFIGHUB_EXECUTABLE:-confighub}"
+  cd -- "$configuration_directory" || dayorder_die "cannot enter the configuration directory"
+  exec "$confighub_executable" run --project shier --env prod -- "$@"
 }
 
 dayorder_require_value() {

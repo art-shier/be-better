@@ -172,6 +172,17 @@ exec /bin/chmod "$mode" "$@"
   writeExecutable(resolve(directory, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
   // Git for Windows does not provide flock; the fixture models uncontended locking.
   writeExecutable(resolve(directory, "flock"), "#!/usr/bin/env bash\nexit 0\n");
+  writeExecutable(resolve(directory, "confighub"), `#!/usr/bin/env bash
+set -Eeuo pipefail
+printf 'confighub cwd=%s args=%s\n' "$PWD" "$*" >> "$DAYORDER_TEST_LOG"
+if [[ "\${DAYORDER_TEST_CONFIGHUB_FAIL:-0}" == 1 ]]; then
+  printf 'confighub: access denied for shier/prod\n' >&2
+  exit 77
+fi
+[[ "$1" == run && "$2" == --project && "$3" == shier && "$4" == --env && "$5" == prod && "$6" == -- ]] || exit 64
+shift 6
+exec "$@"
+`);
 }
 
 function fixture(t) {
@@ -321,9 +332,14 @@ function makeAssetRelease(f, tag) {
 printf 'migrate %s %s\\n' "$1" "$2" >> "$DAYORDER_TEST_LOG"
 [[ "\${DAYORDER_TEST_MIGRATE_FAIL:-0}" != 1 ]]
 `);
-  write(resolve(backend, "config/api.env.example"), "DATABASE_URL_FILE=/etc/dayorder/secrets/api_database_url\n");
-  write(resolve(backend, "config/migrate.env.example"), "MIGRATION_DATABASE_URL_FILE=/etc/dayorder/secrets/migration_database_url\n");
-  write(resolve(backend, "config/worker.env.example"), "WORKER_DATABASE_URL_FILE=/etc/dayorder/secrets/worker_database_url\n");
+  write(resolve(backend, "config/api.env.example"), "DAYORDER_ENV=production\nDAYORDER_AUTH_HMAC_KEY_FILE=/etc/dayorder/secrets/auth_hmac_key\n");
+  write(resolve(backend, "config/migrate.env.example"), "DAYORDER_ENV=production\n");
+  write(
+    resolve(backend, "config/worker.env.example"),
+    "DAYORDER_ENV=production\nDAYORDER_AUTH_HMAC_KEY_FILE=/etc/dayorder/secrets/auth_hmac_key\n"
+      + "DAYORDER_SMTP_PASSWORD_FILE=/etc/dayorder/secrets/smtp_password\n"
+      + "DAYORDER_AGENT_HTTP_KEY_FILE=/etc/dayorder/secrets/agent_http_key\n",
+  );
   // Git for Windows' Bash requires POSIX paths for fixture helper scripts.
   const shellPackager = shellPath(packager);
   const shellRelease = shellPath(release);
@@ -422,6 +438,19 @@ test("deployer derives architecture and operator identity from uname and id", (t
   assert.match(log, /dayorder-server-linux-arm64\.tar\.gz/);
   assert.match(log, /loginctl show-user dayorder-operator/);
   assert.doesNotMatch(log, /spoofed-user/);
+});
+
+test("backend deployment stops before configuration when the ConfigHub CLI is missing", (t) => {
+  const f = fixture(t);
+  makeAssetRelease(f, "v1.2.3");
+  rmSync(resolve(f.commands, "confighub"));
+
+  const result = runDeploy(f, ["all"]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /confighub is required/i);
+  assert.equal(existsSync(resolve(f.runDirectory, "dayorder-config")), false);
+  assert.doesNotMatch(readFileSync(f.log, "utf8"), /migrate|systemctl/);
 });
 
 test("Web deploy defaults to latest, uses the invocation directory, and is idempotent", (t) => {
@@ -612,8 +641,12 @@ test("first all deployment creates persistent templates and stops before migrati
     const path = resolve(f.runDirectory, "dayorder-config", name);
     assert.equal(existsSync(path), true);
     assert.equal(deploymentMode(f, path), "600");
-    assert.match(readFileSync(path, "utf8"), new RegExp(deploymentPath(resolve(f.runDirectory, "dayorder-config/secrets")).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(readFileSync(path, "utf8"), /(?:DATABASE_URL|WORKER_DATABASE_URL|MIGRATION_DATABASE_URL)(?:_FILE)?=/);
   }
+  const secretsPath = new RegExp(deploymentPath(resolve(f.runDirectory, "dayorder-config/secrets")).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(readFileSync(resolve(f.runDirectory, "dayorder-config/api.env"), "utf8"), secretsPath);
+  assert.match(readFileSync(resolve(f.runDirectory, "dayorder-config/worker.env"), "utf8"), secretsPath);
+  assert.equal(existsSync(resolve(f.runDirectory, "dayorder-config/.confighub.yaml")), false);
   assert.equal(existsSync(resolve(f.runDirectory, "current-server")), false);
   assert.equal(existsSync(resolve(f.runDirectory, "current-worker")), false);
   assert.doesNotMatch(readFileSync(f.log, "utf8"), /migrate|systemctl/);
@@ -625,15 +658,29 @@ test("first-run output names every one-line secret and exact permission commands
   const result = runDeploy(f, ["all"]);
 
   assert.notEqual(result.status, 0);
-  for (const secret of [
-    "api_database_url", "worker_database_url", "migration_database_url",
-    "auth_hmac_key", "smtp_password", "agent_http_key",
-  ]) {
+  for (const secret of ["auth_hmac_key", "smtp_password", "agent_http_key"]) {
     assert.match(result.stderr, new RegExp(`secrets/${secret}`));
   }
+  for (const removed of ["api_database_url", "worker_database_url", "migration_database_url"]) {
+    assert.doesNotMatch(result.stderr, new RegExp(`secrets/${removed}`));
+  }
+  assert.match(result.stderr, /dayorder-config\/\.confighub\.yaml/);
   assert.match(result.stderr, /single-line/i);
   assert.match(result.stderr, /chmod 0700/);
   assert.match(result.stderr, /chmod 0600/);
+});
+
+test("ConfigHub authorization failure is printed and stops deployment before migration or systemd", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+
+  const result = runDeploy(f, ["all"], { DAYORDER_TEST_CONFIGHUB_FAIL: "1" });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /confighub: access denied for shier\/prod/i);
+  assert.match(result.stderr, /ConfigHub preflight failed/i);
+  assert.equal(existsSync(resolve(f.runDirectory, "current-server")), false);
+  assert.equal(existsSync(resolve(f.runDirectory, "current-worker")), false);
+  assert.doesNotMatch(readFileSync(f.log, "utf8"), /migrate|systemctl/);
 });
 
 test("configuration file symlinks are rejected before migration", (t) => {
@@ -684,12 +731,18 @@ test("Server migrates up and checks before activation, then passes readiness", (
   const result = runDeploy(f, ["server"]);
   assert.equal(result.status, 0, result.stderr);
   const log = readFileSync(f.log, "utf8");
+  assert.match(log, /confighub cwd=.*dayorder-config args=run --project shier --env prod -- true/);
+  assert.ok(log.indexOf("confighub cwd=") < log.indexOf("migrate up"));
   assert.ok(log.indexOf("migrate up") < log.indexOf("migrate check"));
   assert.ok(log.indexOf("migrate check") < log.indexOf("systemctl --user daemon-reload"));
   assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-server")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.3/server")));
   const unit = readFileSync(resolve(f.home, ".config/systemd/user/dayorder-api.service"), "utf8");
   assert.match(unit, /Restart=on-failure/);
   assert.match(unit, /TimeoutStopSec=30/);
+  assert.match(
+    unit,
+    new RegExp(`^Environment="DAYORDER_CONFIGHUB_EXECUTABLE=${deploymentPath(resolve(f.commands, "confighub")).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"$`, "m"),
+  );
   assert.match(unit, new RegExp(deploymentPath(resolve(f.runDirectory, "current-server/scripts/start-api.sh")).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
@@ -900,9 +953,13 @@ test("configuration templates preserve roots with sed-special characters", (t) =
   const result = runDeploy(f, ["all", "--root", specialRoot]);
   assert.notEqual(result.status, 0);
   const secrets = deploymentPath(resolve(specialRoot, "dayorder-config/secrets"));
-  for (const name of ["api.env", "migrate.env", "worker.env"]) {
+  for (const name of ["api.env", "worker.env"]) {
     assert.match(readFileSync(resolve(specialRoot, "dayorder-config", name), "utf8"), new RegExp(secrets.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
+  assert.doesNotMatch(
+    readFileSync(resolve(specialRoot, "dayorder-config/migrate.env"), "utf8"),
+    /(?:DATABASE_URL|WORKER_DATABASE_URL|MIGRATION_DATABASE_URL)(?:_FILE)?=/,
+  );
 });
 
 test("real generated assets install without privilege and stop at first configuration", {

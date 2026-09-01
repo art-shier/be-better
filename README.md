@@ -159,7 +159,7 @@ npm run config:dev:worker
 
 ## GitHub Release Linux 部署
 
-生产部署的首选入口是公开 GitHub Release。部署机需要 Linux、Bash、`curl`、`tar`、`sha256sum`、`flock` 和常见 GNU 工具；Web、Server 和 Worker 可以在不同机器上分别运行。首次在部署根目录执行：
+生产部署的首选入口是公开 GitHub Release。部署机需要 Linux、Bash、`curl`、`tar`、`sha256sum`、`flock` 和常见 GNU 工具；部署 Server 或 Worker 的机器还需要 ConfigHub CLI，Web-only 部署不需要。Web、Server 和 Worker 可以在不同机器上分别运行。首次在部署根目录执行：
 
 ```bash
 mkdir -p ~/a
@@ -169,25 +169,25 @@ chmod 0755 dayorder-deploy.sh
 ./dayorder-deploy.sh all
 ```
 
-首次运行 Server 或 Worker 时，脚本会创建 `~/a/dayorder-config/{api.env,migrate.env,worker.env,secrets/}` 并停止。必须创建以下六个组件专用密钥文件：`secrets/api_database_url`、`secrets/worker_database_url`、`secrets/migration_database_url`、`secrets/auth_hmac_key`、`secrets/smtp_password`、`secrets/agent_http_key`。每个文件必须是 exactly one non-empty single-line value，不能把多行值静默拼接。填写后按脚本输出限制权限，再重新运行 `./dayorder-deploy.sh all`：
+首次运行 Server 或 Worker 时，脚本会创建 `~/a/dayorder-config/{api.env,migrate.env,worker.env,secrets/}` 并停止。把包含 ConfigHub Server 和 Machine Token 的 `.confighub.yaml` 放到 `~/a/dayorder-config/`；启动脚本会在该目录执行 `confighub run --project shier --env prod`，不再使用数据库 URL 密钥文件。ConfigHub CLI 自行处理配置文件、连接和权限错误，任一失败都会原样输出并停止部署。
+
+仍需创建三个非数据库密钥文件：`secrets/auth_hmac_key`、`secrets/smtp_password`、`secrets/agent_http_key`。每个文件必须是 exactly one non-empty single-line value，不能把多行值静默拼接。填写后按脚本输出限制权限，再重新运行 `./dayorder-deploy.sh all`：
 
 ```bash
-touch ~/a/dayorder-config/secrets/api_database_url \
-  ~/a/dayorder-config/secrets/worker_database_url \
-  ~/a/dayorder-config/secrets/migration_database_url \
-  ~/a/dayorder-config/secrets/auth_hmac_key \
+touch ~/a/dayorder-config/secrets/auth_hmac_key \
   ~/a/dayorder-config/secrets/smtp_password \
   ~/a/dayorder-config/secrets/agent_http_key
 chmod 0700 ~/a/dayorder-config ~/a/dayorder-config/secrets
 chmod 0600 ~/a/dayorder-config/api.env ~/a/dayorder-config/migrate.env ~/a/dayorder-config/worker.env \
-  ~/a/dayorder-config/secrets/api_database_url ~/a/dayorder-config/secrets/worker_database_url \
-  ~/a/dayorder-config/secrets/migration_database_url ~/a/dayorder-config/secrets/auth_hmac_key \
+  ~/a/dayorder-config/secrets/auth_hmac_key \
   ~/a/dayorder-config/secrets/smtp_password ~/a/dayorder-config/secrets/agent_http_key
 ```
 
+从旧版本升级时，部署器不会覆盖已有的 `migrate.env`；必须确认其中包含 `DAYORDER_ENV=production`，否则会在实际 migration 以及 Migrator 的 ConfigHub 调用之前安全失败。旧版环境文件引用的三个数据库 URL 密钥文件应保留到相邻 Release 的回滚窗口结束：新脚本会忽略这些旧覆盖，但回滚后的旧脚本仍需要它们。
+
 如果脚本要求启用用户级 systemd linger，只需执行一次 `sudo loginctl enable-linger "$USER"`，然后再次运行部署命令。
 
-Web 仅更新 `~/a/current-web` 的静态资源链接；请让 Nginx/Caddy 的站点根目录指向该链接。API 和 Worker 会作为两个独立的 `systemd --user` 服务运行。完整的首次安装、更新、日志、指定版本和回退限制见[前后端分离部署手册](docs/runbooks/separate-deployment.md)。
+Web 仅更新 `~/a/current-web` 的静态资源链接；请让 Nginx/Caddy 的站点根目录指向该链接。API 和 Worker 会作为两个独立的 `systemd --user` 服务运行；部署器会把预检通过的 ConfigHub CLI 绝对路径写入 unit，避免依赖 systemd 是否继承交互 shell 的 PATH。完整的首次安装、更新、日志、指定版本和回退限制见[前后端分离部署手册](docs/runbooks/separate-deployment.md)。
 
 Schema 检查拒绝 dirty schema 和低于二进制内嵌 migration floor 的版本；它只在 expand/contract 约束下接受 clean schema at or above the embedded migration floor。这不是无限向前兼容承诺：升级和应用回退均为 adjacent-release only，不得跨过多个 Release。恢复旧 Server 链接后，部署器会重启旧 API 并再次检查 `/health/ready`；若仍不健康，会输出 `restored API failed readiness; manual intervention required` 并以失败退出。
 
@@ -268,7 +268,7 @@ sudo install -m 0640 -o root -g dayorder /opt/dayorder/releases/0.2.0/config/wor
 sudo install -m 0640 -o root -g dayorder /opt/dayorder/releases/0.2.0/config/migrate.env.example /etc/dayorder/migrate.env
 ```
 
-编辑这三个环境文件，并在 `/etc/dayorder/secrets/` 创建其引用的数据库 URL、认证密钥、SMTP 密码和 Agent 密钥文件。API、Worker、Migrator 应使用三个不同权限的 PostgreSQL 账号。
+把 `.confighub.yaml` 放在三个环境文件所在的 `/etc/dayorder/`，并在 `/etc/dayorder/secrets/` 只创建环境文件引用的认证密钥、SMTP 密码和 Agent 密钥文件。启动脚本通过 `confighub run --project shier --env prod` 为 API、Worker、Migrator 注入各自角色所需的数据库配置。
 
 前端部署在 `https://app.example.com` 时，API 配置至少需要调整：
 

@@ -1,6 +1,6 @@
 # Linux 前后端分离部署手册
 
-本手册说明通过 GitHub Release 在 Linux 裸机上分别安装和更新 DayOrder Web、Server 与 Worker。该流程不构建或运行 Docker，也不安装 PostgreSQL、Nginx、Caddy 或 systemd。部署机需要 Linux、Bash、`curl`、`tar`、`sha256sum`、`flock` 和常见 GNU 工具。
+本手册说明通过 GitHub Release 在 Linux 裸机上分别安装和更新 DayOrder Web、Server 与 Worker。该流程不构建或运行 Docker，也不安装 PostgreSQL、Nginx、Caddy 或 systemd。部署机需要 Linux、Bash、`curl`、`tar`、`sha256sum`、`flock` 和常见 GNU 工具；Server 或 Worker 部署还需要 ConfigHub CLI，Web-only 部署不需要。
 
 ## 首次安装
 
@@ -35,35 +35,35 @@ chmod 0755 dayorder-deploy.sh
 ├── current-server -> releases/v0.3.1/server
 ├── current-worker -> releases/v0.3.1/worker
 └── dayorder-config/
+    ├── .confighub.yaml
     ├── api.env
     ├── migrate.env
     ├── worker.env
     └── secrets/
-        ├── api_database_url
-        ├── worker_database_url
-        ├── migration_database_url
         ├── auth_hmac_key
         ├── smtp_password
         └── agent_http_key
 ```
 
-首次 Server 部署缺少 `api.env` 或 `migrate.env`、或首次 Worker 部署缺少 `worker.env` 时，脚本会创建权限受限的 `dayorder-config` 和 `secrets/`，从已校验产物复制缺失模板，然后在 migration、链接切换和服务启动之前停止。填写配置与密钥后重试同一命令。已有配置永不覆盖，历史版本不会自动删除。
+首次 Server 部署缺少 `api.env` 或 `migrate.env`、或首次 Worker 部署缺少 `worker.env` 时，脚本会创建权限受限的 `dayorder-config` 和 `secrets/`，从已校验产物复制缺失模板，然后在 migration、链接切换和服务启动之前停止。已有配置永不覆盖，历史版本不会自动删除。
 
-六个密钥的完整路径是 `secrets/api_database_url`、`secrets/worker_database_url`、`secrets/migration_database_url`、`secrets/auth_hmac_key`、`secrets/smtp_password` 和 `secrets/agent_http_key`。每个文件必须包含 exactly one non-empty single-line value；空文件、多行文件、符号链接、非部署用户拥有的文件或宽松权限都会在 migration 前被拒绝。首次填写后执行：
+把包含 ConfigHub Server 和 Machine Token 的 `.confighub.yaml` 放到 `dayorder-config/`。API、Worker 和 Migrator 启动时都会先切换到环境文件所在目录，再执行 `confighub run --project shier --env prod`。部署器不解析或校验 `.confighub.yaml`；CLI 缺失、配置不可读、Server 不可达、Token 无效或无权限时，ConfigHub 的错误会直接显示在控制台并在 migration 和服务切换前停止部署。
+
+部署器会解析预检通过的 ConfigHub CLI 绝对路径并写入 API、Worker 的 systemd unit，因此服务启动不依赖 systemd 是否继承交互 shell 的 PATH。
+
+三个非数据库密钥的完整路径是 `secrets/auth_hmac_key`、`secrets/smtp_password` 和 `secrets/agent_http_key`。每个文件必须包含 exactly one non-empty single-line value；空文件、多行文件、符号链接、非部署用户拥有的文件或宽松权限都会在 migration 前被拒绝。首次填写后执行：
 
 ```bash
-touch dayorder-config/secrets/api_database_url \
-  dayorder-config/secrets/worker_database_url \
-  dayorder-config/secrets/migration_database_url \
-  dayorder-config/secrets/auth_hmac_key \
+touch dayorder-config/secrets/auth_hmac_key \
   dayorder-config/secrets/smtp_password \
   dayorder-config/secrets/agent_http_key
 chmod 0700 dayorder-config dayorder-config/secrets
 chmod 0600 dayorder-config/api.env dayorder-config/migrate.env dayorder-config/worker.env \
-  dayorder-config/secrets/api_database_url dayorder-config/secrets/worker_database_url \
-  dayorder-config/secrets/migration_database_url dayorder-config/secrets/auth_hmac_key \
+  dayorder-config/secrets/auth_hmac_key \
   dayorder-config/secrets/smtp_password dayorder-config/secrets/agent_http_key
 ```
+
+从旧版本升级时，已有环境文件不会自动覆盖。确认 `dayorder-config/migrate.env` 包含 `DAYORDER_ENV=production`；缺失或设置为其他值会在实际 migration 以及 Migrator 的 ConfigHub 调用之前失败。旧版环境文件引用的 `api_database_url`、`worker_database_url` 和 `migration_database_url` 密钥文件应保留到相邻 Release 的回滚窗口结束，新脚本虽然不读取它们，但回滚后的旧脚本仍然需要。
 
 Server 与 Worker 需要可用的用户级 systemd 管理器。若脚本要求启用 linger，请执行一次：
 
@@ -87,7 +87,7 @@ sudo loginctl enable-linger "$USER"
 
 `all` 会先完成 Server migration 与就绪检查，再激活 Worker，最后切换 Web 链接。Server 或 Worker 激活失败时，应用链接会恢复到本次部署之前的版本并重新启动旧服务；`all` 后续步骤失败也会按逆序恢复本次已切换的应用链接。恢复旧 Server 后还会重新轮询 API 就绪端点；若旧 API 仍不健康，脚本会输出 `restored API failed readiness; manual intervention required` 并失败退出，运维必须检查链接、服务状态和日志。
 
-Web 只下载、校验并切换 `current-web`；Web 部署不安装、配置或启动 Nginx/Caddy，也不启动静态服务器。Nginx/Caddy 必须将站点根目录指向 `<root>/current-web`。Server 与 Worker 是两个独立的 `systemd --user` 服务，分别使用持久化的 `api.env`、`migrate.env` 与 `worker.env`。
+Web 只下载、校验并切换 `current-web`；Web 部署不安装、配置或启动 Nginx/Caddy，也不启动静态服务器。Nginx/Caddy 必须将站点根目录指向 `<root>/current-web`。Server 与 Worker 是两个独立的 `systemd --user` 服务，分别使用持久化的 `api.env`、`migrate.env` 与 `worker.env`，并从同目录的 `.confighub.yaml` 读取数据库配置。
 
 指定旧版本仅切换应用版本；数据库 migration 不会回退。Migrator 与 API 拒绝 dirty schema 和低于二进制内嵌 migration floor 的版本，只在 expand/contract 约束下接受 clean schema at or above the embedded migration floor。这不是任意跨度的向前兼容：升级与应用回退均为 adjacent-release only，一次只能跨一个相邻 Release，不能跳过多个版本。
 
@@ -118,7 +118,7 @@ npm run build:release:web
 npm run build:release:backend
 ```
 
-Web 位于 `release/web/`；后端目录位于 `release/backend/`，其中包含 API、Worker、Migrator、启动脚本和环境模板。离线传输仍须先执行 migration 检查、使用独立的 API/Worker/Migrator 数据库账号，并由两个独立服务管理 API 与 Worker。
+Web 位于 `release/web/`；后端目录位于 `release/backend/`，其中包含 API、Worker、Migrator、启动脚本和环境模板。离线传输后仍须安装 ConfigHub CLI，在三个环境文件所在目录配置 `.confighub.yaml`，先执行 migration 检查，并由两个独立服务管理 API 与 Worker。
 
 `VITE_API_BASE_URL` 会在 Web 构建时写入静态资源；离线环境要改用其他 API 地址时，必须在构建时显式设置它。传输后的后端仍按以下顺序执行并由进程管理器托管：
 

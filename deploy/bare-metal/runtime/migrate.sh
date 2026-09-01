@@ -15,9 +15,10 @@ case "$action" in
 esac
 
 dayorder_load_environment "$environment_file"
+[[ "${DAYORDER_ENV-}" == production ]] || dayorder_die "DAYORDER_ENV must be production for bare-metal migrations"
+dayorder_clear_database_overrides
 dayorder_load_runtime_secrets
-dayorder_require_value MIGRATION_DATABASE_URL
 
 binary="$script_dir/../bin/dayorder-migrate"
 dayorder_require_executable "$binary"
-exec "$binary" "${migration_arguments[@]}"
+dayorder_run_with_confighub "$environment_file" "$binary" "${migration_arguments[@]}"
