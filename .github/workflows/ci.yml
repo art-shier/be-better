@@ -116,6 +116,12 @@ jobs:
       - name: Run live TLS and container security acceptance
         shell: pwsh
         run: ./scripts/security-acceptance.ps1 -BaseUrl https://localhost -EnvironmentFile deploy/.env.production -ProjectName dayorder -Insecure
+      - name: Capture Compose failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          docker compose --env-file deploy/.env.production -f deploy/compose.yaml ps --all || true
+          docker compose --env-file deploy/.env.production -f deploy/compose.yaml logs --no-color || true
       - name: Tear down Compose
         if: always()
         run: docker compose --env-file deploy/.env.production -f deploy/compose.yaml down --volumes --remove-orphans
