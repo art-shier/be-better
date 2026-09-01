@@ -36,6 +36,11 @@ type rolePlan struct {
 	idleTimeout      string
 }
 
+type administratorCapabilities struct {
+	name      string
+	superuser bool
+}
+
 func Preflight(ctx context.Context, source config.ConfigHubDatabaseSource) error {
 	maintenance, err := pgx.Connect(ctx, source.AdminURL("postgres"))
 	if err != nil {
@@ -50,6 +55,9 @@ func Preflight(ctx context.Context, source config.ConfigHubDatabaseSource) error
 	if err = requireTLS(ctx, maintenance); err != nil {
 		return err
 	}
+	if err = inspectExistingRuntimeRoleAdministration(ctx, maintenance, administrator); err != nil {
+		return err
+	}
 	for _, database := range databaseTargets() {
 		exists, owner, inspectErr := inspectDatabase(ctx, maintenance, database)
 		if inspectErr != nil {
@@ -58,7 +66,7 @@ func Preflight(ctx context.Context, source config.ConfigHubDatabaseSource) error
 		if !exists {
 			continue
 		}
-		if owner != administrator {
+		if owner != administrator.name {
 			return fmt.Errorf("database %s has an ownership conflict", database)
 		}
 		if inspectErr = inspectExistingSchema(ctx, source, database); inspectErr != nil {
@@ -138,16 +146,47 @@ func rolePlans(source config.ConfigHubDatabaseSource) []rolePlan {
 
 func roleStatements(plan rolePlan) []sqlStatement {
 	role := pgx.Identifier{string(plan.name)}.Sanitize()
-	attributes := "LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT " + strconv.Itoa(plan.connectionLimit)
+	attributes := fullRoleAttributes(plan)
+	restrictedAttributes := restrictedAdministratorRoleAttributes(plan)
 	reconcile := fmt.Sprintf(`DO $dayorder_role$
+DECLARE
+    administrator_is_superuser BOOLEAN;
+    target RECORD;
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = '%s') THEN
-        EXECUTE format('ALTER ROLE %s WITH %s PASSWORD %%L', pg_catalog.current_setting('dayorder.bootstrap_password'));
+    SELECT role.rolsuper
+    INTO administrator_is_superuser
+    FROM pg_catalog.pg_roles AS role
+    WHERE role.rolname = current_user;
+
+    SELECT role.rolsuper, role.rolreplication, role.rolbypassrls
+    INTO target
+    FROM pg_catalog.pg_roles AS role
+    WHERE role.rolname = '%s';
+
+    IF FOUND THEN
+        IF administrator_is_superuser THEN
+            EXECUTE format('ALTER ROLE %s WITH %s PASSWORD %%L', pg_catalog.current_setting('dayorder.bootstrap_password'));
+        ELSE
+            IF target.rolsuper OR target.rolreplication OR target.rolbypassrls THEN
+                RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'runtime role requires superuser reconciliation';
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_auth_members AS membership
+                JOIN pg_catalog.pg_roles AS member_role ON member_role.oid = membership.member
+                WHERE membership.roleid = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = '%s')
+                  AND member_role.rolname = current_user
+                  AND membership.admin_option
+            ) THEN
+                RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'administrator lacks ADMIN OPTION for runtime role';
+            END IF;
+            EXECUTE format('ALTER ROLE %s WITH %s PASSWORD %%L', pg_catalog.current_setting('dayorder.bootstrap_password'));
+        END IF;
     ELSE
         EXECUTE format('CREATE ROLE %s WITH %s PASSWORD %%L', pg_catalog.current_setting('dayorder.bootstrap_password'));
     END IF;
 END
-$dayorder_role$`, string(plan.name), role, attributes, role, attributes)
+$dayorder_role$`, string(plan.name), role, attributes, string(plan.name), role, restrictedAttributes, role, attributes)
 
 	statements := []sqlStatement{
 		{query: "SELECT pg_catalog.set_config('dayorder.bootstrap_password', $1, true)", arguments: []any{plan.password}},
@@ -161,6 +200,14 @@ $dayorder_role$`, string(plan.name), role, attributes, role, attributes)
 		statements = append(statements, sqlStatement{query: fmt.Sprintf("ALTER ROLE %s SET idle_in_transaction_session_timeout = '%s'", role, plan.idleTimeout)})
 	}
 	return append(statements, sqlStatement{query: "SELECT pg_catalog.set_config('dayorder.bootstrap_password', '', true)"})
+}
+
+func fullRoleAttributes(plan rolePlan) string {
+	return "LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT " + strconv.Itoa(plan.connectionLimit)
+}
+
+func restrictedAdministratorRoleAttributes(plan rolePlan) string {
+	return "LOGIN NOINHERIT NOCREATEDB NOCREATEROLE CONNECTION LIMIT " + strconv.Itoa(plan.connectionLimit)
 }
 
 func createDatabaseStatement(database string) string {
@@ -193,20 +240,63 @@ func migratorSchemaStatements(schemaExists bool) []sqlStatement {
 	)
 }
 
-func inspectAdministrator(ctx context.Context, connection *pgx.Conn) (string, error) {
+func inspectAdministrator(ctx context.Context, connection *pgx.Conn) (administratorCapabilities, error) {
 	var name string
 	var superuser, createDatabase, createRole bool
 	err := connection.QueryRow(ctx, `
 SELECT r.rolname, r.rolsuper, r.rolcreatedb, r.rolcreaterole
 FROM pg_catalog.pg_roles AS r
-WHERE r.rolname = current_user`).Scan(&name, &superuser, &createDatabase, &createRole)
+	WHERE r.rolname = current_user`).Scan(&name, &superuser, &createDatabase, &createRole)
 	if err != nil {
-		return "", safeDatabaseError("inspect PostgreSQL administrator capabilities", err)
+		return administratorCapabilities{}, safeDatabaseError("inspect PostgreSQL administrator capabilities", err)
 	}
 	if !superuser && (!createDatabase || !createRole) {
-		return "", errors.New("PostgreSQL administrator must be able to create databases and roles")
+		return administratorCapabilities{}, errors.New("PostgreSQL administrator must be able to create databases and roles")
 	}
-	return name, nil
+	return administratorCapabilities{name: name, superuser: superuser}, nil
+}
+
+func inspectExistingRuntimeRoleAdministration(ctx context.Context, connection *pgx.Conn, administrator administratorCapabilities) error {
+	if administrator.superuser {
+		return nil
+	}
+	for _, role := range []config.DatabaseRole{config.DatabaseRoleMigrator, config.DatabaseRoleAPI, config.DatabaseRoleWorker} {
+		var superuser, replication, bypassRLS, adminOption bool
+		err := connection.QueryRow(ctx, `
+SELECT
+    target.rolsuper,
+    target.rolreplication,
+    target.rolbypassrls,
+    coalesce(pg_catalog.bool_or(membership.admin_option), false)
+FROM pg_catalog.pg_roles AS target
+LEFT JOIN pg_catalog.pg_auth_members AS membership
+    ON membership.roleid = target.oid
+   AND membership.member = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_user)
+WHERE target.rolname = $1
+GROUP BY target.rolsuper, target.rolreplication, target.rolbypassrls`, string(role)).Scan(
+			&superuser, &replication, &bypassRLS, &adminOption,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return safeDatabaseError("inspect existing runtime role "+string(role), err)
+		}
+		if err = validateExistingRuntimeRoleAdministration(role, superuser, replication, bypassRLS, adminOption); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateExistingRuntimeRoleAdministration(role config.DatabaseRole, superuser, replication, bypassRLS, adminOption bool) error {
+	if superuser || replication || bypassRLS {
+		return fmt.Errorf("existing runtime role %s requires a superuser to reconcile", role)
+	}
+	if !adminOption {
+		return fmt.Errorf("PostgreSQL administrator requires ADMIN OPTION for existing runtime role %s", role)
+	}
+	return nil
 }
 
 func requireTLS(ctx context.Context, connection *pgx.Conn) error {

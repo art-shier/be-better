@@ -91,6 +91,58 @@ func TestRoleStatementsBindPasswordsAndReconcileSecuritySettings(t *testing.T) {
 	}
 }
 
+func TestRestrictedAdministratorRoleReconciliationAvoidsSuperuserOnlyOptions(t *testing.T) {
+	plan := rolePlans(bootstrapTestSource())[1]
+	attributes := restrictedAdministratorRoleAttributes(plan)
+	for _, expected := range []string{
+		"LOGIN", "NOINHERIT", "NOCREATEDB", "NOCREATEROLE",
+		"CONNECTION LIMIT " + strconv.Itoa(plan.connectionLimit),
+	} {
+		if !strings.Contains(attributes, expected) {
+			t.Fatalf("restricted administrator role attributes are missing %q", expected)
+		}
+	}
+	for _, forbidden := range []string{"NOSUPERUSER", "NOREPLICATION", "NOBYPASSRLS"} {
+		if strings.Contains(attributes, forbidden) {
+			t.Fatalf("restricted administrator role attributes contain superuser-only option %q", forbidden)
+		}
+	}
+
+	joined := joinQueries(roleStatements(plan))
+	for _, guard := range []string{"target.rolsuper", "target.rolreplication", "target.rolbypassrls", "pg_catalog.pg_auth_members", "admin_option"} {
+		if !strings.Contains(joined, guard) {
+			t.Fatalf("role reconciliation SQL is missing existing-role guard %q", guard)
+		}
+	}
+}
+
+func TestRestrictedAdministratorRejectsUnsafeOrUnownedExistingRoles(t *testing.T) {
+	tests := []struct {
+		name        string
+		superuser   bool
+		replication bool
+		bypassRLS   bool
+		adminOption bool
+		wantError   bool
+	}{
+		{name: "safe role with ADMIN OPTION", adminOption: true},
+		{name: "superuser drift", superuser: true, adminOption: true, wantError: true},
+		{name: "replication drift", replication: true, adminOption: true, wantError: true},
+		{name: "bypass RLS drift", bypassRLS: true, adminOption: true, wantError: true},
+		{name: "missing ADMIN OPTION", wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateExistingRuntimeRoleAdministration(
+				config.DatabaseRoleAPI, test.superuser, test.replication, test.bypassRLS, test.adminOption,
+			)
+			if (err != nil) != test.wantError {
+				t.Fatalf("validation error = %v, wantError %t", err, test.wantError)
+			}
+		})
+	}
+}
+
 func TestBootstrapGeneratedSQLContainsNoDestructiveOperations(t *testing.T) {
 	statements := make([]sqlStatement, 0)
 	for _, plan := range rolePlans(bootstrapTestSource()) {
