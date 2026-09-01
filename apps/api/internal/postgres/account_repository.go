@@ -61,7 +61,7 @@ func (repository *AccountRepository) CreatePendingAccount(ctx context.Context, r
 	}); err != nil {
 		return model.Account{}, mapDatabaseError("create verification token", err)
 	}
-	if _, err = queries.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
+	if err = queries.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
 		ID: pgUUID(registration.OutboxID), UserID: userID,
 		EventType: "email.verification.requested", AggregateType: "user", AggregateID: userID,
 		Payload: append([]byte(nil), registration.OutboxPayload...), AvailableAt: pgTime(registration.Account.CreatedAt),
@@ -124,7 +124,7 @@ func (repository *AccountRepository) CreateAccountTokenDelivery(ctx context.Cont
 		}); err != nil {
 			return mapDatabaseError("create account token delivery", err)
 		}
-		if _, err := queries.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
+		if err := queries.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
 			ID: pgUUID(delivery.OutboxID), UserID: pgUUID(account.ID), EventType: delivery.EventType,
 			AggregateType: "user", AggregateID: pgUUID(account.ID),
 			Payload: append([]byte(nil), delivery.OutboxPayload...), AvailableAt: pgTime(delivery.Token.CreatedAt),
@@ -202,7 +202,7 @@ func (repository *AccountRepository) UpdateEmail(ctx context.Context, userID uui
 		}); err != nil {
 			return mapDatabaseError("create changed-email verification token", err)
 		}
-		if _, err = queries.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
+		if err = queries.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
 			ID: pgUUID(delivery.OutboxID), UserID: pgUUID(userID), EventType: delivery.EventType,
 			AggregateType: "user", AggregateID: pgUUID(userID),
 			Payload: append([]byte(nil), delivery.OutboxPayload...), AvailableAt: pgTime(delivery.Token.CreatedAt),

@@ -348,14 +348,13 @@ func (q *Queries) CreateAuditEventEntity(ctx context.Context, auditEventID pgtyp
 	return err
 }
 
-const createOutboxEvent = `-- name: CreateOutboxEvent :one
+const createOutboxEvent = `-- name: CreateOutboxEvent :exec
 INSERT INTO dayorder.outbox_events (
     id, user_id, event_type, aggregate_type, aggregate_id, payload, available_at
 ) VALUES (
     $1, $2, $3, $4,
     $5, $6, $7
 )
-RETURNING id, user_id, event_type, aggregate_type, aggregate_id, payload, status, available_at, attempts, locked_at, lock_token, last_error, created_at, processed_at
 `
 
 type CreateOutboxEventParams struct {
@@ -368,8 +367,8 @@ type CreateOutboxEventParams struct {
 	AvailableAt   pgtype.Timestamptz `db:"available_at" json:"available_at"`
 }
 
-func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) (*DayorderOutboxEvent, error) {
-	row := q.db.QueryRow(ctx, createOutboxEvent,
+func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) error {
+	_, err := q.db.Exec(ctx, createOutboxEvent,
 		arg.ID,
 		arg.UserID,
 		arg.EventType,
@@ -378,24 +377,7 @@ func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventPa
 		arg.Payload,
 		arg.AvailableAt,
 	)
-	var i DayorderOutboxEvent
-	err := row.Scan(
-		&i.ID,
-		&i.UserID,
-		&i.EventType,
-		&i.AggregateType,
-		&i.AggregateID,
-		&i.Payload,
-		&i.Status,
-		&i.AvailableAt,
-		&i.Attempts,
-		&i.LockedAt,
-		&i.LockToken,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.ProcessedAt,
-	)
-	return &i, err
+	return err
 }
 
 const failAgentRun = `-- name: FailAgentRun :one

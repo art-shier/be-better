@@ -34,7 +34,7 @@ type Querier interface {
 	CreateGoal(ctx context.Context, arg CreateGoalParams) (*DayorderGoal, error)
 	CreateGoalMilestone(ctx context.Context, arg CreateGoalMilestoneParams) (*DayorderGoalMilestone, error)
 	CreateNote(ctx context.Context, arg CreateNoteParams) (*DayorderNote, error)
-	CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) (*DayorderOutboxEvent, error)
+	CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) error
 	CreateRecord(ctx context.Context, arg CreateRecordParams) (*DayorderRecord, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (*DayorderSession, error)
 	CreateTag(ctx context.Context, iD pgtype.UUID, userID pgtype.UUID, name string, normalizedName string) (*DayorderTag, error)

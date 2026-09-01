@@ -28,7 +28,7 @@ func (*OutboxWriter) Record(
 	}
 	queries := db.New(tx)
 	for _, event := range events {
-		if _, err := queries.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
+		if err := queries.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
 			ID: pgUUID(event.ID), UserID: pgUUID(userID), EventType: event.EventType,
 			AggregateType: event.AggregateType, AggregateID: pgUUID(event.AggregateID),
 			Payload: bytes.Clone(event.Payload), AvailableAt: pgTime(event.AvailableAt),

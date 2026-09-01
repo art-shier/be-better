@@ -233,11 +233,10 @@ FROM dayorder.audit_event_entities
 WHERE user_id = sqlc.arg(user_id) AND audit_event_id = sqlc.arg(audit_event_id)
 ORDER BY entity_type, entity_id;
 
--- name: CreateOutboxEvent :one
+-- name: CreateOutboxEvent :exec
 INSERT INTO dayorder.outbox_events (
     id, user_id, event_type, aggregate_type, aggregate_id, payload, available_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(user_id), sqlc.arg(event_type), sqlc.arg(aggregate_type),
     sqlc.arg(aggregate_id), sqlc.arg(payload), sqlc.arg(available_at)
-)
-RETURNING *;
+);
