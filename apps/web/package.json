@@ -8,7 +8,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
-    "test": "cross-env NODE_ENV=test vitest run",
+    "test": "cross-env NODE_ENV=test TZ=Asia/Shanghai vitest run",
     "test:watch": "cross-env NODE_ENV=test vitest"
   },
   "dependencies": {
