@@ -51,6 +51,7 @@ for (const role of ["dayorder_migrator", "dayorder_api", "dayorder_worker", "day
 requireMatch(roles, /REVOKE CONNECT, TEMPORARY ON DATABASE[^;]+FROM PUBLIC/i, "database defaults must revoke public connect and temporary privileges");
 requireMatch(roles, /GRANT pg_monitor TO dayorder_monitor/i, "monitor role must inherit pg_monitor");
 requireMatch(backup, /repo1-cipher-type=aes-256-cbc/, "pgBackRest repository must be encrypted");
+requireMatch(backup, /compress-type=gz/, "pgBackRest compression must be supported by the Alpine package");
 for (const variable of [
   "POSTGRES_PASSWORD_FILE",
   "DATABASE_URL_FILE",
