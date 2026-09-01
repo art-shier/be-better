@@ -154,7 +154,10 @@ SET status = sqlc.arg(status),
     provider = sqlc.arg(provider),
     model = sqlc.arg(model),
     summary = sqlc.arg(summary),
-    finished_at = CASE WHEN sqlc.arg(status)::varchar = 'completed' THEN sqlc.arg(finished_at) ELSE NULL END,
+    finished_at = CASE
+        WHEN sqlc.arg(status)::varchar = 'completed' THEN sqlc.arg(finished_at)::timestamptz
+        ELSE NULL::timestamptz
+    END,
     error_code = NULL,
     error_message = NULL,
     version = version + 1,

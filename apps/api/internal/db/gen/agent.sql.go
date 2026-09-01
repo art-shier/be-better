@@ -438,7 +438,10 @@ SET status = $1,
     provider = $2,
     model = $3,
     summary = $4,
-    finished_at = CASE WHEN $1::varchar = 'completed' THEN $5 ELSE NULL END,
+    finished_at = CASE
+        WHEN $1::varchar = 'completed' THEN $5::timestamptz
+        ELSE NULL::timestamptz
+    END,
     error_code = NULL,
     error_message = NULL,
     version = version + 1,
