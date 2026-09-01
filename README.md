@@ -109,6 +109,36 @@ Invoke-WebRequest https://你的域名/health/ready
 
 PostgreSQL 不发布主机端口；公网只开放 Caddy 的 80/443。上线、回滚、事故、用户删除和数据库维护分别见 [运行手册目录](docs/runbooks/)。备份与恢复目标为 RPO ≤ 5 分钟、RTO ≤ 60 分钟。
 
+## ConfigHub PostgreSQL 配置
+
+ConfigHub CLI 在当前接入中是只读客户端：配置值需要在 ConfigHub Web 中维护，CLI 只负责读取并注入当前进程。数据库配置固定存放在项目/环境 `shier/prod`，需要以下七个键：`db_address`、`db_port`、`db_username`、`db_password`、`db_migrator_password`、`db_api_password`、`db_worker_password`。本地 `.confighub.yaml` 包含 Machine Token，已被 Git 忽略，不得复制到其他项目文件。
+
+首次初始化或角色密码轮换时执行：
+
+```powershell
+npm run config:db:preflight
+npm run config:db:bootstrap
+npm run config:db:check
+```
+
+`preflight` 只读检查 PostgreSQL TLS、管理员建库/建角色能力和既有对象所有权；必须先通过它再执行 Bootstrap。Bootstrap 只处理固定的 `dayorder-test`、`dayorder` 两个数据库以及 `dayorder_migrator`、`dayorder_api`、`dayorder_worker` 三个角色，可重复执行，绝不会删除数据库、Schema 或角色。默认开发环境和本地业务验证只连接 `dayorder-test`：
+
+```powershell
+npm run config:dev:api
+npm run config:dev:worker
+```
+
+生产运行或生产 schema 检查必须显式设置 `DAYORDER_ENV=production`；建议在独立 PowerShell 作用域中设置，避免污染后续本地命令：
+
+```powershell
+& {
+  $env:DAYORDER_ENV = 'production'
+  confighub run --project shier --env prod -- go run ./apps/api/cmd/migrate -check
+}
+```
+
+轮换任一数据库角色密码时，顺序固定为：先在 ConfigHub 发布包含新密码的 Revision，再运行 Bootstrap 更新 PostgreSQL 角色，最后重启受影响的 API、Worker 或 Migrator。不要把 `confighub export` 的原始输出、密码、Token 或完整数据库 URL 粘贴到日志、Issue、聊天记录或提交中。
+
 ## 核心配置
 
 | 变量 | 作用 |
