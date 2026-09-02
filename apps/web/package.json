@@ -12,7 +12,7 @@
     "test:watch": "cross-env NODE_ENV=test vitest"
   },
   "dependencies": {
-    "@radix-ui/react-dialog": "1.1.15",
+    "@radix-ui/react-dialog": "1.1.23",
     "date-fns": "3.6.0",
     "idb": "^8.0.3",
     "lucide-react": "0.468.0",
