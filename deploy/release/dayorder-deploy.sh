@@ -7,22 +7,44 @@ readonly LATEST_BASE="https://github.com/$REPOSITORY/releases/latest/download"
 readonly VERSION_BASE="https://github.com/$REPOSITORY/releases/download"
 
 die() { printf 'dayorder-deploy: %s\n' "$*" >&2; exit 1; }
-usage() { printf 'usage: dayorder-deploy.sh <web|server|worker|all> [--version vX.Y.Z] [--root PATH]\n' >&2; }
+usage() {
+  printf '%s\n' \
+    'usage: dayorder-deploy.sh <web|server|worker|all> [--version vX.Y.Z] [--root PATH]' \
+    '       dayorder-deploy.sh upgrade <web|server|worker|all> [--root PATH]' \
+    '       dayorder-deploy.sh redeploy <web|server|worker|all> [--version vX.Y.Z] [--root PATH]' \
+    '       dayorder-deploy.sh <start|stop|restart|status> <server|worker|web|all> [--root PATH]' >&2
+}
 require_command() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 
 [[ $# -ge 1 ]] || { usage; exit 1; }
-component="$1"; shift
+action=deploy
+case "$1" in
+  web|server|worker|all) component="$1"; shift ;;
+  start|stop|restart|status|upgrade|redeploy)
+    action="$1"; shift
+    [[ $# -ge 1 ]] || { usage; exit 1; }
+    component="$1"; shift
+    ;;
+  *) usage; exit 1 ;;
+esac
 case "$component" in web|server|worker|all) ;; *) usage; exit 1 ;; esac
 requested_version=""
+version_specified=0
 root_input="$PWD"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --version) [[ $# -ge 2 ]] || die "--version requires a value"; requested_version="$2"; shift 2 ;;
+    --version) [[ $# -ge 2 ]] || die "--version requires a value"; requested_version="$2"; version_specified=1; shift 2 ;;
     --root) [[ $# -ge 2 ]] || die "--root requires a value"; root_input="$2"; shift 2 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
-[[ -z "$requested_version" || "$requested_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "version must match vX.Y.Z"
+[[ "$action" != upgrade || "$version_specified" == 0 ]] || die "upgrade does not accept --version; it always resolves the latest Release"
+case "$action" in
+  start|stop|restart|status)
+    [[ "$version_specified" == 0 ]] || die "$action does not accept --version"
+    ;;
+esac
+[[ "$version_specified" == 0 || "$requested_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "version must match vX.Y.Z"
 [[ -n "$root_input" ]] || die "deployment root must not be empty"
 [[ ! "$root_input" =~ [[:cntrl:]] ]] || die "deployment root contains control characters"
 [[ ! -L "$root_input" ]] || die "deployment root must not be a symbolic link"
@@ -30,6 +52,54 @@ root="$(realpath -m -- "$root_input")"
 home="$(realpath -m -- "${HOME:?HOME is required}")"
 [[ "$root" != / ]] || die "filesystem root cannot be the deployment root"
 [[ "$root" != "$home" ]] || die "home directory cannot be the deployment root"
+
+report_web_status() {
+  local link="$root/current-web" target
+  if [[ -L "$link" ]]; then
+    target="$(realpath -m -- "$link")"
+    printf 'Web current: %s\n' "$target"
+  elif [[ -e "$link" ]]; then
+    die "Web current path is not a symbolic link: $link"
+  else
+    printf 'Web is not deployed under %s\n' "$root"
+  fi
+}
+
+manage_services() {
+  local result=0
+  local -a services
+  if [[ "$component" == web ]]; then
+    [[ "$action" == status ]] || printf 'Web has no managed systemd service; %s did not change current-web.\n' "$action"
+    report_web_status
+    return
+  fi
+  require_command systemctl
+  case "$component" in
+    server) services=(dayorder-api.service) ;;
+    worker) services=(dayorder-worker.service) ;;
+    all)
+      if [[ "$action" == stop ]]; then
+        services=(dayorder-worker.service dayorder-api.service)
+      else
+        services=(dayorder-api.service dayorder-worker.service)
+      fi
+      ;;
+  esac
+  systemctl --user "$action" "${services[@]}" || result=$?
+  if [[ "$component" == all ]]; then
+    [[ "$action" == status ]] || printf 'Web has no managed systemd service; %s did not change current-web.\n' "$action"
+    report_web_status
+  fi
+  return "$result"
+}
+
+case "$action" in
+  start|stop|restart|status)
+    manage_services
+    exit
+    ;;
+esac
+
 mkdir -p -- "$root"
 [[ ! -L "$root" ]] || die "deployment root must not be a symbolic link"
 
@@ -568,7 +638,7 @@ restore_link() {
 deploy_server() {
   local destination="$root/releases/$version/server"
   server_old="$(current_target server)" || return 1
-  if [[ "$server_old" == "$destination" ]]; then printf 'Server %s is already deployed\n' "$version"; return 0; fi
+  if [[ "$action" != redeploy && "$server_old" == "$destination" ]]; then printf 'Server %s is already deployed\n' "$version"; return 0; fi
   "$destination/scripts/migrate.sh" up "$config_dir/migrate.env" || return 1
   "$destination/scripts/migrate.sh" check "$config_dir/migrate.env" || return 1
   switch_link server "$destination" || return 1; server_changed=1
@@ -583,7 +653,7 @@ deploy_server() {
 deploy_worker() {
   local destination="$root/releases/$version/worker"
   worker_old="$(current_target worker)" || return 1
-  if [[ "$worker_old" == "$destination" ]]; then printf 'Worker %s is already deployed\n' "$version"; return 0; fi
+  if [[ "$action" != redeploy && "$worker_old" == "$destination" ]]; then printf 'Worker %s is already deployed\n' "$version"; return 0; fi
   switch_link worker "$destination" || return 1; worker_changed=1
   if ! write_unit dayorder-worker "$root/current-worker" start-worker.sh "$config_dir/worker.env" 60 || \
     ! activate_service dayorder-worker || ! systemctl --user is-active --quiet dayorder-worker.service; then
@@ -596,7 +666,7 @@ deploy_worker() {
 deploy_web() {
   local destination="$root/releases/$version/web"
   web_old="$(current_target web)" || return 1
-  if [[ "$web_old" == "$destination" ]]; then printf 'Web %s is already deployed\n' "$version"; return 0; fi
+  if [[ "$action" != redeploy && "$web_old" == "$destination" ]]; then printf 'Web %s is already deployed\n' "$version"; return 0; fi
   switch_link web "$destination" || return 1
   web_changed=1
   printf 'Web %s deployed at %s/current-web; configure Nginx/Caddy/CDN separately\n' "$version" "$root"

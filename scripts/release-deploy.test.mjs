@@ -416,9 +416,96 @@ test("deployer rejects invalid commands, versions, roots, and architectures", (t
   makeAssetRelease(f, "v1.2.3");
   assert.match(runDeploy(f, ["api"]).stderr, /web\|server\|worker\|all/);
   assert.match(runDeploy(f, ["web", "--version", "latest"]).stderr, /vX\.Y\.Z/);
+  assert.match(runDeploy(f, ["web", "--version", ""]).stderr, /version must match vX\.Y\.Z/);
+  assert.match(runDeploy(f, ["upgrade", "web", "--version", ""]).stderr, /upgrade.*--version/i);
+  assert.match(runDeploy(f, ["restart", "server", "--version", ""]).stderr, /restart.*--version/i);
   assert.match(runDeploy(f, ["web", "--root", f.home]).stderr, /home directory/);
   const unsupported = runDeploy(f, ["server"], { DAYORDER_TEST_MACHINE: "riscv64" });
   assert.match(unsupported.stderr, /unsupported architecture/);
+});
+
+test("service lifecycle commands manage API and Worker without downloading releases", (t) => {
+  const f = fixture(t);
+  const web = resolve(f.runDirectory, "releases/v1.2.3/web");
+  mkdirSync(web, { recursive: true });
+  makeDeploymentSymlink(web, resolve(f.runDirectory, "current-web"));
+  const expectations = new Map([
+    ["start", "dayorder-api.service dayorder-worker.service"],
+    ["stop", "dayorder-worker.service dayorder-api.service"],
+    ["restart", "dayorder-api.service dayorder-worker.service"],
+    ["status", "dayorder-api.service dayorder-worker.service"],
+  ]);
+
+  for (const [action, services] of expectations) {
+    writeFileSync(f.log, "", "utf8");
+    const result = runDeploy(f, [action, "all", "--root", f.runDirectory]);
+    assert.equal(result.status, 0, `${action}: ${result.stderr}`);
+    const log = readFileSync(f.log, "utf8");
+    assert.match(log, new RegExp(`systemctl --user ${action} ${services}`));
+    assert.doesNotMatch(log, /curl |confighub|loginctl/);
+    assert.match(result.stdout, /Web.*v1\.2\.3/i);
+  }
+
+  writeFileSync(f.log, "", "utf8");
+  const untouchedRoot = resolve(f.base, "lifecycle-must-not-create-this-root");
+  const failedStop = runDeploy(f, ["stop", "server", "--root", untouchedRoot], {
+    DAYORDER_TEST_SYSTEMCTL_STOP_FAIL: "1",
+  });
+  assert.notEqual(failedStop.status, 0);
+  assert.equal(existsSync(untouchedRoot), false);
+  assert.match(readFileSync(f.log, "utf8"), /systemctl --user stop dayorder-api\.service/);
+
+  writeFileSync(f.log, "", "utf8");
+  const webOnly = runDeploy(f, ["restart", "web", "--root", f.runDirectory]);
+  assert.equal(webOnly.status, 0, webOnly.stderr);
+  assert.equal(readFileSync(f.log, "utf8"), "");
+  assert.match(webOnly.stdout, /Web has no managed systemd service/i);
+});
+
+test("redeploy reactivates the same version and repairs units without downloading component archives", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const initial = runDeploy(f, ["all", "--version", "v1.2.3"]);
+  assert.equal(initial.status, 0, initial.stderr);
+  rmSync(resolve(f.home, ".config/systemd/user/dayorder-api.service"));
+  rmSync(resolve(f.home, ".config/systemd/user/dayorder-worker.service"));
+  writeFileSync(f.log, "", "utf8");
+
+  const redeployed = runDeploy(f, ["redeploy", "all", "--version", "v1.2.3"]);
+
+  assert.equal(redeployed.status, 0, redeployed.stderr);
+  assert.equal(existsSync(resolve(f.home, ".config/systemd/user/dayorder-api.service")), true);
+  assert.equal(existsSync(resolve(f.home, ".config/systemd/user/dayorder-worker.service")), true);
+  assert.doesNotMatch(redeployed.stdout, /already deployed/);
+  const log = readFileSync(f.log, "utf8");
+  assert.match(log, /migrate up/);
+  assert.match(log, /systemctl --user restart dayorder-api\.service/);
+  assert.match(log, /systemctl --user restart dayorder-worker\.service/);
+  assert.deepEqual(log.split("\n").filter((line) => line.startsWith("curl ")), [
+    "curl https://github.com/art-shier/be-better/releases/download/v1.2.3/release-manifest.json",
+    "curl https://github.com/art-shier/be-better/releases/download/v1.2.3/SHA256SUMS",
+  ]);
+});
+
+test("upgrade resolves latest and activates the newer release", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const initial = runDeploy(f, ["all", "--version", "v1.2.3"]);
+  assert.equal(initial.status, 0, initial.stderr);
+  makeAssetRelease(f, "v1.2.4");
+  writeFileSync(f.log, "", "utf8");
+
+  const upgraded = runDeploy(f, ["upgrade", "all"]);
+
+  assert.equal(upgraded.status, 0, upgraded.stderr);
+  for (const name of ["server", "worker", "web"]) {
+    assert.equal(
+      deploymentRealpath(resolve(f.runDirectory, `current-${name}`)),
+      deploymentRealpath(resolve(f.runDirectory, `releases/v1.2.4/${name}`)),
+    );
+  }
+  assert.match(readFileSync(f.log, "utf8"), /releases\/latest\/download\/release-manifest\.json/);
+  const pinned = runDeploy(f, ["upgrade", "all", "--version", "v1.2.3"]);
+  assert.notEqual(pinned.status, 0);
+  assert.match(pinned.stderr, /upgrade.*--version/i);
 });
 
 test("deployer derives architecture and operator identity from uname and id", (t) => {

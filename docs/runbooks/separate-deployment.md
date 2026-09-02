@@ -85,6 +85,31 @@ sudo loginctl enable-linger "$USER"
 ./dayorder-deploy.sh all --version v0.3.0
 ```
 
+升级到 GitHub 最新 Release：
+
+```bash
+./dayorder-deploy.sh upgrade all
+./dayorder-deploy.sh upgrade server --root /srv/dayorder
+```
+
+`upgrade` 始终解析 latest，不接受 `--version`，且只升级应用资产，不会自更新 `dayorder-deploy.sh`；当前已经是最新版本时不会重启服务。若需要在版本不变时重新执行 Server migration、重建 systemd unit 并重新激活组件，使用 `redeploy`。匹配的本地 Release 资产会复用，不会重复下载组件压缩包：
+
+```bash
+./dayorder-deploy.sh redeploy all
+./dayorder-deploy.sh redeploy server --version v0.3.0 --root /srv/dayorder
+```
+
+API 和 Worker 的启停、重启与状态检查也可以统一通过部署脚本执行：
+
+```bash
+./dayorder-deploy.sh start all --root /srv/dayorder
+./dayorder-deploy.sh stop all --root /srv/dayorder
+./dayorder-deploy.sh restart all --root /srv/dayorder
+./dayorder-deploy.sh status all --root /srv/dayorder
+```
+
+这些生命周期命令不会访问 GitHub Release、运行 ConfigHub 预检或修改部署目录，并且必须由最初部署服务的同一用户执行。`stop` 只停止当前服务，不会取消 unit 的开机启用状态。`all` 只对 `dayorder-api.service` 和 `dayorder-worker.service` 执行 systemd 操作，同时报告 `<root>/current-web`；Web 没有由脚本管理的 systemd 服务，`start|stop|restart web` 只报告当前 Web 链接，不会启动或停止 Nginx/Caddy。
+
 `all` 会先完成 Server migration 与就绪检查，再激活 Worker，最后切换 Web 链接。Server 或 Worker 激活失败时，应用链接会恢复到本次部署之前的版本并重新启动旧服务；`all` 后续步骤失败也会按逆序恢复本次已切换的应用链接。恢复旧 Server 后还会重新轮询 API 就绪端点；若旧 API 仍不健康，脚本会输出 `restored API failed readiness; manual intervention required` 并失败退出，运维必须检查链接、服务状态和日志。
 
 Web 只下载、校验并切换 `current-web`；Web 部署不安装、配置或启动 Nginx/Caddy，也不启动静态服务器。Nginx/Caddy 必须将站点根目录指向 `<root>/current-web`。Server 与 Worker 是两个独立的 `systemd --user` 服务，分别使用持久化的 `api.env`、`migrate.env` 与 `worker.env`，并从同目录的 `.confighub.yaml` 读取数据库配置。
@@ -96,6 +121,7 @@ Web 只下载、校验并切换 `current-web`；Web 部署不安装、配置或�
 部署完成后检查两个服务：
 
 ```bash
+./dayorder-deploy.sh status all
 systemctl --user status dayorder-api.service dayorder-worker.service
 journalctl --user -u dayorder-api.service -f
 journalctl --user -u dayorder-worker.service -f

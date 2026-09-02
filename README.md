@@ -169,6 +169,8 @@ chmod 0755 dayorder-deploy.sh
 ./dayorder-deploy.sh all
 ```
 
+后续可用 `./dayorder-deploy.sh upgrade all` 升级应用到 GitHub 最新 Release；该命令不接受 `--version`，也不会自更新 `dayorder-deploy.sh`。需要在版本未变化时重新生成 unit、执行 Server migration 检查并重启 API/Worker，可运行 `./dayorder-deploy.sh redeploy all`，或用 `--version vX.Y.Z` 重部署指定版本。服务启停和状态检查可使用 `start`、`stop`、`restart`、`status`，例如 `./dayorder-deploy.sh restart all`；这些命令只管理 API 与 Worker，Web 没有独立的 systemd 服务，只报告当前 `current-web`。旧的 `web|server|worker|all` 部署命令保持兼容。
+
 首次运行 Server 或 Worker 时，脚本会创建 `~/a/dayorder-config/{api.env,migrate.env,worker.env,secrets/}` 并停止。把包含 ConfigHub Server 和 Machine Token 的 `.confighub.yaml` 放到 `~/a/dayorder-config/`；启动脚本会在该目录执行 `confighub run --project shier --env prod`，不再使用数据库 URL 密钥文件。ConfigHub CLI 自行处理配置文件、连接和权限错误，任一失败都会原样输出并停止部署。
 
 仍需创建三个非数据库密钥文件：`secrets/auth_hmac_key`、`secrets/smtp_password`、`secrets/agent_http_key`。每个文件必须是 exactly one non-empty single-line value，不能把多行值静默拼接。填写后按脚本输出限制权限，再重新运行 `./dayorder-deploy.sh all`：
