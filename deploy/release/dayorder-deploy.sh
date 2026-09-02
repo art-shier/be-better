@@ -203,11 +203,17 @@ validate_archive() {
   done <<< "$listings"
 }
 
+validate_no_unsafe_nodes() {
+  local directory="$1" label="$2" unsafe
+  if ! unsafe="$(find "$directory" \( -type l -o -type b -o -type c -o -type p -o -type s \) -print -quit)"; then
+    die "could not inspect $label for unsafe nodes"
+  fi
+  [[ -z "$unsafe" ]] || die "$label contains unsafe nodes"
+}
+
 validate_component_tree() {
   local name="$1" directory="$2" actual expected
-  if find "$directory" -type l -o -type b -o -type c -o -type p | grep -q .; then
-    die "archive contains unsafe nodes"
-  fi
+  validate_no_unsafe_nodes "$directory" "archive"
   case "$name" in
     web)
       [[ -f "$directory/index.html" && -d "$directory/assets" ]] || die "Web archive is missing index.html or assets"
@@ -262,18 +268,17 @@ managed_destination() {
 
 install_component() {
   local name="$1" asset archive checksum destination staging marker
-  asset="$(asset_name "$name")"; archive="$work_dir/$asset"
-  download "$release_base/$asset" "$archive"; verify_file "$asset"; checksum="$(checksum_for "$asset")"
+  asset="$(asset_name "$name")"; checksum="$(checksum_for "$asset")"
   destination="$(managed_destination "$name")"; marker="$destination/.dayorder-release"
   if [[ -d "$destination" ]]; then
     [[ ! -L "$marker" && -f "$marker" ]] || die "existing version directory has no release marker: $destination"
     grep -Fxq "asset=$asset" "$marker" && grep -Fxq "sha256=$checksum" "$marker" || \
       die "existing version directory does not match the Release asset"
-    if find "$destination" -type l -o -type b -o -type c -o -type p | grep -q .; then
-      die "existing version directory contains unsafe nodes"
-    fi
+    validate_no_unsafe_nodes "$destination" "existing version directory"
     return
   fi
+  archive="$work_dir/$asset"
+  download "$release_base/$asset" "$archive"; verify_file "$asset"
   staging="$work_dir/unpack-$name"; mkdir -p -- "$staging"
   validate_archive "$archive"
   tar --extract --gzip --no-same-owner --no-same-permissions --file "$archive" --directory "$staging"

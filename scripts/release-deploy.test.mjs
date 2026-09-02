@@ -143,6 +143,11 @@ exec /bin/ln "$@"
 if [[ "\${DAYORDER_TEST_TAR_LIST_FAIL:-0}" == 1 && "$*" == *"-tzf"* ]]; then exit 74; fi
 exec /usr/bin/tar "$@"
 `);
+  writeExecutable(resolve(directory, "find"), `#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ -n "\${DAYORDER_TEST_FIND_FAIL_PATH:-}" && "$1" == "$DAYORDER_TEST_FIND_FAIL_PATH" ]]; then exit 75; fi
+exec /usr/bin/find "$@"
+`);
   writeExecutable(resolve(directory, "stat"), `#!/usr/bin/env bash
 format=""; path="\${@: -1}"
 while [[ $# -gt 0 ]]; do
@@ -428,6 +433,7 @@ test("deployer derives architecture and operator identity from uname and id", (t
   const first = runDeploy(f, ["all"], identityEnvironment);
   assert.notEqual(first.status, 0);
   assert.match(first.stderr, /configuration templates were created/);
+  assert.match(readFileSync(f.log, "utf8"), /dayorder-server-linux-arm64\.tar\.gz/);
   writeFileSync(f.log, "", "utf8");
 
   const linger = runDeploy(f, ["server"], { ...identityEnvironment, DAYORDER_TEST_LINGER: "no" });
@@ -435,7 +441,6 @@ test("deployer derives architecture and operator identity from uname and id", (t
   assert.notEqual(linger.status, 0);
   assert.match(linger.stderr, /loginctl enable-linger "dayorder-operator"/);
   const log = readFileSync(f.log, "utf8");
-  assert.match(log, /dayorder-server-linux-arm64\.tar\.gz/);
   assert.match(log, /loginctl show-user dayorder-operator/);
   assert.doesNotMatch(log, /spoofed-user/);
 });
@@ -532,6 +537,34 @@ test("deployer rejects a noncanonical Manifest with assets outside the assets ob
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /manifest/i);
   assert.equal(existsSync(resolve(f.runDirectory, "current-web")), false);
+});
+
+test("cached component reuse rejects multiple unsafe nodes", (t) => {
+  const f = fixture(t);
+  makeAssetRelease(f, "v1.2.3");
+  const first = runDeploy(f, ["web"]);
+  assert.equal(first.status, 0, first.stderr);
+  const cachedWeb = resolve(f.runDirectory, "releases/v1.2.3/web");
+  makeDeploymentSymlink("missing-one", resolve(cachedWeb, "unsafe-one"));
+  makeDeploymentSymlink("missing-two", resolve(cachedWeb, "unsafe-two"));
+
+  const reused = runDeploy(f, ["web"]);
+
+  assert.notEqual(reused.status, 0);
+  assert.match(reused.stderr, /existing version directory contains unsafe nodes/i);
+});
+
+test("cached component reuse fails closed when its safety scan fails", (t) => {
+  const f = fixture(t);
+  makeAssetRelease(f, "v1.2.3");
+  const first = runDeploy(f, ["web"]);
+  assert.equal(first.status, 0, first.stderr);
+  const cachedWeb = deploymentPath(resolve(f.runDirectory, "releases/v1.2.3/web"));
+
+  const reused = runDeploy(f, ["web"], { DAYORDER_TEST_FIND_FAIL_PATH: cachedWeb });
+
+  assert.notEqual(reused.status, 0);
+  assert.match(reused.stderr, /could not inspect existing version directory/i);
 });
 
 test("deployer rejects checksum records with trailing fields", (t) => {
@@ -848,6 +881,11 @@ test("Successful all activates Server then Worker then Web and a repeat is a no-
   assert.equal(repeat.status, 0, repeat.stderr);
   assert.equal((repeat.stdout.match(/already deployed/g) ?? []).length, 3);
   const repeatLog = readFileSync(f.log, "utf8").slice(logBeforeRepeat.length);
+  assert.deepEqual(repeatLog.split("\n").filter((line) => line.startsWith("curl ")), [
+    "curl https://github.com/art-shier/be-better/releases/latest/download/release-manifest.json",
+    "curl https://github.com/art-shier/be-better/releases/download/v1.2.3/release-manifest.json",
+    "curl https://github.com/art-shier/be-better/releases/download/v1.2.3/SHA256SUMS",
+  ]);
   assert.doesNotMatch(repeatLog, /migrate|daemon-reload| enable | restart | start /);
 });
 
