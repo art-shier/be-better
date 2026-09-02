@@ -8,6 +8,7 @@ import (
 	"dayorder.local/api/internal/testdb"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -41,19 +42,32 @@ func TestUpgradeFromPreviousMigrationVersion(t *testing.T) {
 	defer pool.Close()
 	userID, tokenID := uuid.New(), uuid.New()
 	verificationOutboxID, resetOutboxID, agentOutboxID, lockToken := uuid.New(), uuid.New(), uuid.New(), uuid.New()
-	if _, err = pool.Exec(ctx, `
+	if err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if _, execErr := tx.Exec(ctx, `
 INSERT INTO dayorder.users (id, email, normalized_email, display_name, password_hash, status)
-VALUES ($1, 'legacy@example.com', 'legacy@example.com', 'Legacy', 'password-hash', 'pending_verification');
-INSERT INTO dayorder.user_settings (user_id) VALUES ($1);
+VALUES ($1, 'legacy@example.com', 'legacy@example.com', 'Legacy', 'password-hash', 'pending_verification')
+`, userID); execErr != nil {
+			return execErr
+		}
+		if _, execErr := tx.Exec(ctx, "INSERT INTO dayorder.user_settings (user_id) VALUES ($1)", userID); execErr != nil {
+			return execErr
+		}
+		if _, execErr := tx.Exec(ctx, `
 INSERT INTO dayorder.account_tokens (id, user_id, purpose, token_hash, expires_at)
-VALUES ($2, $1, 'verify_email', decode(repeat('11', 32), 'hex'), now() + interval '1 hour');
+VALUES ($2, $1, 'verify_email', decode(repeat('11', 32), 'hex'), now() + interval '1 hour')
+`, userID, tokenID); execErr != nil {
+			return execErr
+		}
+		_, execErr := tx.Exec(ctx, `
 INSERT INTO dayorder.outbox_events (
     id, user_id, event_type, aggregate_type, aggregate_id, payload, status, locked_at, lock_token
 ) VALUES
-    ($3, $1, 'email.verification.requested', 'user', $1, '{"token":"legacy-verification-secret"}'::jsonb, 'processing', now(), $6),
-    ($4, $1, 'email.password_reset.requested', 'user', $1, '{"token":"legacy-reset-secret"}'::jsonb, 'dead', NULL, NULL),
-    ($5, $1, 'agent.run.requested', 'agent_run', $1, '{"intent":"legacy-agent-request"}'::jsonb, 'pending', NULL, NULL);
-`, userID, tokenID, verificationOutboxID, resetOutboxID, agentOutboxID, lockToken); err != nil {
+    ($2, $1, 'email.verification.requested', 'user', $1, '{"token":"legacy-verification-secret"}'::jsonb, 'processing', now(), $5),
+    ($3, $1, 'email.password_reset.requested', 'user', $1, '{"token":"legacy-reset-secret"}'::jsonb, 'dead', NULL, NULL),
+    ($4, $1, 'agent.run.requested', 'agent_run', $1, '{"intent":"legacy-agent-request"}'::jsonb, 'pending', NULL, NULL)
+`, userID, verificationOutboxID, resetOutboxID, agentOutboxID, lockToken)
+		return execErr
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err = Up(database.MigrationURL); err != nil {
@@ -88,15 +102,28 @@ WHERE account.id = $1
 	}
 
 	rollbackUserID, rollbackTokenID, rollbackOutboxID := uuid.New(), uuid.New(), uuid.New()
-	if _, err = pool.Exec(ctx, `
+	if err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if _, execErr := tx.Exec(ctx, `
 INSERT INTO dayorder.users (id, email, normalized_email, display_name, password_hash, status)
-VALUES ($1, 'rollback@example.com', 'rollback@example.com', 'Rollback', 'password-hash', 'pending_verification');
-INSERT INTO dayorder.user_settings (user_id) VALUES ($1);
+VALUES ($1, 'rollback@example.com', 'rollback@example.com', 'Rollback', 'password-hash', 'pending_verification')
+`, rollbackUserID); execErr != nil {
+			return execErr
+		}
+		if _, execErr := tx.Exec(ctx, "INSERT INTO dayorder.user_settings (user_id) VALUES ($1)", rollbackUserID); execErr != nil {
+			return execErr
+		}
+		if _, execErr := tx.Exec(ctx, `
 INSERT INTO dayorder.account_tokens (id, user_id, purpose, token_hash, expires_at)
-VALUES ($2, $1, 'verify_email', decode(repeat('22', 32), 'hex'), now() + interval '1 hour');
+VALUES ($2, $1, 'verify_email', decode(repeat('22', 32), 'hex'), now() + interval '1 hour')
+`, rollbackUserID, rollbackTokenID); execErr != nil {
+			return execErr
+		}
+		_, execErr := tx.Exec(ctx, `
 INSERT INTO dayorder.outbox_events (id, user_id, event_type, aggregate_type, aggregate_id, payload)
-VALUES ($3, $1, 'email.verification.requested', 'user', $1, '{"token":"rollback-secret"}'::jsonb);
-`, rollbackUserID, rollbackTokenID, rollbackOutboxID); err != nil {
+VALUES ($2, $1, 'email.verification.requested', 'user', $1, '{"token":"rollback-secret"}'::jsonb)
+`, rollbackUserID, rollbackOutboxID)
+		return execErr
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err = Up(database.MigrationURL); err != nil {
