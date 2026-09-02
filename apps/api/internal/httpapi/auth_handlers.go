@@ -17,82 +17,33 @@ func (router *Router) registerAccount(response http.ResponseWriter, request *htt
 	if !router.decodeJSON(response, request, &input, 64<<10) {
 		return
 	}
-	account, err := router.accounts.Register(request.Context(), service.RegisterInput{
-		Email: input.Email, DisplayName: input.DisplayName, Password: input.Password,
+	result, err := router.accounts.Register(request.Context(), service.RegisterInput{
+		Email: input.Email, DisplayName: input.DisplayName, Password: input.Password, UserAgent: request.UserAgent(),
 	})
-	if err != nil {
-		router.handleServiceError(response, request, err)
-		return
-	}
-	router.writeJSON(response, http.StatusCreated, map[string]any{
-		"user": account, "verificationRequired": true,
-	})
-}
-
-func (router *Router) verifyEmail(response http.ResponseWriter, request *http.Request) {
-	var input struct {
-		Token string `json:"token"`
-	}
-	if !router.decodeJSON(response, request, &input, 16<<10) {
-		return
-	}
-	account, err := router.accounts.VerifyEmail(request.Context(), input.Token)
-	if err != nil {
-		router.handleServiceError(response, request, err)
-		return
-	}
-	result, err := router.sessions.CreateVerifiedSession(request.Context(), account, request.UserAgent())
 	if err != nil {
 		router.handleServiceError(response, request, err)
 		return
 	}
 	router.setSessionCookie(response, request, result.Token, result.Session.ExpiresAt)
-	router.writeJSON(response, http.StatusOK, map[string]any{
-		"user": result.Account, "expiresAt": result.Session.ExpiresAt,
+	router.writeJSON(response, http.StatusCreated, map[string]any{
+		"user": result.Account, "expiresAt": result.Session.ExpiresAt, "verificationRequired": false,
 	})
 }
 
+func (router *Router) verifyEmail(response http.ResponseWriter, request *http.Request) {
+	router.writeError(response, request, http.StatusServiceUnavailable, "EMAIL_VERIFICATION_NOT_AVAILABLE", "邮箱验证功能暂未接入", false, nil)
+}
+
 func (router *Router) resendVerification(response http.ResponseWriter, request *http.Request) {
-	var input struct {
-		Email string `json:"email"`
-	}
-	if !router.decodeJSON(response, request, &input, 16<<10) {
-		return
-	}
-	if err := router.accounts.ResendVerification(request.Context(), input.Email); err != nil {
-		router.handleServiceError(response, request, err)
-		return
-	}
-	router.writeJSON(response, http.StatusAccepted, map[string]bool{"accepted": true})
+	router.writeError(response, request, http.StatusServiceUnavailable, "EMAIL_VERIFICATION_NOT_AVAILABLE", "邮箱验证功能暂未接入", false, nil)
 }
 
 func (router *Router) requestPasswordReset(response http.ResponseWriter, request *http.Request) {
-	var input struct {
-		Email string `json:"email"`
-	}
-	if !router.decodeJSON(response, request, &input, 16<<10) {
-		return
-	}
-	if err := router.accounts.RequestPasswordReset(request.Context(), input.Email); err != nil {
-		router.handleServiceError(response, request, err)
-		return
-	}
-	router.writeJSON(response, http.StatusAccepted, map[string]bool{"accepted": true})
+	router.writeError(response, request, http.StatusServiceUnavailable, "PASSWORD_RESET_NOT_AVAILABLE", "忘记密码功能暂未接入", false, nil)
 }
 
 func (router *Router) completePasswordReset(response http.ResponseWriter, request *http.Request) {
-	var input struct {
-		Token    string `json:"token"`
-		Password string `json:"password"`
-	}
-	if !router.decodeJSON(response, request, &input, 32<<10) {
-		return
-	}
-	if _, err := router.accounts.ResetPassword(request.Context(), input.Token, input.Password); err != nil {
-		router.handleServiceError(response, request, err)
-		return
-	}
-	response.WriteHeader(http.StatusNoContent)
+	router.writeError(response, request, http.StatusServiceUnavailable, "PASSWORD_RESET_NOT_AVAILABLE", "忘记密码功能暂未接入", false, nil)
 }
 
 func (router *Router) loginAccount(response http.ResponseWriter, request *http.Request) {

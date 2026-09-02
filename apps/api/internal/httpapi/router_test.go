@@ -20,15 +20,17 @@ import (
 )
 
 type stubAccountApplication struct {
-	registerResult model.Account
+	registerResult service.RegistrationResult
 	registerErr    error
 	registerCalls  int
+	lastRegister   service.RegisterInput
 	verifyResult   model.Account
 	verifyErr      error
 }
 
-func (application *stubAccountApplication) Register(context.Context, service.RegisterInput) (model.Account, error) {
+func (application *stubAccountApplication) Register(_ context.Context, input service.RegisterInput) (service.RegistrationResult, error) {
 	application.registerCalls++
+	application.lastRegister = input
 	return application.registerResult, application.registerErr
 }
 func (application *stubAccountApplication) VerifyEmail(context.Context, string) (model.Account, error) {
@@ -53,10 +55,6 @@ func (application *stubAccountApplication) UpdateEmail(context.Context, model.Ac
 type stubSessionApplication struct {
 	loginResult         service.SessionResult
 	loginErr            error
-	verifiedResult      service.SessionResult
-	verifiedErr         error
-	verifiedAccount     model.Account
-	verifiedUserAgent   string
 	authenticated       model.AuthenticatedSession
 	authenticateErr     error
 	changeResult        service.SessionResult
@@ -94,11 +92,6 @@ func (metrics *recordingRouterMetrics) ObserveSyncMutation(status string) {
 func (application *stubSessionApplication) Login(_ context.Context, input service.LoginInput) (service.SessionResult, error) {
 	application.lastLogin = input
 	return application.loginResult, application.loginErr
-}
-func (application *stubSessionApplication) CreateVerifiedSession(_ context.Context, account model.Account, userAgent string) (service.SessionResult, error) {
-	application.verifiedAccount = account
-	application.verifiedUserAgent = userAgent
-	return application.verifiedResult, application.verifiedErr
 }
 func (application *stubSessionApplication) Authenticate(context.Context, string) (model.AuthenticatedSession, error) {
 	return application.authenticated, application.authenticateErr
@@ -141,39 +134,73 @@ func TestPostgresRouterLoginSetsHardenedHTTPSCookieAndRequestID(t *testing.T) {
 	}
 }
 
-func TestPostgresRouterEmailVerificationCreatesSession(t *testing.T) {
+func TestPostgresRouterRegistrationCreatesSessionWithoutVerification(t *testing.T) {
 	account := model.Account{ID: uuid.New(), Email: "user@example.com", Status: model.AccountActive}
 	expires := time.Now().UTC().Add(24 * time.Hour)
-	sessions := &stubSessionApplication{verifiedResult: service.SessionResult{
-		Account: account, Session: model.Session{ExpiresAt: expires}, Token: "verified-session-token",
+	accounts := &stubAccountApplication{registerResult: service.RegistrationResult{
+		Account: account, Session: model.Session{ExpiresAt: expires}, Token: "registration-session-token",
 	}}
-	handler := newTestRouter(t, &stubAccountApplication{verifyResult: account}, sessions, nil)
-	request := httptest.NewRequest(http.MethodPost, "https://dayorder.example/api/v1/auth/verify-email", bytes.NewBufferString(`{"token":"verification-token"}`))
+	handler := newTestRouter(t, accounts, &stubSessionApplication{}, nil)
+	request := httptest.NewRequest(http.MethodPost, "https://dayorder.example/api/v1/auth/register", bytes.NewBufferString(`{"email":"user@example.com","displayName":"User","password":"valid-password"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", "DayOrder Test Browser")
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
 
-	if response.Code != http.StatusOK {
+	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
 	}
-	if sessions.verifiedAccount.ID != account.ID || sessions.verifiedUserAgent != "DayOrder Test Browser" {
-		t.Fatalf("verified session input = account %s user-agent %q", sessions.verifiedAccount.ID, sessions.verifiedUserAgent)
+	if accounts.lastRegister.UserAgent != "DayOrder Test Browser" {
+		t.Fatalf("registration user-agent = %q", accounts.lastRegister.UserAgent)
 	}
 	cookies := response.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Value != "verified-session-token" || !cookies[0].Secure || !cookies[0].HttpOnly {
+	if len(cookies) != 1 || cookies[0].Value != "registration-session-token" || !cookies[0].Secure || !cookies[0].HttpOnly {
 		t.Fatalf("session cookies = %#v", cookies)
 	}
 	var body struct {
-		User      model.Account `json:"user"`
-		ExpiresAt time.Time     `json:"expiresAt"`
+		User                 model.Account `json:"user"`
+		ExpiresAt            time.Time     `json:"expiresAt"`
+		VerificationRequired *bool         `json:"verificationRequired"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.User.ID != account.ID || !body.ExpiresAt.Equal(expires) {
-		t.Fatalf("verification response = %#v", body)
+	if body.User.ID != account.ID || !body.ExpiresAt.Equal(expires) || body.VerificationRequired == nil || *body.VerificationRequired {
+		t.Fatalf("registration response = %#v", body)
+	}
+}
+
+func TestUnavailableEmailAccountRoutesReturnExplicitErrors(t *testing.T) {
+	handler := newTestRouter(t, &stubAccountApplication{}, &stubSessionApplication{}, nil)
+	for _, route := range []struct {
+		path    string
+		code    string
+		message string
+	}{
+		{path: "/api/v1/auth/verify-email", code: "EMAIL_VERIFICATION_NOT_AVAILABLE", message: "邮箱验证功能暂未接入"},
+		{path: "/api/v1/auth/resend-verification", code: "EMAIL_VERIFICATION_NOT_AVAILABLE", message: "邮箱验证功能暂未接入"},
+		{path: "/api/v1/auth/password-reset/request", code: "PASSWORD_RESET_NOT_AVAILABLE", message: "忘记密码功能暂未接入"},
+		{path: "/api/v1/auth/password-reset/complete", code: "PASSWORD_RESET_NOT_AVAILABLE", message: "忘记密码功能暂未接入"},
+	} {
+		t.Run(route.path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "https://dayorder.example"+route.path, bytes.NewBufferString(`{}`))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			if response.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+			}
+			var envelope apiErrorEnvelope
+			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error.Code != route.code || envelope.Error.Message != route.message || envelope.Error.Retryable {
+				t.Fatalf("error = %#v", envelope.Error)
+			}
+		})
 	}
 }
 
@@ -200,7 +227,7 @@ func TestRequestLogAndMetricsUseRouteStatusWithoutSensitiveInput(t *testing.T) {
 	var logs bytes.Buffer
 	metrics := &recordingRouterMetrics{}
 	handler, err := NewRouter(RouterOptions{
-		Accounts: &stubAccountApplication{registerResult: model.Account{ID: uuid.New(), Email: "safe@example.com"}},
+		Accounts: &stubAccountApplication{registerResult: service.RegistrationResult{Account: model.Account{ID: uuid.New(), Email: "safe@example.com"}}},
 		Sessions: &stubSessionApplication{}, Metrics: metrics,
 		Logger: slog.New(slog.NewJSONHandler(&logs, nil)),
 	})

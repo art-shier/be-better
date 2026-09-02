@@ -17,6 +17,8 @@ const (
 	Development Environment = "development"
 	Test        Environment = "test"
 	Production  Environment = "production"
+
+	configHubAuthHMACKey = "dayorder_auth_hmac_key"
 )
 
 type LookupFunc func(string) (string, bool)
@@ -49,6 +51,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	ScrubConfigHubDatabaseEnvironment()
+	_ = os.Unsetenv(configHubAuthHMACKey)
 	return config, nil
 }
 
@@ -132,10 +135,7 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 		allowedOrigins = append(allowedOrigins, strings.TrimSuffix(parsed.String(), "/"))
 	}
 
-	hmacKey := valueOr(lookup, "DAYORDER_AUTH_HMAC_KEY", "")
-	if hmacKey == "" && environment != Production {
-		hmacKey = "development-only-hmac-key-change-before-production"
-	}
+	hmacKey := resolveAuthHMACKey(lookup, environment)
 	if len([]byte(hmacKey)) < 32 {
 		return Config{}, errors.New("DAYORDER_AUTH_HMAC_KEY must contain at least 32 bytes")
 	}
@@ -158,6 +158,17 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 		AuthHMACKey:    []byte(hmacKey),
 		Database:       database,
 	}, nil
+}
+
+func resolveAuthHMACKey(lookup LookupFunc, environment Environment) string {
+	if key, ok := lookup(configHubAuthHMACKey); ok {
+		return key
+	}
+	key := valueOr(lookup, "DAYORDER_AUTH_HMAC_KEY", "")
+	if key == "" && environment != Production {
+		return "development-only-hmac-key-change-before-production"
+	}
+	return key
 }
 
 func validateListenAddress(value string) error {

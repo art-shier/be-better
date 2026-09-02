@@ -15,7 +15,7 @@ import (
 )
 
 type AccountApplication interface {
-	Register(context.Context, service.RegisterInput) (model.Account, error)
+	Register(context.Context, service.RegisterInput) (service.RegistrationResult, error)
 	VerifyEmail(context.Context, string) (model.Account, error)
 	ResendVerification(context.Context, string) error
 	RequestPasswordReset(context.Context, string) error
@@ -26,7 +26,6 @@ type AccountApplication interface {
 
 type SessionApplication interface {
 	Login(context.Context, service.LoginInput) (service.SessionResult, error)
-	CreateVerifiedSession(context.Context, model.Account, string) (service.SessionResult, error)
 	Authenticate(context.Context, string) (model.AuthenticatedSession, error)
 	Logout(context.Context, model.AuthenticatedSession) error
 	ChangePassword(context.Context, service.ChangePasswordInput) (service.SessionResult, error)
@@ -125,6 +124,7 @@ type RouterOptions struct {
 	Devices        DeviceApplication
 	Sync           SyncApplication
 	Agents         AgentApplication
+	AgentAvailable bool
 	Audits         AuditApplication
 	Undos          UndoApplication
 	AllowedOrigins []string
@@ -151,6 +151,7 @@ type Router struct {
 	devices        DeviceApplication
 	sync           SyncApplication
 	agents         AgentApplication
+	agentAvailable bool
 	audits         AuditApplication
 	undos          UndoApplication
 	allowedOrigins map[string]struct{}
@@ -169,7 +170,7 @@ func NewRouter(options RouterOptions) (http.Handler, error) {
 	}
 	router := &Router{
 		accounts: options.Accounts, sessions: options.Sessions,
-		goals: options.Goals, tasks: options.Tasks, calendar: options.Calendar, content: options.Content, settings: options.Settings, devices: options.Devices, sync: options.Sync, agents: options.Agents, audits: options.Audits, undos: options.Undos,
+		goals: options.Goals, tasks: options.Tasks, calendar: options.Calendar, content: options.Content, settings: options.Settings, devices: options.Devices, sync: options.Sync, agents: options.Agents, agentAvailable: options.AgentAvailable, audits: options.Audits, undos: options.Undos,
 		allowedOrigins: make(map[string]struct{}), logger: logger, metrics: options.Metrics, ready: options.Ready,
 	}
 	for _, origin := range options.AllowedOrigins {
@@ -247,13 +248,20 @@ func NewRouter(options RouterOptions) (http.Handler, error) {
 		mux.HandleFunc("GET /api/v1/users/me/settings", router.getSettings)
 		mux.HandleFunc("PATCH /api/v1/users/me/settings", router.updateSettings)
 	}
-	if router.agents != nil {
+	if router.agentAvailable && router.agents != nil {
 		mux.HandleFunc("GET /api/v1/agent-runs", router.listAgentRuns)
 		mux.HandleFunc("POST /api/v1/agent-runs", router.createAgentRun)
 		mux.HandleFunc("GET /api/v1/agent-runs/{runId}", router.getAgentRun)
 		mux.HandleFunc("POST /api/v1/agent-runs/{runId}/stop", router.stopAgentRun)
 		mux.HandleFunc("POST /api/v1/agent-changes/{changeId}/accept", router.acceptAgentChange)
 		mux.HandleFunc("POST /api/v1/agent-changes/{changeId}/reject", router.rejectAgentChange)
+	} else {
+		mux.HandleFunc("GET /api/v1/agent-runs", router.agentUnavailable)
+		mux.HandleFunc("POST /api/v1/agent-runs", router.agentUnavailable)
+		mux.HandleFunc("GET /api/v1/agent-runs/{runId}", router.agentUnavailable)
+		mux.HandleFunc("POST /api/v1/agent-runs/{runId}/stop", router.agentUnavailable)
+		mux.HandleFunc("POST /api/v1/agent-changes/{changeId}/accept", router.agentUnavailable)
+		mux.HandleFunc("POST /api/v1/agent-changes/{changeId}/reject", router.agentUnavailable)
 	}
 	if router.audits != nil {
 		mux.HandleFunc("GET /api/v1/audit-events", router.listAuditEvents)

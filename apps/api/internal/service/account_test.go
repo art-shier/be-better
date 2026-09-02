@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -13,16 +12,17 @@ import (
 )
 
 type fakeAccountStore struct {
-	registration  *model.PendingAccountRegistration
+	registration  *model.AccountRegistration
 	createErr     error
 	consumeHash   []byte
 	consumeResult model.Account
 	consumeErr    error
+	updatedEmail  string
 }
 
-func (store *fakeAccountStore) CreatePendingAccount(_ context.Context, registration model.PendingAccountRegistration) (model.Account, error) {
+func (store *fakeAccountStore) CreateRegistration(_ context.Context, registration model.AccountRegistration) (model.Account, model.Session, error) {
 	store.registration = &registration
-	return registration.Account, store.createErr
+	return registration.Account, registration.Session.Session, store.createErr
 }
 
 func (store *fakeAccountStore) ConsumeAccountToken(_ context.Context, tokenHash []byte, _ model.AccountTokenPurpose, _ time.Time) (model.Account, error) {
@@ -41,8 +41,9 @@ func (store *fakeAccountStore) ResetPasswordWithToken(context.Context, []byte, s
 func (store *fakeAccountStore) UpdateDisplayName(context.Context, uuid.UUID, string) (model.Account, error) {
 	return model.Account{}, nil
 }
-func (store *fakeAccountStore) UpdateEmail(context.Context, uuid.UUID, string, model.AccountTokenDelivery) (model.Account, error) {
-	return model.Account{}, nil
+func (store *fakeAccountStore) UpdateEmail(_ context.Context, userID uuid.UUID, email string) (model.Account, error) {
+	store.updatedEmail = email
+	return model.Account{ID: userID, Email: email, NormalizedEmail: email, Status: model.AccountActive}, nil
 }
 
 func TestNormalizeEmailIsCaseInsensitiveAndStrict(t *testing.T) {
@@ -60,7 +61,7 @@ func TestNormalizeEmailIsCaseInsensitiveAndStrict(t *testing.T) {
 	}
 }
 
-func TestRegisterCreatesPendingAccountTokenAndVerificationOutbox(t *testing.T) {
+func TestRegisterCreatesActiveAccountWithoutVerificationDelivery(t *testing.T) {
 	store := &fakeAccountStore{}
 	service, err := NewAccountService(store)
 	if err != nil {
@@ -68,38 +69,47 @@ func TestRegisterCreatesPendingAccountTokenAndVerificationOutbox(t *testing.T) {
 	}
 	fixedNow := time.Date(2026, 8, 28, 8, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return fixedNow }
+	userID, sessionID := uuid.New(), uuid.New()
+	uuidIndex := 0
+	service.newUUID = func() (uuid.UUID, error) {
+		uuidIndex++
+		if uuidIndex == 1 {
+			return userID, nil
+		}
+		return sessionID, nil
+	}
+	service.newToken = func() (string, []byte, error) {
+		return "registration-session-token", []byte("01234567890123456789012345678901"), nil
+	}
 
-	account, err := service.Register(context.Background(), RegisterInput{
-		Email: " User@Example.COM ", DisplayName: "  日序用户  ", Password: "long-enough-password",
+	result, err := service.Register(context.Background(), RegisterInput{
+		Email: " User@Example.COM ", DisplayName: "  日序用户  ", Password: "long-enough-password", UserAgent: "DayOrder Test Browser",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if account.Status != model.AccountPendingVerification || account.NormalizedEmail != "user@example.com" {
+	account := result.Account
+	if account.Status != model.AccountActive || account.NormalizedEmail != "user@example.com" || account.EmailVerifiedAt != nil {
 		t.Fatalf("registered account = %#v", account)
 	}
 	if store.registration == nil {
-		t.Fatal("pending registration was not persisted")
+		t.Fatal("registration was not persisted")
 	}
 	registration := store.registration
 	if registration.PasswordHash == "long-enough-password" || registration.PasswordHash == "" {
 		t.Fatal("registration did not persist a password hash")
 	}
-	if len(registration.VerificationToken.TokenHash) != 32 || registration.VerificationToken.Purpose != model.TokenVerifyEmail {
-		t.Fatalf("verification token = %#v", registration.VerificationToken)
+	if !account.CreatedAt.Equal(fixedNow) || !account.UpdatedAt.Equal(fixedNow) {
+		t.Fatalf("registration timestamps = %s %s", account.CreatedAt, account.UpdatedAt)
 	}
-	if registration.VerificationToken.ExpiresAt != fixedNow.Add(24*time.Hour) {
-		t.Fatalf("verification token expires at %s", registration.VerificationToken.ExpiresAt)
+	if result.Token != "registration-session-token" || result.Session.ID != sessionID || result.Session.UserID != userID {
+		t.Fatalf("registration session result = %#v token %q", result.Session, result.Token)
 	}
-	var payload struct {
-		Token string `json:"token"`
-		Email string `json:"email"`
+	if registration.Session.UserAgent != "DayOrder Test Browser" || !registration.Session.ExpiresAt.Equal(fixedNow.Add(sessionDuration)) {
+		t.Fatalf("persisted registration session = %#v", registration.Session)
 	}
-	if err = json.Unmarshal(registration.OutboxPayload, &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.Token == "" || payload.Email != "user@example.com" {
-		t.Fatalf("verification outbox payload = %#v", payload)
+	if string(registration.Session.TokenHash) == result.Token || len(registration.Session.TokenHash) != 32 {
+		t.Fatal("registration persisted a plaintext or invalid session token hash")
 	}
 }
 
@@ -114,6 +124,23 @@ func TestRegisterMapsNormalizedEmailConflict(t *testing.T) {
 	})
 	if !errors.Is(err, ErrEmailInUse) {
 		t.Fatalf("Register() error = %v, want ErrEmailInUse", err)
+	}
+}
+
+func TestUpdateEmailKeepsAccountActiveWithoutVerificationDelivery(t *testing.T) {
+	store := &fakeAccountStore{}
+	accountService, err := NewAccountService(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := model.Account{ID: uuid.New(), Email: "old@example.com", Status: model.AccountActive}
+
+	updated, err := accountService.UpdateEmail(context.Background(), current, " New@Example.COM ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.updatedEmail != "new@example.com" || updated.Status != model.AccountActive || updated.EmailVerifiedAt != nil {
+		t.Fatalf("updated account = %#v stored email = %q", updated, store.updatedEmail)
 	}
 }
 

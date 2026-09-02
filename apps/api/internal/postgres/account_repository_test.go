@@ -9,6 +9,7 @@ import (
 	"dayorder.local/api/internal/config"
 	"dayorder.local/api/internal/database"
 	dbmigrations "dayorder.local/api/internal/migrations"
+	"dayorder.local/api/internal/model"
 	postgresstore "dayorder.local/api/internal/postgres"
 	"dayorder.local/api/internal/service"
 	"dayorder.local/api/internal/testdb"
@@ -17,7 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestAccountRepositoryRegistrationVerificationSessionsAndThrottles(t *testing.T) {
+func TestAccountRepositoryDirectRegistrationSessionsAndThrottles(t *testing.T) {
 	databaseFixture := testdb.StartForTest(t)
 	if err := dbmigrations.Up(databaseFixture.MigrationURL); err != nil {
 		t.Fatal(err)
@@ -50,63 +51,71 @@ func TestAccountRepositoryRegistrationVerificationSessionsAndThrottles(t *testin
 		t.Fatal(err)
 	}
 
-	account, err := accounts.Register(ctx, service.RegisterInput{
-		Email: "User@Example.COM", DisplayName: "User", Password: "initial-password",
+	registration, err := accounts.Register(ctx, service.RegisterInput{
+		Email: "User@Example.COM", DisplayName: "User", Password: "initial-password", UserAgent: "integration-test",
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	account := registration.Account
+	if account.Status != model.AccountActive || account.EmailVerifiedAt != nil {
+		t.Fatalf("directly registered account = %#v", account)
+	}
+	if _, err = sessions.Authenticate(ctx, registration.Token); err != nil {
+		t.Fatalf("authenticate registration session: %v", err)
 	}
 	if _, err = accounts.Register(ctx, service.RegisterInput{
 		Email: " user@example.com ", DisplayName: "Duplicate", Password: "initial-password",
 	}); !errors.Is(err, service.ErrEmailInUse) {
 		t.Fatalf("case-insensitive duplicate registration error = %v", err)
 	}
+	var verificationArtifacts int
+	if err = migrationPool.QueryRow(ctx, `
+SELECT
+    (SELECT count(*) FROM dayorder.account_tokens WHERE user_id = $1 AND purpose = 'verify_email')
+  + (SELECT count(*) FROM dayorder.outbox_events WHERE user_id = $1 AND event_type = 'email.verification.requested')
+`, account.ID).Scan(&verificationArtifacts); err != nil {
+		t.Fatal(err)
+	}
+	if verificationArtifacts != 0 {
+		t.Fatalf("direct registration created %d verification artifacts", verificationArtifacts)
+	}
+	failedUserID := uuid.New()
+	_, _, err = repository.CreateRegistration(ctx, model.AccountRegistration{
+		Account: model.Account{
+			ID: failedUserID, Email: "rollback@example.com", NormalizedEmail: "rollback@example.com",
+			DisplayName: "Rollback", Status: model.AccountActive,
+		},
+		PasswordHash: "password-hash",
+		Session: model.NewSession{Session: model.Session{
+			ID: uuid.New(), UserID: failedUserID, ExpiresAt: time.Unix(0, 0).UTC(),
+		}, TokenHash: []byte("01234567890123456789012345678901")},
+	})
+	if err == nil {
+		t.Fatal("registration with an invalid session unexpectedly succeeded")
+	}
+	var failedUserCount int
+	if err = migrationPool.QueryRow(ctx, `SELECT count(*) FROM dayorder.users WHERE id = $1`, failedUserID).Scan(&failedUserCount); err != nil {
+		t.Fatal(err)
+	}
+	if failedUserCount != 0 {
+		t.Fatalf("failed registration left %d user rows", failedUserCount)
+	}
+	updated, err := accounts.UpdateEmail(ctx, account, " Updated@Example.COM ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Email != "updated@example.com" || updated.Status != model.AccountActive || updated.EmailVerifiedAt != nil {
+		t.Fatalf("directly updated email account = %#v", updated)
+	}
+
 	if _, err = sessions.Login(ctx, service.LoginInput{
-		Email: account.Email, Password: "initial-password", IP: "203.0.113.10",
-	}); !errors.Is(err, service.ErrAccountNotActive) {
-		t.Fatalf("pending-account login error = %v", err)
-	}
-
-	verificationToken := outboxToken(t, ctx, migrationPool, account.ID.String())
-	workerPool, err := database.Open(ctx, testDatabaseConfig(databaseFixture.WorkerURL))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer workerPool.Close()
-	outboxRepository, err := postgresstore.NewOutboxRepository(workerPool)
-	if err != nil {
-		t.Fatal(err)
-	}
-	claimed, err := outboxRepository.Claim(ctx, 10, uuid.New(), 5*time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(claimed) != 1 || claimed[0].EventType != "email.verification.requested" {
-		t.Fatalf("claimed verification events = %#v", claimed)
-	}
-	if err = outboxRepository.Complete(ctx, claimed[0].ID, claimed[0].LockToken); err != nil {
-		t.Fatal(err)
-	}
-	var scrubbedPayload string
-	if err = migrationPool.QueryRow(ctx, "SELECT payload::text FROM dayorder.outbox_events WHERE id = $1", claimed[0].ID).Scan(&scrubbedPayload); err != nil {
-		t.Fatal(err)
-	}
-	if scrubbedPayload != "{}" {
-		t.Fatalf("processed verification payload = %q, want scrubbed object", scrubbedPayload)
-	}
-	verified, err := accounts.VerifyEmail(ctx, verificationToken)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if verified.EmailVerifiedAt == nil {
-		t.Fatal("verified account has no verification timestamp")
-	}
-	if _, err = accounts.VerifyEmail(ctx, verificationToken); !errors.Is(err, service.ErrInvalidToken) {
-		t.Fatalf("reused verification token error = %v", err)
-	}
-
-	login, err := sessions.Login(ctx, service.LoginInput{
 		Email: account.Email, Password: "initial-password", IP: "203.0.113.10", UserAgent: "integration-test",
+	}); !errors.Is(err, service.ErrInvalidCredentials) {
+		t.Fatalf("old email login error = %v, want ErrInvalidCredentials", err)
+	}
+	login, err := sessions.Login(ctx, service.LoginInput{
+		Email: updated.Email, Password: "initial-password", IP: "203.0.113.10", UserAgent: "integration-test",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +134,7 @@ SELECT token_hash FROM dayorder.sessions WHERE id = $1
 	}
 
 	rotated, err := sessions.ChangePassword(ctx, service.ChangePasswordInput{
-		Account: verified, CurrentPassword: "initial-password", NewPassword: "rotated-password", UserAgent: "integration-test",
+		Account: account, CurrentPassword: "initial-password", NewPassword: "rotated-password", UserAgent: "integration-test",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -152,21 +161,6 @@ SELECT token_hash FROM dayorder.sessions WHERE id = $1
 	if !errors.As(err, &rateLimit) {
 		t.Fatalf("sixth failed login error = %v, want rate limit", err)
 	}
-}
-
-func outboxToken(t testing.TB, ctx context.Context, pool *pgxpool.Pool, userID string) string {
-	t.Helper()
-	var token string
-	if err := pool.QueryRow(ctx, `
-SELECT payload ->> 'token'
-FROM dayorder.outbox_events
-WHERE user_id = $1::uuid AND event_type = 'email.verification.requested'
-ORDER BY created_at DESC
-LIMIT 1
-`, userID).Scan(&token); err != nil {
-		t.Fatal(err)
-	}
-	return token
 }
 
 func testDatabaseConfig(databaseURL string) config.DatabaseConfig {

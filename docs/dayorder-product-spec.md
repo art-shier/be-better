@@ -285,7 +285,7 @@ Agent 运行状态和审批队列通过本地 API 持久化，页面刷新后可
 
 - 目标、任务、事件、记录、笔记的增删改查。
 - PostgreSQL 关系持久化、RLS、数据导出、加密备份与隔离恢复。
-- 邮箱密码注册、验证、登录、退出、资料与安全设置；验证成功后可用幂等资源 Mutation 迁移游客数据。
+- 邮箱密码注册、登录、退出、资料与安全设置；注册直接建立 Session 后可用幂等资源 Mutation 迁移游客数据。邮箱验证与忘记密码暂未接入。
 - 每用户独立实体、设备和增量游标；Session Cookie、Argon2id、登录限流和 Agent 登录门禁。
 - 今日页规则化聚合、浏览器内提醒。
 - 无 AI 时也能完整使用。
@@ -332,7 +332,7 @@ Agent 运行状态和审批队列通过本地 API 持久化，页面刷新后可
 ### 11.1 运行状态
 
 - 游客：今天、目标、任务、日程、记录和笔记全部可用，数据仅保存在当前浏览器，不调用任何远端业务资源接口。
-- 已验证账户：核心功能先读取当前账户的 IndexedDB 实体缓存，再通过资源 API 和增量同步与服务端收敛；可以使用 Agent 和账户设置。
+- 登录账户：核心功能先读取当前账户的 IndexedDB 实体缓存，再通过资源 API 和增量同步与服务端收敛；可以使用账户设置，Agent 当前暂未接入。
 - 离线账户：服务不可达时继续读取最近账户的本机缓存；Agent、资料修改、密码修改和退出不可用。
 - Session 失效：保留当前账户缓存并提示重新登录，不自动切回游客数据，也不允许 Agent 运行。
 
@@ -340,11 +340,11 @@ Agent 运行状态和审批队列通过本地 API 持久化，页面刷新后可
 
 - 认证入口使用应用上下文内弹窗，不建立营销式独立登录页。
 - 注册字段为称呼、邮箱和密码；默认勾选“迁移这台设备的数据”，并显示目标、任务和笔记数量。
-- 注册先在 PostgreSQL 事务中创建 `pending_verification` 用户、默认设置、一次性验证令牌和 Outbox 事件，不建立 Session；验证邮箱成功后才创建正式 Session。
+- 注册只校验邮箱格式，在 PostgreSQL 事务中直接创建 `active` 用户和默认设置，不生成验证令牌或验证邮件 Outbox；随后建立正式 Session。
 - 游客迁移把各类实体转换为带幂等键的离线 Mutation，按目标、里程碑、记录、任务、日程、笔记、复盘和设置的依赖顺序提交。全部 Mutation 确认完成后才清理游客副本；失败时游客数据保持不变。
 - 取消迁移时账户从默认空数据开始。登录已有账户永不自动合并当前游客数据。
 - 正常退出需要联网；服务端撤销当前 Session 后，前端清除当前账户缓存并回到仍然存在的游客空间。
-- 修改邮箱和密码必须验证当前密码。修改密码后撤销其他 Session，并轮换当前 Session。
+- 修改邮箱和密码必须验证当前密码。修改邮箱只校验新邮箱格式并直接生效；修改密码后撤销其他 Session，并轮换当前 Session。
 
 ### 11.3 API 与安全边界
 
@@ -352,7 +352,6 @@ Agent 运行状态和审批队列通过本地 API 持久化，页面刷新后可
 
 ```text
 POST  /auth/register
-POST  /auth/verify-email
 POST  /auth/login
 POST  /auth/logout
 GET   /auth/session
@@ -365,6 +364,8 @@ GET   /sync/changes
 POST  /sync/mutations
 GET|POST /agent-runs、/agent-changes、/audit-events
 ```
+
+`/auth/verify-email`、`/auth/resend-verification`、`/auth/password-reset/request` 和 `/auth/password-reset/complete` 当前统一返回 `503` 未接入错误；Agent 路径同样暂不可用。
 
 - Session 使用 30 天 `dayorder_session` Cookie，属性为 `HttpOnly`、`SameSite=Lax`、`Path=/`；HTTPS 时启用 `Secure`。
 - 密码使用 Argon2id；服务端只保存 Session token 的 SHA-256 哈希。

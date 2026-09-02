@@ -80,14 +80,17 @@ dayorder_load_secret() {
   export "$variable"
 }
 
-dayorder_load_runtime_secrets() {
-  local variable
-  for variable in \
-    DATABASE_URL WORKER_DATABASE_URL MIGRATION_DATABASE_URL \
-    DAYORDER_AUTH_HMAC_KEY DAYORDER_SMTP_PASSWORD DAYORDER_AGENT_HTTP_KEY
-  do
+dayorder_load_legacy_secret_if_present() {
+  local variable="$1"
+  local file_variable="${variable}_FILE"
+  local current_value="${!variable-}"
+  local file_path="${!file_variable-}"
+
+  if [[ -n "$current_value" || -z "$file_path" || -e "$file_path" || -L "$file_path" ]]; then
     dayorder_load_secret "$variable"
-  done
+    return
+  fi
+  unset "$file_variable"
 }
 
 dayorder_clear_database_overrides() {

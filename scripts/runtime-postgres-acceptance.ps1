@@ -156,23 +156,21 @@ function Invoke-APISQL {
     return ($output | Out-String).Trim()
 }
 
-function Get-AccountToken {
-    param([string]$Email, [string]$EventType)
+function Get-VerificationArtifactCount {
+    param([string]$Email)
     $safeEmail = $Email.Replace("'", "''")
-    return Invoke-AdminSQL "SELECT event.payload->>'token' FROM dayorder.outbox_events event JOIN dayorder.users usr ON usr.id = event.user_id WHERE usr.email = '$safeEmail' AND event.event_type = '$EventType' ORDER BY event.created_at DESC LIMIT 1;"
+    return [int](Invoke-AdminSQL "SELECT (SELECT count(*) FROM dayorder.account_tokens token JOIN dayorder.users usr ON usr.id = token.user_id WHERE usr.email = '$safeEmail' AND token.purpose = 'verify_email') + (SELECT count(*) FROM dayorder.outbox_events event JOIN dayorder.users usr ON usr.id = event.user_id WHERE usr.email = '$safeEmail' AND event.event_type = 'email.verification.requested');")
 }
 
-function Register-VerifiedAccount {
+function Register-Account {
     param([string]$BaseUrl, [string]$Email, [string]$DisplayName, [string]$Password)
     $session = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
     $registered = Invoke-Json "POST" "$BaseUrl/api/v1/auth/register" $session @{ displayName = $DisplayName; email = $Email; password = $Password }
-    Assert-Status $registered 201 "$DisplayName registration creates a pending account"
-    Assert-True ([bool]$registered.Body.verificationRequired) "$DisplayName requires email verification"
-    $token = Get-AccountToken $Email "email.verification.requested"
-    Assert-True (-not [string]::IsNullOrWhiteSpace($token)) "$DisplayName verification token is queued transactionally"
-    $verified = Invoke-Json "POST" "$BaseUrl/api/v1/auth/verify-email" $session @{ token = $token }
-    Assert-Status $verified 200 "$DisplayName verification activates the account"
-    return [pscustomobject]@{ Session = $session; User = $verified.Body.user; Password = $Password }
+    Assert-Status $registered 201 "$DisplayName registration creates an active account and session"
+    Assert-True (-not [bool]$registered.Body.verificationRequired) "$DisplayName does not require email verification"
+    Assert-Status (Invoke-Json "GET" "$BaseUrl/api/v1/auth/session" $session) 200 "$DisplayName registration session is immediately authenticated"
+    Assert-True ((Get-VerificationArtifactCount $Email) -eq 0) "$DisplayName registration creates no verification token or Outbox event"
+    return [pscustomobject]@{ Session = $session; User = $registered.Body.user; Password = $Password }
 }
 
 $dockerAvailable = $null -ne (Get-Command docker -ErrorAction SilentlyContinue)
@@ -191,7 +189,7 @@ $environmentNames = @(
     "DAYORDER_MIGRATOR_DB_PASSWORD", "DAYORDER_API_DB_PASSWORD", "DAYORDER_WORKER_DB_PASSWORD",
     "MIGRATION_DATABASE_URL", "DATABASE_URL", "WORKER_DATABASE_URL", "DAYORDER_ENV", "DAYORDER_ADDR",
     "DAYORDER_PUBLIC_URL", "DAYORDER_ALLOWED_ORIGINS", "DAYORDER_AUTH_HMAC_KEY",
-    "DAYORDER_WORKER_METRICS_ADDR", "DAYORDER_WORKER_POLL_RATE", "DAYORDER_MAIL_SINK", "DAYORDER_AGENT_PROVIDER"
+    "DAYORDER_WORKER_METRICS_ADDR", "DAYORDER_WORKER_POLL_RATE", "DAYORDER_MAIL_SINK"
 )
 $savedEnvironment = @{}
 foreach ($name in $environmentNames) { $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process") }
@@ -220,7 +218,6 @@ try {
     $env:DAYORDER_WORKER_METRICS_ADDR = "127.0.0.1:$workerPort"
     $env:DAYORDER_WORKER_POLL_RATE = "100ms"
     $env:DAYORDER_MAIL_SINK = "log"
-    $env:DAYORDER_AGENT_PROVIDER = "deterministic"
 
     Write-Host "Starting isolated PostgreSQL acceptance project $projectName..."
     & docker compose -p $projectName -f $composeFile up -d --wait postgres
@@ -245,8 +242,26 @@ try {
     Assert-Status (Invoke-Json "GET" "$baseUrl/api/v1/goals" $anonymous) 401 "anonymous resource reads are rejected"
 
     $suffix = [guid]::NewGuid().ToString("N")
-    $accountA = Register-VerifiedAccount $baseUrl "acceptance-a-$suffix@example.com" "Acceptance A" "acceptance-password-123"
-    $accountB = Register-VerifiedAccount $baseUrl "acceptance-b-$suffix@example.com" "Acceptance B" "acceptance-password-456"
+    $accountAEmail = "acceptance-a-$suffix@example.com"
+    $accountAUpdatedEmail = "acceptance-a-updated-$suffix@example.com"
+    $accountA = Register-Account $baseUrl $accountAEmail "Acceptance A" "acceptance-password-123"
+    $accountB = Register-Account $baseUrl "acceptance-b-$suffix@example.com" "Acceptance B" "acceptance-password-456"
+    foreach ($unavailable in @(
+        @{ Path = "verify-email"; Body = @{ token = "unused" }; Code = "EMAIL_VERIFICATION_NOT_AVAILABLE" },
+        @{ Path = "resend-verification"; Body = @{ email = $accountAEmail }; Code = "EMAIL_VERIFICATION_NOT_AVAILABLE" },
+        @{ Path = "password-reset/request"; Body = @{ email = $accountAEmail }; Code = "PASSWORD_RESET_NOT_AVAILABLE" },
+        @{ Path = "password-reset/complete"; Body = @{ token = "unused"; password = "unused-password" }; Code = "PASSWORD_RESET_NOT_AVAILABLE" }
+    )) {
+        $response = Invoke-Json "POST" "$baseUrl/api/v1/auth/$($unavailable.Path)" $anonymous $unavailable.Body
+        Assert-Status $response 503 "$($unavailable.Path) reports that email delivery is not integrated"
+        Assert-True ($response.Body.error.code -eq $unavailable.Code -and -not [bool]$response.Body.error.retryable) "$($unavailable.Path) returns a stable non-retryable error"
+    }
+    $updatedEmail = Invoke-Json "PUT" "$baseUrl/api/v1/users/me/email" $accountA.Session @{ currentPassword = "acceptance-password-123"; email = $accountAUpdatedEmail }
+    Assert-True ($updatedEmail.Status -eq 200 -and $updatedEmail.Body.user.email -eq $accountAUpdatedEmail) "email changes take effect immediately"
+    $oldEmailSession = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
+    Assert-Status (Invoke-Json "POST" "$baseUrl/api/v1/auth/login" $oldEmailSession @{ email = $accountAEmail; password = "acceptance-password-123" }) 401 "old email cannot log in after an email change"
+    $newEmailSession = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
+    Assert-Status (Invoke-Json "POST" "$baseUrl/api/v1/auth/login" $newEmailSession @{ email = $accountAUpdatedEmail; password = "acceptance-password-123" }) 200 "new email logs in with the existing password"
     $deviceA = [guid]::NewGuid().ToString()
     $deviceASecond = [guid]::NewGuid().ToString()
     $deviceB = [guid]::NewGuid().ToString()
@@ -325,22 +340,13 @@ try {
         Assert-Status (Invoke-Json "DELETE" "$baseUrl/api/v1/$($resource.Path)" $accountA.Session $null (New-MutationHeaders $deviceA $resource.Version)) 204 "$($resource.Path) delete succeeds"
     }
 
-    $resetRequested = Invoke-Json "POST" "$baseUrl/api/v1/auth/password-reset/request" $anonymous @{ email = "acceptance-a-$suffix@example.com" }
-    Assert-Status $resetRequested 202 "password reset request is accepted without account disclosure"
-    $resetToken = Get-AccountToken "acceptance-a-$suffix@example.com" "email.password_reset.requested"
-    Assert-True (-not [string]::IsNullOrWhiteSpace($resetToken)) "password reset token is queued transactionally"
-    Assert-Status (Invoke-Json "POST" "$baseUrl/api/v1/auth/password-reset/complete" $anonymous @{ token = $resetToken; password = "acceptance-password-789" }) 204 "password reset completes"
-    Assert-Status (Invoke-Json "GET" "$baseUrl/api/v1/auth/session" $accountA.Session) 401 "password reset revokes prior sessions"
-    $accountA.Session = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
-    Assert-Status (Invoke-Json "POST" "$baseUrl/api/v1/auth/login" $accountA.Session @{ email = "acceptance-a-$suffix@example.com"; password = "acceptance-password-789" }) 200 "new password establishes a rotated session"
-
     Stop-Api
     Start-Api $apiBinary
     Wait-Url "$baseUrl/health/ready"
     $loadedGoal = Invoke-Json "GET" "$baseUrl/api/v1/goals/$($createdGoal.Body.id)" $accountA.Session
     Assert-True ($loadedGoal.Status -eq 200 -and $loadedGoal.Body.title -eq "PostgreSQL acceptance goal") "session and resources survive an API restart"
 
-    & node (Join-Path $repoRoot "scripts\load-smoke.js") --base-url $baseUrl --email "acceptance-a-$suffix@example.com" --password "acceptance-password-789" --cycles 5 --concurrency 2 --p95-ms 2000
+    & node (Join-Path $repoRoot "scripts\load-smoke.js") --base-url $baseUrl --email $accountAUpdatedEmail --password "acceptance-password-123" --cycles 5 --concurrency 2 --p95-ms 2000
     if ($LASTEXITCODE -ne 0) { throw "load smoke failed" }
     Assert-True $true "concurrent resource CRUD load smoke stays within its error and latency budget"
 

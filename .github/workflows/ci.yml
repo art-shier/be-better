@@ -79,7 +79,7 @@ jobs:
           cp deploy/env.production.example deploy/.env.production
           sed -i 's/dayorder.example.invalid/localhost/g' deploy/.env.production
           mkdir -p deploy/secrets
-          for name in postgres_admin_password migrator_db_password api_db_password worker_db_password backup_db_password monitor_db_password auth_hmac_key smtp_password agent_http_key pgbackrest_cipher_pass; do
+          for name in postgres_admin_password migrator_db_password api_db_password worker_db_password backup_db_password monitor_db_password auth_hmac_key smtp_password pgbackrest_cipher_pass; do
             printf '%s' "ci-$name-0123456789abcdef0123456789abcdef" > "deploy/secrets/$name"
           done
           printf '%s' 'postgres://dayorder_migrator:ci-migrator_db_password-0123456789abcdef0123456789abcdef@postgres:5432/dayorder?sslmode=disable&search_path=dayorder' > deploy/secrets/migration_database_url
@@ -97,7 +97,7 @@ jobs:
         run: |
           docker run --rm --entrypoint caddy \
             -e DAYORDER_DOMAIN=localhost -e DAYORDER_ACME_EMAIL=ops@example.invalid \
-            dayorder-web:0.2.0 validate --config /etc/caddy/Caddyfile --adapter caddyfile
+            dayorder-web:0.3.0 validate --config /etc/caddy/Caddyfile --adapter caddyfile
           docker run --rm --entrypoint /bin/promtool \
             -v "$PWD/deploy/prometheus:/etc/prometheus:ro" \
             prom/prometheus:v3.6.0@sha256:76947e7ef22f8a698fc638f706685909be425dbe09bd7a2cd7aca849f79b5f64 \

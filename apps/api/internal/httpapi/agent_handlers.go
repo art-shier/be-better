@@ -6,6 +6,10 @@ import (
 	"dayorder.local/api/internal/service"
 )
 
+func (router *Router) agentUnavailable(response http.ResponseWriter, request *http.Request) {
+	router.writeError(response, request, http.StatusServiceUnavailable, "AGENT_NOT_AVAILABLE", "Agent 功能暂未接入", false, nil)
+}
+
 func (router *Router) createAgentRun(response http.ResponseWriter, request *http.Request) {
 	authenticated, ok := router.authenticateRequest(response, request)
 	if !ok {

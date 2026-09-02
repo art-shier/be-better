@@ -77,8 +77,8 @@ export function AuthDialog() {
       <label className="form-field"><span>邮箱</span><input ref={emailRef} value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="email" placeholder="name@example.com" /></label>
       {!resetMode && <label className="form-field"><span>密码</span><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete={tab === "login" ? "current-password" : "new-password"} placeholder="至少 10 个字符" /></label>}
       {!resetMode && tab === "login" && <button className="text-button auth-forgot" type="button" onClick={() => { setResetMode(true); setError(""); }}>忘记密码？</button>}
-      {!resetMode && tab === "register" && <label className={`migration-choice ${migrate ? "active" : ""}`}><input type="checkbox" checked={migrate} onChange={(event) => setMigrate(event.target.checked)} /><span className="migration-check">{migrate && <Check size={13} />}</span><span><strong>验证后迁移这台设备的数据</strong><small>{data.goals.length} 个目标 · {data.tasks.length} 个任务 · {data.notes.length} 篇笔记</small></span></label>}
-      {!resetMode && tab === "register" && <div className="auth-note"><HardDrive size={16} /><span>注册后先验证邮箱。所有数据成功写入账户前，游客副本不会被删除。</span></div>}
+      {!resetMode && tab === "register" && <label className={`migration-choice ${migrate ? "active" : ""}`}><input type="checkbox" checked={migrate} onChange={(event) => setMigrate(event.target.checked)} /><span className="migration-check">{migrate && <Check size={13} />}</span><span><strong>注册后迁移这台设备的数据</strong><small>{data.goals.length} 个目标 · {data.tasks.length} 个任务 · {data.notes.length} 篇笔记</small></span></label>}
+      {!resetMode && tab === "register" && <div className="auth-note"><HardDrive size={16} /><span>邮箱格式校验通过后会直接创建账户。所有数据成功写入账户前，游客副本不会被删除。</span></div>}
       {resetSent && <p className="form-success" role="status">如果该邮箱对应可用账户，重置邮件已发送。</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
       <button className="button primary auth-submit" type="submit" disabled={pending || resetSent}>{pending ? "正在处理…" : resetMode ? "发送重置邮件" : tab === "login" ? "登录账户" : "创建账户"}</button>

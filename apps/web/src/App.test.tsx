@@ -47,17 +47,17 @@ async function seedAccount(accountId: string, data: AppData): Promise<void> {
   await replaceAccountEntities(accountId, crypto.randomUUID(), "test-cursor", [...grouped].map(([entityType, values]) => ({ entityType, values })));
 }
 
-function GuestHarness() {
-  return <AuthProvider sessionCheckEnabled={false}><AppStoreProvider><UiProvider><Harness /></UiProvider></AppStoreProvider></AuthProvider>;
+function GuestHarness({ agentAvailable = false }: { agentAvailable?: boolean }) {
+  return <AuthProvider sessionCheckEnabled={false}><AppStoreProvider><UiProvider><Harness agentAvailable={agentAvailable} /></UiProvider></AppStoreProvider></AuthProvider>;
 }
 
-function AccountHarness() {
-  return <AuthProvider sessionCheckEnabled={false} initialSession={testSession}><AppStoreProvider identity={{ kind: "user", userId: testUser.id }} syncEnabled={false}><UiProvider><Harness /></UiProvider></AppStoreProvider></AuthProvider>;
+function AccountHarness({ agentAvailable = false }: { agentAvailable?: boolean }) {
+  return <AuthProvider sessionCheckEnabled={false} initialSession={testSession}><AppStoreProvider identity={{ kind: "user", userId: testUser.id }} syncEnabled={false}><UiProvider><Harness agentAvailable={agentAvailable} /></UiProvider></AppStoreProvider></AuthProvider>;
 }
 
-function Harness() {
+function Harness({ agentAvailable = false }: { agentAvailable?: boolean }) {
   const { data } = useAppStore();
-  return <><App /><output data-testid="entity-counts">{`${data.events.length}:${data.records.length}`}</output><output data-testid="onboarding-state">{`${data.settings.onboardingCompleted}:${data.goals.length}:${data.tasks.length}`}</output></>;
+  return <><App agentAvailable={agentAvailable} /><output data-testid="entity-counts">{`${data.events.length}:${data.records.length}`}</output><output data-testid="onboarding-state">{`${data.settings.onboardingCompleted}:${data.goals.length}:${data.tasks.length}`}</output></>;
 }
 
 describe("关键页面交互", () => {
@@ -74,6 +74,16 @@ describe("关键页面交互", () => {
     window.location.hash = "today";
     localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(createSeedData()));
     await deleteDayOrderDB();
+  });
+
+  it("生产界面隐藏所有 Agent 入口", async () => {
+    window.location.hash = "agent";
+
+    render(<AccountHarness />);
+
+    expect([...document.querySelectorAll(".nav-button, .bottom-button")].some((item) => item.textContent === "Agent")).toBe(false);
+    expect(document.querySelector(".assistant-trigger")).toBeNull();
+    await waitFor(() => expect(window.location.hash).toBe("#today"));
   });
 
   it("快速记录默认自动识别并创建带来源的日程", async () => {
@@ -144,7 +154,7 @@ describe("关键页面交互", () => {
     vi.mocked(createAgentRun).mockResolvedValue(run);
     vi.mocked(getAgentRun).mockResolvedValue(run);
     const user = userEvent.setup();
-    render(<AccountHarness />);
+    render(<AccountHarness agentAvailable />);
 
     await user.click((await screen.findAllByRole("button", { name: /^Agent/ }))[0]);
     await user.click(screen.getAllByRole("button", { name: "发起委托" })[0]);
@@ -178,7 +188,7 @@ describe("关键页面交互", () => {
     vi.mocked(acceptAgentChange).mockResolvedValue({ change: { ...pending.changes[0], status: "applied", version: 2 }, run: pending });
     vi.mocked(rejectAgentChange).mockResolvedValue({ change: { ...pending.changes[1], status: "rejected", version: 2 }, run: completed });
     const user = userEvent.setup();
-    render(<AccountHarness />);
+    render(<AccountHarness agentAvailable />);
 
     await user.click((await screen.findAllByRole("button", { name: /^Agent/ }))[0]);
     await user.click(screen.getAllByRole("button", { name: "发起委托" })[0]);
@@ -201,7 +211,7 @@ describe("关键页面交互", () => {
       sourceRefs: [{ id: crypto.randomUUID(), runId: "run_read", entityType: "task", entityId: seed.tasks[0].id, entityVersion: seed.tasks[0].version, labelSnapshot: seed.tasks[0].title, createdAt: "2026-08-27T02:01:00Z" }],
     }));
     const user = userEvent.setup();
-    render(<AccountHarness />);
+    render(<AccountHarness agentAvailable />);
 
     await user.click(await screen.findByRole("button", { name: "打开 Agent 快捷面板" }));
     await user.click(screen.getByRole("button", { name: "下午怎么安排更合理？" }));
@@ -212,7 +222,7 @@ describe("关键页面交互", () => {
 
   it("游客点击 Agent 保留当前页面并打开登录门禁", async () => {
     const user = userEvent.setup();
-    render(<GuestHarness />);
+    render(<GuestHarness agentAvailable />);
     await user.click(screen.getAllByRole("button", { name: /^Agent/ })[0]);
     expect(screen.getByRole("dialog", { name: "登录后使用 Agent" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#today");

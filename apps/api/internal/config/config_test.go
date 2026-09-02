@@ -44,6 +44,34 @@ func TestLoadKeepsPathlessNativeURLCompatibility(t *testing.T) {
 	}
 }
 
+func TestLoadPrefersConfigHubAuthHMACKeyWithoutTrimming(t *testing.T) {
+	values := map[string]string{
+		"DATABASE_URL":           "postgres://dayorder:secret@127.0.0.1:5432/dayorder",
+		"DAYORDER_AUTH_HMAC_KEY": "legacy-auth-hmac-key-with-at-least-32-bytes",
+		"dayorder_auth_hmac_key": " config-hub-auth-hmac-key-with-at-least-32-bytes ",
+	}
+
+	config, err := LoadFrom(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(config.AuthHMACKey) != " config-hub-auth-hmac-key-with-at-least-32-bytes " {
+		t.Fatal("ConfigHub auth HMAC key did not retain priority or exact bytes")
+	}
+}
+
+func TestLoadScrubsConfigHubAuthHMACKeyAfterSuccess(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://dayorder:secret@127.0.0.1:5432/dayorder")
+	t.Setenv("dayorder_auth_hmac_key", "config-hub-auth-hmac-key-with-at-least-32-bytes")
+
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := os.LookupEnv("dayorder_auth_hmac_key"); ok {
+		t.Fatal("dayorder_auth_hmac_key remained in the process environment")
+	}
+}
+
 func TestLoadScrubsConfigHubDatabaseEnvironmentAfterSuccess(t *testing.T) {
 	setConfigHubDatabaseEnvironment(t, validConfigHubValues())
 	t.Setenv("DATABASE_URL", "")

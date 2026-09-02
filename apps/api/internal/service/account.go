@@ -28,13 +28,13 @@ var (
 var emailPattern = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 
 type AccountStore interface {
-	CreatePendingAccount(context.Context, model.PendingAccountRegistration) (model.Account, error)
+	CreateRegistration(context.Context, model.AccountRegistration) (model.Account, model.Session, error)
 	ConsumeAccountToken(context.Context, []byte, model.AccountTokenPurpose, time.Time) (model.Account, error)
 	LookupLoginAccount(context.Context, string) (model.LoginAccount, error)
 	CreateAccountTokenDelivery(context.Context, model.Account, model.AccountTokenDelivery) error
 	ResetPasswordWithToken(context.Context, []byte, string, time.Time) (model.Account, error)
 	UpdateDisplayName(context.Context, uuid.UUID, string) (model.Account, error)
-	UpdateEmail(context.Context, uuid.UUID, string, model.AccountTokenDelivery) (model.Account, error)
+	UpdateEmail(context.Context, uuid.UUID, string) (model.Account, error)
 }
 
 type AccountService struct {
@@ -48,6 +48,13 @@ type RegisterInput struct {
 	Email       string
 	DisplayName string
 	Password    string
+	UserAgent   string
+}
+
+type RegistrationResult struct {
+	Account model.Account
+	Session model.Session
+	Token   string
 }
 
 func NewAccountService(store AccountStore) (*AccountService, error) {
@@ -62,73 +69,62 @@ func NewAccountService(store AccountStore) (*AccountService, error) {
 	}, nil
 }
 
-func (service *AccountService) Register(ctx context.Context, input RegisterInput) (model.Account, error) {
+func (service *AccountService) Register(ctx context.Context, input RegisterInput) (RegistrationResult, error) {
 	normalizedEmail, err := NormalizeEmail(input.Email)
 	if err != nil {
-		return model.Account{}, err
+		return RegistrationResult{}, err
 	}
 	displayName, err := ValidateDisplayName(input.DisplayName)
 	if err != nil {
-		return model.Account{}, err
+		return RegistrationResult{}, err
 	}
 	if err = ValidatePassword(input.Password); err != nil {
-		return model.Account{}, err
+		return RegistrationResult{}, err
 	}
 	passwordHash, err := auth.HashPassword(input.Password)
 	if err != nil {
-		return model.Account{}, fmt.Errorf("hash account password: %w", err)
+		return RegistrationResult{}, fmt.Errorf("hash account password: %w", err)
 	}
 	userID, err := service.newUUID()
 	if err != nil {
-		return model.Account{}, fmt.Errorf("generate account ID: %w", err)
+		return RegistrationResult{}, fmt.Errorf("generate account ID: %w", err)
 	}
-	tokenID, err := service.newUUID()
+	sessionID, err := service.newUUID()
 	if err != nil {
-		return model.Account{}, fmt.Errorf("generate verification token ID: %w", err)
+		return RegistrationResult{}, fmt.Errorf("generate registration session ID: %w", err)
 	}
-	outboxID, err := service.newUUID()
+	token, tokenHash, err := service.newToken()
 	if err != nil {
-		return model.Account{}, fmt.Errorf("generate verification outbox ID: %w", err)
-	}
-	plainToken, tokenHash, err := service.newToken()
-	if err != nil {
-		return model.Account{}, fmt.Errorf("generate verification token: %w", err)
+		return RegistrationResult{}, fmt.Errorf("generate registration session token: %w", err)
 	}
 	now := service.now().UTC()
-	payload, err := json.Marshal(map[string]string{
-		"email":       normalizedEmail,
-		"displayName": displayName,
-		"token":       plainToken,
-	})
-	if err != nil {
-		return model.Account{}, fmt.Errorf("encode verification outbox: %w", err)
-	}
-	registration := model.PendingAccountRegistration{
+	registration := model.AccountRegistration{
 		Account: model.Account{
 			ID:              userID,
 			Email:           normalizedEmail,
 			NormalizedEmail: normalizedEmail,
 			DisplayName:     displayName,
-			Status:          model.AccountPendingVerification,
+			Status:          model.AccountActive,
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		},
 		PasswordHash: passwordHash,
-		VerificationToken: model.AccountToken{
-			ID: tokenID, UserID: userID, Purpose: model.TokenVerifyEmail,
-			TokenHash: tokenHash, CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour),
+		Session: model.NewSession{
+			Session: model.Session{
+				ID: sessionID, UserID: userID, UserAgent: input.UserAgent,
+				CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(sessionDuration),
+			},
+			TokenHash: tokenHash,
 		},
-		OutboxID:      outboxID,
-		OutboxPayload: payload,
 	}
-	account, err := service.store.CreatePendingAccount(ctx, registration)
+	account, session, err := service.store.CreateRegistration(ctx, registration)
 	if errors.Is(err, model.ErrConflict) {
-		return model.Account{}, ErrEmailInUse
+		return RegistrationResult{}, ErrEmailInUse
 	}
 	if err != nil {
-		return model.Account{}, fmt.Errorf("create pending account: %w", err)
+		return RegistrationResult{}, fmt.Errorf("create account registration: %w", err)
 	}
-	return account, nil
+	return RegistrationResult{Account: account, Session: session, Token: token}, nil
 }
 
 func (service *AccountService) VerifyEmail(ctx context.Context, token string) (model.Account, error) {
@@ -193,14 +189,7 @@ func (service *AccountService) UpdateEmail(ctx context.Context, current model.Ac
 	if err != nil {
 		return model.Account{}, err
 	}
-	delivery, err := service.newTokenDelivery(
-		current.ID, normalized, current.DisplayName, model.TokenVerifyEmail,
-		"email.verification.requested", 24*time.Hour,
-	)
-	if err != nil {
-		return model.Account{}, err
-	}
-	account, err := service.store.UpdateEmail(ctx, current.ID, normalized, delivery)
+	account, err := service.store.UpdateEmail(ctx, current.ID, normalized)
 	if errors.Is(err, model.ErrConflict) {
 		return model.Account{}, ErrEmailInUse
 	}

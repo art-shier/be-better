@@ -114,6 +114,22 @@ printf 'systemctl %s\\n' "$*" >> "$DAYORDER_TEST_LOG"
 if [[ "$*" == *restart*dayorder-api.service* && "\${DAYORDER_TEST_SYSTEMCTL_RESTART_FAIL:-0}" == 1 ]]; then exit 1; fi
 if [[ "$*" == *stop*dayorder-api.service* && "\${DAYORDER_TEST_SYSTEMCTL_STOP_FAIL:-0}" == 1 ]]; then exit 1; fi
 if [[ "$*" == *is-active*dayorder-worker.service* && "\${DAYORDER_TEST_WORKER_FAIL:-0}" == 1 ]]; then exit 1; fi
+action="$2"
+if [[ "$action" == is-active ]]; then
+  service="\${@: -1}"
+  [[ -f "$HOME/.dayorder-test-active-$service" ]]
+  exit
+fi
+if [[ "$action" == start || "$action" == restart ]]; then
+  for service in "$@"; do
+    [[ "$service" == *.service ]] && touch "$HOME/.dayorder-test-active-$service"
+  done
+fi
+if [[ "$action" == stop ]]; then
+  for service in "$@"; do
+    [[ "$service" == *.service ]] && rm -f "$HOME/.dayorder-test-active-$service"
+  done
+fi
 exit 0
 `);
   writeExecutable(resolve(directory, "mv"), `#!/usr/bin/env bash
@@ -337,13 +353,11 @@ function makeAssetRelease(f, tag) {
 printf 'migrate %s %s\\n' "$1" "$2" >> "$DAYORDER_TEST_LOG"
 [[ "\${DAYORDER_TEST_MIGRATE_FAIL:-0}" != 1 ]]
 `);
-  write(resolve(backend, "config/api.env.example"), "DAYORDER_ENV=production\nDAYORDER_AUTH_HMAC_KEY_FILE=/etc/dayorder/secrets/auth_hmac_key\n");
+  write(resolve(backend, "config/api.env.example"), "DAYORDER_ENV=production\n");
   write(resolve(backend, "config/migrate.env.example"), "DAYORDER_ENV=production\n");
   write(
     resolve(backend, "config/worker.env.example"),
-    "DAYORDER_ENV=production\nDAYORDER_AUTH_HMAC_KEY_FILE=/etc/dayorder/secrets/auth_hmac_key\n"
-      + "DAYORDER_SMTP_PASSWORD_FILE=/etc/dayorder/secrets/smtp_password\n"
-      + "DAYORDER_AGENT_HTTP_KEY_FILE=/etc/dayorder/secrets/agent_http_key\n",
+    "DAYORDER_ENV=production\n",
   );
   // Git for Windows' Bash requires POSIX paths for fixture helper scripts.
   const shellPackager = shellPath(packager);
@@ -478,7 +492,8 @@ test("redeploy reactivates the same version and repairs units without downloadin
   assert.doesNotMatch(redeployed.stdout, /already deployed/);
   const log = readFileSync(f.log, "utf8");
   assert.match(log, /migrate up/);
-  assert.match(log, /systemctl --user restart dayorder-api\.service/);
+  assert.match(log, /systemctl --user start dayorder-api\.service/);
+  assert.match(log, /systemctl --user start dayorder-worker\.service/);
   assert.match(log, /systemctl --user restart dayorder-worker\.service/);
   assert.deepEqual(log.split("\n").filter((line) => line.startsWith("curl ")), [
     "curl https://github.com/art-shier/be-better/releases/download/v1.2.3/release-manifest.json",
@@ -763,31 +778,30 @@ test("first all deployment creates persistent templates and stops before migrati
     assert.equal(deploymentMode(f, path), "600");
     assert.doesNotMatch(readFileSync(path, "utf8"), /(?:DATABASE_URL|WORKER_DATABASE_URL|MIGRATION_DATABASE_URL)(?:_FILE)?=/);
   }
-  const secretsPath = new RegExp(deploymentPath(resolve(f.runDirectory, "dayorder-config/secrets")).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  assert.match(readFileSync(resolve(f.runDirectory, "dayorder-config/api.env"), "utf8"), secretsPath);
-  assert.match(readFileSync(resolve(f.runDirectory, "dayorder-config/worker.env"), "utf8"), secretsPath);
+  assert.doesNotMatch(readFileSync(resolve(f.runDirectory, "dayorder-config/api.env"), "utf8"), /\/secrets\//);
+  assert.doesNotMatch(readFileSync(resolve(f.runDirectory, "dayorder-config/worker.env"), "utf8"), /\/secrets\//);
   assert.equal(existsSync(resolve(f.runDirectory, "dayorder-config/.confighub.yaml")), false);
   assert.equal(existsSync(resolve(f.runDirectory, "current-server")), false);
   assert.equal(existsSync(resolve(f.runDirectory, "current-worker")), false);
   assert.doesNotMatch(readFileSync(f.log, "utf8"), /migrate|systemctl/);
 });
 
-test("first-run output names every one-line secret and exact permission commands", (t) => {
+test("first-run output requires ConfigHub but no local application secret files", (t) => {
   const f = fixture(t); makeAssetRelease(f, "v1.2.3");
 
   const result = runDeploy(f, ["all"]);
 
   assert.notEqual(result.status, 0);
-  for (const secret of ["auth_hmac_key", "smtp_password", "agent_http_key"]) {
-    assert.match(result.stderr, new RegExp(`secrets/${secret}`));
+  for (const secret of ["auth_hmac_key", "agent_http_key", "smtp_password"]) {
+    assert.doesNotMatch(result.stderr, new RegExp(`secrets/${secret}`));
   }
   for (const removed of ["api_database_url", "worker_database_url", "migration_database_url"]) {
     assert.doesNotMatch(result.stderr, new RegExp(`secrets/${removed}`));
   }
   assert.match(result.stderr, /dayorder-config\/\.confighub\.yaml/);
-  assert.match(result.stderr, /single-line/i);
   assert.match(result.stderr, /chmod 0700/);
   assert.match(result.stderr, /chmod 0600/);
+  assert.doesNotMatch(result.stderr, /\btouch\b/);
 });
 
 test("ConfigHub authorization failure is printed and stops deployment before migration or systemd", (t) => {
@@ -870,6 +884,22 @@ test("Server migrates up and checks before activation, then passes readiness", (
   assert.match(unit, new RegExp(deploymentPath(resolve(f.runDirectory, "current-server/scripts/start-api.sh")).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
+test("Server upgrade stops the old Worker and API before migration", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const initial = runDeploy(f, ["all", "--version", "v1.2.3"]);
+  assert.equal(initial.status, 0, initial.stderr);
+  makeAssetRelease(f, "v1.2.4");
+  writeFileSync(f.log, "", "utf8");
+
+  const upgraded = runDeploy(f, ["server", "--version", "v1.2.4"]);
+
+  assert.equal(upgraded.status, 0, upgraded.stderr);
+  const log = readFileSync(f.log, "utf8");
+  assert.ok(log.indexOf("systemctl --user stop dayorder-worker.service") < log.indexOf("systemctl --user stop dayorder-api.service"));
+  assert.ok(log.indexOf("systemctl --user stop dayorder-api.service") < log.indexOf("migrate up"));
+  assert.ok(log.indexOf("migrate check") < log.lastIndexOf("systemctl --user start dayorder-worker.service"));
+});
+
 test("Worker is a separate enabled user service with a 60 second stop timeout", (t) => {
   const f = configuredFixture(t, "v1.2.3");
   const result = runDeploy(f, ["worker"]);
@@ -901,14 +931,42 @@ test("service units preserve custom roots with spaces and literal percent signs"
   );
 });
 
-test("migration failure leaves the Server link unchanged", (t) => {
+test("migration failure leaves links unchanged and restores the old API and Worker", (t) => {
   const f = configuredFixture(t, "v1.2.3");
-  const result = runDeploy(f, ["server"], { DAYORDER_TEST_MIGRATE_FAIL: "1" });
+  const initial = runDeploy(f, ["all", "--version", "v1.2.3"]);
+  assert.equal(initial.status, 0, initial.stderr);
+  makeAssetRelease(f, "v1.2.4");
+  writeFileSync(f.log, "", "utf8");
+
+  const result = runDeploy(f, ["server", "--version", "v1.2.4"], { DAYORDER_TEST_MIGRATE_FAIL: "1" });
+
   assert.notEqual(result.status, 0);
-  assert.equal(existsSync(resolve(f.runDirectory, "current-server")), false);
+  for (const name of ["server", "worker", "web"]) {
+    assert.equal(deploymentRealpath(resolve(f.runDirectory, `current-${name}`)), deploymentRealpath(resolve(f.runDirectory, `releases/v1.2.3/${name}`)));
+  }
   const log = readFileSync(f.log, "utf8");
+  assert.ok(log.indexOf("systemctl --user stop dayorder-worker.service") < log.indexOf("systemctl --user stop dayorder-api.service"));
+  assert.ok(log.indexOf("systemctl --user stop dayorder-api.service") < log.indexOf("migrate up"));
   assert.match(log, /migrate up/);
-  assert.doesNotMatch(log, /systemctl/);
+  assert.match(log, /systemctl --user start dayorder-api\.service/);
+  assert.match(log, /systemctl --user start dayorder-worker\.service/);
+});
+
+test("API stop failure restores the already stopped Worker and skips migration", (t) => {
+  const f = configuredFixture(t, "v1.2.3");
+  const initial = runDeploy(f, ["all", "--version", "v1.2.3"]);
+  assert.equal(initial.status, 0, initial.stderr);
+  makeAssetRelease(f, "v1.2.4");
+  writeFileSync(f.log, "", "utf8");
+
+  const result = runDeploy(f, ["server", "--version", "v1.2.4"], { DAYORDER_TEST_SYSTEMCTL_STOP_FAIL: "1" });
+
+  assert.notEqual(result.status, 0);
+  const log = readFileSync(f.log, "utf8");
+  assert.match(log, /systemctl --user stop dayorder-worker\.service/);
+  assert.match(log, /systemctl --user stop dayorder-api\.service/);
+  assert.match(log, /systemctl --user start dayorder-worker\.service/);
+  assert.doesNotMatch(log, /migrate/);
 });
 
 test("health failure restores the previous Server link and restarts the old API", (t) => {
@@ -957,7 +1015,7 @@ test("Successful all activates Server then Worker then Web and a repeat is a no-
   const first = runDeploy(f, ["all"]);
   assert.equal(first.status, 0, first.stderr);
   const log = readFileSync(f.log, "utf8");
-  assert.ok(log.indexOf("migrate check") < log.indexOf("dayorder-worker.service"));
+  assert.ok(log.indexOf("migrate check") < log.indexOf("systemctl --user enable dayorder-worker.service"));
   assert.ok(first.stdout.indexOf("Server v1.2.3 deployed") < first.stdout.indexOf("Worker v1.2.3 deployed"));
   assert.ok(first.stdout.indexOf("Worker v1.2.3 deployed") < first.stdout.indexOf("Web v1.2.3 deployed"));
   for (const name of ["server", "worker", "web"]) {
@@ -1057,7 +1115,10 @@ test("rollback restart failure reports manual intervention while restoring the o
   const initial = runDeploy(f, ["server", "--version", "v1.2.3"]);
   assert.equal(initial.status, 0, initial.stderr);
   makeAssetRelease(f, "v1.2.4");
-  const failed = runDeploy(f, ["server", "--version", "v1.2.4"], { DAYORDER_TEST_SYSTEMCTL_RESTART_FAIL: "1" });
+  const failed = runDeploy(f, ["server", "--version", "v1.2.4"], {
+    DAYORDER_TEST_HEALTH_FAIL_VERSION: "v1.2.4",
+    DAYORDER_TEST_SYSTEMCTL_RESTART_FAIL: "1",
+  });
   assert.notEqual(failed.status, 0);
   assert.match(failed.stderr, /rollback failed.*manual intervention/i);
   assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-server")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.3/server")));
@@ -1097,19 +1158,16 @@ test("service deployment rejects control characters in the root before migration
   assert.doesNotMatch(readFileSync(f.log, "utf8"), /migrate|systemctl/);
 });
 
-test("configuration templates preserve roots with sed-special characters", (t) => {
+test("configuration templates support roots with sed-special characters without local secrets", (t) => {
   const f = fixture(t); makeAssetRelease(f, "v1.2.3");
   const specialRoot = resolve(f.base, process.platform === "win32" ? "root&hash#backslash" : "root&hash#back\\slash");
   const result = runDeploy(f, ["all", "--root", specialRoot]);
   assert.notEqual(result.status, 0);
-  const secrets = deploymentPath(resolve(specialRoot, "dayorder-config/secrets"));
-  for (const name of ["api.env", "worker.env"]) {
-    assert.match(readFileSync(resolve(specialRoot, "dayorder-config", name), "utf8"), new RegExp(secrets.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  for (const name of ["api.env", "worker.env", "migrate.env"]) {
+    const configuration = readFileSync(resolve(specialRoot, "dayorder-config", name), "utf8");
+    assert.doesNotMatch(configuration, /\/secrets\//);
+    assert.doesNotMatch(configuration, /(?:DATABASE_URL|WORKER_DATABASE_URL|MIGRATION_DATABASE_URL)(?:_FILE)?=/);
   }
-  assert.doesNotMatch(
-    readFileSync(resolve(specialRoot, "dayorder-config/migrate.env"), "utf8"),
-    /(?:DATABASE_URL|WORKER_DATABASE_URL|MIGRATION_DATABASE_URL)(?:_FILE)?=/,
-  );
 });
 
 test("real generated assets install without privilege and stop at first configuration", {

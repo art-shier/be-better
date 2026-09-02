@@ -147,15 +147,6 @@ func (service *SessionService) Login(ctx context.Context, input LoginInput) (Ses
 	return service.createSession(ctx, loginAccount.Account, input.UserAgent, now)
 }
 
-// CreateVerifiedSession establishes the first authenticated session after an
-// email verification token has atomically activated the account.
-func (service *SessionService) CreateVerifiedSession(ctx context.Context, account model.Account, userAgent string) (SessionResult, error) {
-	if account.Status != model.AccountActive {
-		return SessionResult{}, ErrAccountNotActive
-	}
-	return service.createSession(ctx, account, userAgent, service.now().UTC())
-}
-
 func (service *SessionService) Authenticate(ctx context.Context, token string) (model.AuthenticatedSession, error) {
 	if strings.TrimSpace(token) == "" {
 		return model.AuthenticatedSession{}, ErrInvalidSession

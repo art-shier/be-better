@@ -26,7 +26,7 @@ Prometheus 默认只绑定宿主机 `127.0.0.1:9090`。通过 SSH 隧道查看�
 
 ## DayOrderOutboxBacklog
 
-检查 Worker 是否健康、事件类型分布、SMTP/Agent Provider 可用性和最近重试。保持单个事件的幂等语义，不得直接把 pending 批量改成 processed。
+检查 Worker 是否健康、事件类型分布、SMTP 可用性和最近重试。保持单个事件的幂等语义，不得直接把 pending 批量改成 processed。Agent 当前暂未接入，不检查 Provider。
 
 ## DayOrderOutboxStalled
 

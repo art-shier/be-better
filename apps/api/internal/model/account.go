@@ -56,12 +56,10 @@ type AccountToken struct {
 	CreatedAt time.Time
 }
 
-type PendingAccountRegistration struct {
-	Account           Account
-	PasswordHash      string
-	VerificationToken AccountToken
-	OutboxID          uuid.UUID
-	OutboxPayload     json.RawMessage
+type AccountRegistration struct {
+	Account      Account
+	PasswordHash string
+	Session      NewSession
 }
 
 type AccountTokenDelivery struct {

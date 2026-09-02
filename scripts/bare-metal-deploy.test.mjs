@@ -91,6 +91,12 @@ shift 6
 export db_address=db.example.invalid db_port=5432 db_username=dayorder_admin
 export db_password=admin-password db_migrator_password=migrator-password
 export db_api_password=api-password db_worker_password=worker-password
+if [[ -n "\${DAYORDER_TEST_CONFIGHUB_AUTH_HMAC_KEY:-}" ]]; then
+  export dayorder_auth_hmac_key="$DAYORDER_TEST_CONFIGHUB_AUTH_HMAC_KEY"
+fi
+if [[ -n "\${DAYORDER_TEST_CONFIGHUB_SMTP_PASSWORD:-}" ]]; then
+  export dayorder_smtp_password="$DAYORDER_TEST_CONFIGHUB_SMTP_PASSWORD"
+fi
 exec "$@"
 `);
   return fixture;
@@ -210,6 +216,62 @@ test("Worker wrapper selects the Worker binary", (t) => {
     readFileSync(configHubLog, "utf8"),
     /\trun --project shier --env prod -- .*\/scripts\/\.\.\/bin\/dayorder-worker\n$/,
   );
+});
+
+test("Worker wrapper lets ConfigHub replace a missing legacy SMTP password file", (t) => {
+  const fixture = createRuntimeFixture();
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const envPath = resolve(fixture, "worker.env");
+  const capturePath = resolve(fixture, "worker.capture");
+  const missingSecretPath = gitShellPath(resolve(fixture, "secrets/missing-smtp-password"));
+  const configHubPassword = "config-hub-smtp-password";
+  writeProtected(
+    envPath,
+    `DAYORDER_AUTH_HMAC_KEY='worker-hmac-secret-with-at-least-32-bytes'\nDAYORDER_SMTP_PASSWORD_FILE='${missingSecretPath}'\n`,
+  );
+  writeExecutable(
+    resolve(fixture, "bin/dayorder-worker"),
+    "#!/usr/bin/env bash\nprintf '%s\\n' \"$dayorder_smtp_password\" > \"$CAPTURE_PATH\"\n",
+  );
+
+  const result = runScript(resolve(fixture, "scripts/start-worker.sh"), [envPath], {
+    CAPTURE_PATH: capturePath,
+    DAYORDER_TEST_CONFIGHUB_SMTP_PASSWORD: configHubPassword,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(capturePath, "utf8"), `${configHubPassword}\n`);
+  assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(configHubPassword));
+});
+
+test("API and Worker wrappers let ConfigHub replace missing legacy auth HMAC key files", async (t) => {
+  for (const runtime of [
+    { script: "start-api.sh", binary: "dayorder-api", environment: "api.env" },
+    { script: "start-worker.sh", binary: "dayorder-worker", environment: "worker.env" },
+  ]) {
+    await t.test(runtime.binary, (t) => {
+      const fixture = createRuntimeFixture();
+      t.after(() => rmSync(fixture, { recursive: true, force: true }));
+      const environmentPath = resolve(fixture, runtime.environment);
+      const capturePath = resolve(fixture, `${runtime.binary}.capture`);
+      const missingSecretPath = gitShellPath(resolve(fixture, "secrets/missing-auth-hmac-key"));
+      const configHubKey = "config-hub-auth-hmac-key-with-at-least-32-bytes";
+      writeProtected(environmentPath, `DAYORDER_AUTH_HMAC_KEY_FILE='${missingSecretPath}'\n`);
+      writeExecutable(
+        resolve(fixture, `bin/${runtime.binary}`),
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$dayorder_auth_hmac_key\" > \"$CAPTURE_PATH\"\n",
+      );
+
+      const result = runScript(resolve(fixture, `scripts/${runtime.script}`), [environmentPath], {
+        CAPTURE_PATH: capturePath,
+        DAYORDER_TEST_CONFIGHUB_AUTH_HMAC_KEY: configHubKey,
+      });
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(readFileSync(capturePath, "utf8"), `${configHubKey}\n`);
+      assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(configHubKey));
+    });
+  }
 });
 
 test("migration wrapper maps up and check to the embedded migrator", (t) => {
@@ -507,17 +569,17 @@ test("release build scripts and package commands expose the agreed contract", ()
   assert.match(ignore, /^release\/$/m);
 });
 
-test("service configuration templates delegate database configuration to ConfigHub", () => {
+test("service configuration templates delegate runtime secrets to ConfigHub and disable Agent", () => {
   const api = readFileSync(resolve(root, "deploy/bare-metal/config/api.env.example"), "utf8");
   const worker = readFileSync(resolve(root, "deploy/bare-metal/config/worker.env.example"), "utf8");
   const migrate = readFileSync(resolve(root, "deploy/bare-metal/config/migrate.env.example"), "utf8");
 
-  assert.match(api, /^DAYORDER_AUTH_HMAC_KEY_FILE=/m);
+  assert.doesNotMatch(api, /^DAYORDER_AUTH_HMAC_KEY_FILE=/m);
   assert.doesNotMatch(api, /^(?:DATABASE_URL|WORKER_DATABASE_URL|MIGRATION_DATABASE_URL)(?:_FILE)?=/m);
 
-  assert.match(worker, /^DAYORDER_AUTH_HMAC_KEY_FILE=/m);
-  assert.match(worker, /^DAYORDER_SMTP_PASSWORD_FILE=/m);
-  assert.match(worker, /^DAYORDER_AGENT_HTTP_KEY_FILE=/m);
+  assert.doesNotMatch(worker, /^DAYORDER_AUTH_HMAC_KEY_FILE=/m);
+  assert.doesNotMatch(worker, /^DAYORDER_SMTP_PASSWORD_FILE=/m);
+  assert.doesNotMatch(worker, /^DAYORDER_AGENT_/m);
   assert.doesNotMatch(worker, /^(?:DATABASE_URL|WORKER_DATABASE_URL|MIGRATION_DATABASE_URL)(?:_FILE)?=/m);
 
   assert.doesNotMatch(migrate, /^(?:DATABASE_URL|WORKER_DATABASE_URL|MIGRATION_DATABASE_URL)(?:_FILE)?=/m);
@@ -559,23 +621,27 @@ test("project documentation covers the Docker-independent release path", () => {
   assert.match(runbook, /Server.*Worker.*独立/s);
 });
 
-test("release documentation states the ConfigHub, remaining secret, schema, and rollback safety contract", () => {
+test("release documentation states the ConfigHub-only secret, disabled Agent, schema, and rollback safety contract", () => {
   const documents = [
     readFileSync(resolve(root, "README.md"), "utf8"),
     readFileSync(resolve(root, "docs/runbooks/separate-deployment.md"), "utf8"),
   ];
   for (const document of documents) {
-    for (const secret of [
-      "auth_hmac_key",
-      "smtp_password",
-      "agent_http_key",
-    ]) assert.match(document, new RegExp(`secrets/${secret}`));
+    const shellCode = Array.from(
+      document.matchAll(/```(?:bash|powershell)\r?\n([\s\S]*?)```/g),
+      (match) => match[1],
+    ).join("\n");
+    for (const secret of ["auth_hmac_key", "agent_http_key", "smtp_password"]) {
+      assert.doesNotMatch(shellCode, new RegExp(`secrets/${secret}`));
+    }
+    assert.match(document, /dayorder_smtp_password/);
+    assert.match(document, /dayorder_auth_hmac_key/);
+    assert.match(document, /Agent.*(?:暂未接入|屏蔽|禁用)/s);
     for (const removed of ["api_database_url", "worker_database_url", "migration_database_url"]) {
       assert.doesNotMatch(document, new RegExp(`secrets/${removed}`));
     }
     assert.match(document, /\.confighub\.yaml/);
     assert.match(document, /confighub run --project shier --env prod/);
-    assert.match(document, /exactly one non-empty single-line value/);
     assert.match(document, /chmod 0700/);
     assert.match(document, /chmod 0600/);
     assert.match(document, /clean schema at or above the embedded migration floor/);

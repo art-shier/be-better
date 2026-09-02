@@ -54,6 +54,46 @@ func (*stubAgentApplication) Stop(context.Context, service.MutationContext, uuid
 	return model.AgentRun{}, nil
 }
 
+func TestDisabledAgentRoutesReturnNotAvailable(t *testing.T) {
+	handler, err := NewRouter(RouterOptions{
+		Accounts: &stubAccountApplication{}, Sessions: &stubSessionApplication{},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/agent-runs"},
+		{http.MethodPost, "/api/v1/agent-runs"},
+		{http.MethodGet, "/api/v1/agent-runs/11111111-1111-4111-8111-111111111111"},
+		{http.MethodPost, "/api/v1/agent-runs/11111111-1111-4111-8111-111111111111/stop"},
+		{http.MethodPost, "/api/v1/agent-changes/11111111-1111-4111-8111-111111111111/accept"},
+		{http.MethodPost, "/api/v1/agent-changes/11111111-1111-4111-8111-111111111111/reject"},
+	} {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			request := httptest.NewRequest(route.method, "http://dayorder.example"+route.path, nil)
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			if response.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+			}
+			var envelope apiErrorEnvelope
+			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error.Code != "AGENT_NOT_AVAILABLE" || envelope.Error.Message != "Agent 功能暂未接入" || envelope.Error.Retryable {
+				t.Fatalf("error = %#v", envelope.Error)
+			}
+		})
+	}
+}
+
 func TestAgentRoutesCreateRunAndAcceptVersionedChange(t *testing.T) {
 	userID, deviceID, runID, changeID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	sessions := &stubSessionApplication{authenticated: model.AuthenticatedSession{Account: model.Account{ID: userID, Status: model.AccountActive}}}
@@ -65,7 +105,7 @@ func TestAgentRoutesCreateRunAndAcceptVersionedChange(t *testing.T) {
 		},
 	}
 	handler, err := NewRouter(RouterOptions{
-		Accounts: &stubAccountApplication{}, Sessions: sessions, Agents: agents,
+		Accounts: &stubAccountApplication{}, Sessions: sessions, Agents: agents, AgentAvailable: true,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {

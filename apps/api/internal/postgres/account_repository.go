@@ -28,50 +28,47 @@ func NewAccountRepository(pool *pgxpool.Pool) (*AccountRepository, error) {
 	return &AccountRepository{pool: pool, queries: db.New(pool)}, nil
 }
 
-func (repository *AccountRepository) CreatePendingAccount(ctx context.Context, registration model.PendingAccountRegistration) (model.Account, error) {
+func (repository *AccountRepository) CreateRegistration(ctx context.Context, registration model.AccountRegistration) (model.Account, model.Session, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
-		return model.Account{}, fmt.Errorf("begin pending account transaction: %w", err)
+		return model.Account{}, model.Session{}, fmt.Errorf("begin account transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 	queries := repository.queries.WithTx(tx)
 	userID := pgUUID(registration.Account.ID)
 	if err = queries.SetUserContext(ctx, userID); err != nil {
-		return model.Account{}, fmt.Errorf("set pending account context: %w", err)
+		return model.Account{}, model.Session{}, fmt.Errorf("set account context: %w", err)
+	}
+	emailVerifiedAt := pgtype.Timestamptz{}
+	if registration.Account.EmailVerifiedAt != nil {
+		emailVerifiedAt = pgTime(*registration.Account.EmailVerifiedAt)
 	}
 	user, err := queries.CreateUser(ctx, db.CreateUserParams{
 		ID: userID, Email: registration.Account.Email,
 		NormalizedEmail: registration.Account.NormalizedEmail,
 		DisplayName:     registration.Account.DisplayName,
 		PasswordHash:    registration.PasswordHash,
-		Status:          string(model.AccountPendingVerification),
-		EmailVerifiedAt: pgtype.Timestamptz{},
+		Status:          string(registration.Account.Status),
+		EmailVerifiedAt: emailVerifiedAt,
 	})
 	if err != nil {
-		return model.Account{}, mapDatabaseError("create pending account", err)
+		return model.Account{}, model.Session{}, mapDatabaseError("create account", err)
 	}
 	if _, err = queries.CreateUserSettings(ctx, userID); err != nil {
-		return model.Account{}, mapDatabaseError("create account settings", err)
+		return model.Account{}, model.Session{}, mapDatabaseError("create account settings", err)
 	}
-	if _, err = queries.CreateAccountToken(ctx, db.CreateAccountTokenParams{
-		ID: pgUUID(registration.VerificationToken.ID), UserID: userID,
-		Purpose:   string(registration.VerificationToken.Purpose),
-		TokenHash: append([]byte(nil), registration.VerificationToken.TokenHash...),
-		ExpiresAt: pgTime(registration.VerificationToken.ExpiresAt),
-	}); err != nil {
-		return model.Account{}, mapDatabaseError("create verification token", err)
-	}
-	if err = queries.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
-		ID: pgUUID(registration.OutboxID), UserID: userID,
-		EventType: "email.verification.requested", AggregateType: "user", AggregateID: userID,
-		Payload: append([]byte(nil), registration.OutboxPayload...), AvailableAt: pgTime(registration.Account.CreatedAt),
-	}); err != nil {
-		return model.Account{}, mapDatabaseError("create verification outbox event", err)
+	session, err := queries.CreateSession(ctx, db.CreateSessionParams{
+		ID: pgUUID(registration.Session.ID), UserID: userID,
+		TokenHash: append([]byte(nil), registration.Session.TokenHash...),
+		UserAgent: registration.Session.UserAgent, ExpiresAt: pgTime(registration.Session.ExpiresAt),
+	})
+	if err != nil {
+		return model.Account{}, model.Session{}, mapDatabaseError("create registration session", err)
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return model.Account{}, fmt.Errorf("commit pending account transaction: %w", err)
+		return model.Account{}, model.Session{}, fmt.Errorf("commit account transaction: %w", err)
 	}
-	return accountFromRow(user), nil
+	return accountFromRow(user), sessionFromRow(session), nil
 }
 
 func (repository *AccountRepository) ConsumeAccountToken(ctx context.Context, tokenHash []byte, purpose model.AccountTokenPurpose, _ time.Time) (model.Account, error) {
@@ -185,7 +182,7 @@ func (repository *AccountRepository) UpdateDisplayName(ctx context.Context, user
 	return account, err
 }
 
-func (repository *AccountRepository) UpdateEmail(ctx context.Context, userID uuid.UUID, normalizedEmail string, delivery model.AccountTokenDelivery) (model.Account, error) {
+func (repository *AccountRepository) UpdateEmail(ctx context.Context, userID uuid.UUID, normalizedEmail string) (model.Account, error) {
 	var account model.Account
 	err := repository.inUserTransaction(ctx, userID, func(queries *db.Queries) error {
 		user, err := queries.UpdateEmail(ctx, normalizedEmail, normalizedEmail, pgUUID(userID))
@@ -193,22 +190,6 @@ func (repository *AccountRepository) UpdateEmail(ctx context.Context, userID uui
 			return mapDatabaseError("update account email", err)
 		}
 		account = accountFromRow(user)
-		if _, err = queries.InvalidateAccountTokens(ctx, pgUUID(userID), string(model.TokenVerifyEmail)); err != nil {
-			return mapDatabaseError("invalidate email verification tokens", err)
-		}
-		if _, err = queries.CreateAccountToken(ctx, db.CreateAccountTokenParams{
-			ID: pgUUID(delivery.Token.ID), UserID: pgUUID(userID), Purpose: string(model.TokenVerifyEmail),
-			TokenHash: append([]byte(nil), delivery.Token.TokenHash...), ExpiresAt: pgTime(delivery.Token.ExpiresAt),
-		}); err != nil {
-			return mapDatabaseError("create changed-email verification token", err)
-		}
-		if err = queries.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
-			ID: pgUUID(delivery.OutboxID), UserID: pgUUID(userID), EventType: delivery.EventType,
-			AggregateType: "user", AggregateID: pgUUID(userID),
-			Payload: append([]byte(nil), delivery.OutboxPayload...), AvailableAt: pgTime(delivery.Token.CreatedAt),
-		}); err != nil {
-			return mapDatabaseError("create changed-email verification outbox", err)
-		}
 		return nil
 	})
 	return account, err

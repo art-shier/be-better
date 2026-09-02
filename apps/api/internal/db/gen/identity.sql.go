@@ -676,7 +676,6 @@ const updateEmail = `-- name: UpdateEmail :one
 UPDATE dayorder.users
 SET email = $1,
     normalized_email = $2,
-    status = 'pending_verification',
     email_verified_at = NULL,
     updated_at = now()
 WHERE id = $3

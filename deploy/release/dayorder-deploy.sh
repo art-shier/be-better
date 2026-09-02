@@ -482,7 +482,7 @@ ensure_config() {
   rm -f -- "$temporary" || die "cannot clean temporary configuration file"
   validate_owned_file "$destination" "configuration file" 600
   config_created=1
-  printf 'Created %s; fill it and the referenced secret files before retrying.\n' "$destination" >&2
+  printf 'Created %s; fill it and configure ConfigHub before retrying.\n' "$destination" >&2
 }
 
 require_config() {
@@ -496,23 +496,17 @@ print_configuration_instructions() {
   case "$component" in
     server)
       environment_files=(api.env migrate.env)
-      secret_files=(auth_hmac_key)
       ;;
     worker)
       environment_files=(worker.env)
-      secret_files=(auth_hmac_key smtp_password agent_http_key)
       ;;
     all)
       environment_files=(api.env migrate.env worker.env)
-      secret_files=(auth_hmac_key smtp_password agent_http_key)
       ;;
   esac
   printf 'ConfigHub CLI reads %s/.confighub.yaml; ConfigHub errors stop deployment.\n' "$config_dir" >&2
-  printf 'Required secret files (each must contain exactly one non-empty single-line value):\n' >&2
-  for path in "${secret_files[@]}"; do printf '  %s/secrets/%s\n' "$config_dir" "$path" >&2; done
-  printf 'Create/edit the files, then enforce these permissions before retrying:\n  touch' >&2
-  for path in "${secret_files[@]}"; do printf ' %q' "$config_dir/secrets/$path" >&2; done
-  printf '\n  chmod 0700 %q %q\n  chmod 0600' "$config_dir" "$config_dir/secrets" >&2
+  printf 'Configure the environment files, then enforce these permissions before retrying:\n' >&2
+  printf '  chmod 0700 %q %q\n  chmod 0600' "$config_dir" "$config_dir/secrets" >&2
   for path in "${environment_files[@]}"; do printf ' %q' "$config_dir/$path" >&2; done
   for path in "${secret_files[@]}"; do printf ' %q' "$config_dir/secrets/$path" >&2; done
   printf '\n' >&2
@@ -592,6 +586,55 @@ write_unit() {
 
 server_changed=0; worker_changed=0; web_changed=0
 server_old=""; worker_old=""; web_old=""
+api_needs_resume=0; worker_needs_resume=0; backend_restore_failed=0
+
+resume_quiesced_api() {
+  (( api_needs_resume != 0 )) || return 0
+  if ! systemctl --user start dayorder-api.service || ! wait_for_api; then
+    printf 'dayorder-deploy: failed to restore the previous API after migration interruption\n' >&2
+    backend_restore_failed=1
+    return 1
+  fi
+  api_needs_resume=0
+}
+
+resume_quiesced_worker() {
+  (( worker_needs_resume != 0 )) || return 0
+  if ! systemctl --user start dayorder-worker.service || ! systemctl --user is-active --quiet dayorder-worker.service; then
+    printf 'dayorder-deploy: failed to restore the previous Worker after migration interruption\n' >&2
+    backend_restore_failed=1
+    return 1
+  fi
+  worker_needs_resume=0
+}
+
+resume_quiesced_backend() {
+  local result=0
+  resume_quiesced_api || result=1
+  resume_quiesced_worker || result=1
+  return "$result"
+}
+
+quiesce_backend() {
+  local api_active=0 worker_active=0
+  if systemctl --user is-active --quiet dayorder-api.service; then api_active=1; fi
+  if systemctl --user is-active --quiet dayorder-worker.service; then worker_active=1; fi
+  if (( worker_active != 0 )); then
+    if ! systemctl --user stop dayorder-worker.service; then
+      printf 'dayorder-deploy: failed to stop the previous Worker before migration\n' >&2
+      return 1
+    fi
+    worker_needs_resume=1
+  fi
+  if (( api_active != 0 )); then
+    if ! systemctl --user stop dayorder-api.service; then
+      printf 'dayorder-deploy: failed to stop the previous API before migration\n' >&2
+      resume_quiesced_worker || true
+      return 1
+    fi
+    api_needs_resume=1
+  fi
+}
 
 activate_service() {
   local service="$1"
@@ -639,14 +682,30 @@ deploy_server() {
   local destination="$root/releases/$version/server"
   server_old="$(current_target server)" || return 1
   if [[ "$action" != redeploy && "$server_old" == "$destination" ]]; then printf 'Server %s is already deployed\n' "$version"; return 0; fi
-  "$destination/scripts/migrate.sh" up "$config_dir/migrate.env" || return 1
-  "$destination/scripts/migrate.sh" check "$config_dir/migrate.env" || return 1
-  switch_link server "$destination" || return 1; server_changed=1
+  quiesce_backend || return 1
+  if ! "$destination/scripts/migrate.sh" up "$config_dir/migrate.env" || \
+    ! "$destination/scripts/migrate.sh" check "$config_dir/migrate.env"; then
+    resume_quiesced_backend || true
+    return 1
+  fi
+  if ! switch_link server "$destination"; then
+    resume_quiesced_backend || true
+    return 1
+  fi
+  server_changed=1
   if ! write_unit dayorder-api "$root/current-server" start-api.sh "$config_dir/api.env" 30 || \
     ! activate_service dayorder-api || ! wait_for_api; then
-    restore_link server "$server_old" dayorder-api || return 2
+    if restore_link server "$server_old" dayorder-api; then
+      api_needs_resume=0
+    else
+      backend_restore_failed=1
+    fi
+    resume_quiesced_worker || true
+    (( backend_restore_failed == 0 )) || return 2
     server_changed=0; return 1
   fi
+  api_needs_resume=0
+  if ! resume_quiesced_worker; then return 2; fi
   printf 'Server %s deployed\n' "$version"
 }
 
@@ -715,7 +774,7 @@ rollback_failed=0
 case "$component" in
   server)
     if ! deploy_server; then
-      (( server_changed == 0 )) || die "Server deployment failed; rollback failed; manual intervention required"
+      (( server_changed == 0 && backend_restore_failed == 0 )) || die "Server deployment failed; rollback failed; manual intervention required"
       die "Server deployment failed; previous application link was preserved or restored"
     fi
     ;;
@@ -728,7 +787,7 @@ case "$component" in
   web) deploy_web ;;
   all)
     if ! deploy_server; then
-      (( server_changed == 0 )) || die "Server deployment failed; rollback failed; manual intervention required"
+      (( server_changed == 0 && backend_restore_failed == 0 )) || die "Server deployment failed; rollback failed; manual intervention required"
       die "Server deployment failed before later components were activated"
     fi
     if ! deploy_worker; then

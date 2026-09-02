@@ -114,11 +114,6 @@ services:
       DAYORDER_SMTP_PASSWORD_FILE: /run/secrets/smtp_password
       DAYORDER_SMTP_TLS_MODE: ${DAYORDER_SMTP_TLS_MODE:-starttls}
       DAYORDER_SMTP_TIMEOUT: ${DAYORDER_SMTP_TIMEOUT:-15s}
-      DAYORDER_AGENT_PROVIDER: http
-      DAYORDER_AGENT_HTTP_URL: ${DAYORDER_AGENT_HTTP_URL:?DAYORDER_AGENT_HTTP_URL is required}
-      DAYORDER_AGENT_HTTP_KEY_FILE: /run/secrets/agent_http_key
-      DAYORDER_AGENT_MODEL: ${DAYORDER_AGENT_MODEL:?DAYORDER_AGENT_MODEL is required}
-      DAYORDER_AGENT_TIMEOUT: ${DAYORDER_AGENT_TIMEOUT:-30s}
       DAYORDER_DB_MAX_CONN_LIFETIME: ${DAYORDER_DB_MAX_CONN_LIFETIME:-30m}
       DAYORDER_DB_MAX_CONN_IDLE_TIME: ${DAYORDER_DB_MAX_CONN_IDLE_TIME:-5m}
       DAYORDER_DB_STATEMENT_TIMEOUT: ${DAYORDER_WORKER_DB_STATEMENT_TIMEOUT:-30s}
@@ -129,7 +124,6 @@ services:
       - worker_database_url
       - auth_hmac_key
       - smtp_password
-      - agent_http_key
     networks:
       - data
       - egress
@@ -352,7 +346,5 @@ secrets:
     file: ${DAYORDER_SECRETS_DIR:-./secrets}/auth_hmac_key
   smtp_password:
     file: ${DAYORDER_SECRETS_DIR:-./secrets}/smtp_password
-  agent_http_key:
-    file: ${DAYORDER_SECRETS_DIR:-./secrets}/agent_http_key
   pgbackrest_cipher_pass:
     file: ${DAYORDER_SECRETS_DIR:-./secrets}/pgbackrest_cipher_pass

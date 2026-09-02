@@ -28,7 +28,7 @@ scripts/         构建与真实运行验收脚本
 - 同步使用实体版本、设备顺序、幂等 Mutation、opaque cursor 和增量 change feed；首次同步使用 bootstrap 高水位、分页快照和追赶拉取，不再每 500 ms 上传整份账户 JSON。
 - 笔记标签使用关联表；笔记跨实体弱关联使用 `entity_links`，服务层在同一用户事务中校验目标存在。
 
-游客数据仍只写浏览器 localStorage。邮箱验证成功后，用户可以把游客资源按依赖顺序转换成离线 Mutation；只有全部提交完成才清理游客副本。
+游客数据仍只写浏览器 localStorage。注册直接建立 Session 后，用户可以把游客资源按依赖顺序转换成离线 Mutation；只有全部提交完成才清理游客副本。
 
 ## 本地开发
 
@@ -57,16 +57,17 @@ npm run dev
 - 就绪检查：<http://127.0.0.1:8080/health/ready>
 - Worker：另一个终端运行 `npm run dev:worker`
 
-开发默认 `DAYORDER_MAIL_SINK=log`，不会投递邮件，也不会把验证或重置令牌写入日志。走真实邮件流程时配置 SMTP；生产环境强制 SMTP 与 TLS。
+开发默认 `DAYORDER_MAIL_SINK=log`，不会投递邮件。当前邮箱验证与忘记密码接口返回未接入错误；提醒邮件等 Worker 邮件任务走真实流程时配置 SMTP，生产环境强制 SMTP 与 TLS。
 
 ## 认证与离线账户
 
-- 注册先创建 `pending_verification` 账户；验证邮箱成功后才建立正式 Session。
+- 注册只校验邮箱格式，直接创建 `active` 账户并建立正式 Session；修改邮箱同样直接生效且不生成验证邮件。
+- 邮箱验证/重发与忘记/重置密码接口当前返回 `503` 未接入错误。
 - 密码使用 Argon2id；30 天不透明 Session 只通过 `HttpOnly`、`SameSite=Lax` Cookie 传递，数据库只保存令牌 SHA-256 哈希。
 - 登录已有账户不会合并游客数据。
 - API 暂时不可达时，已缓存账户仍可从 IndexedDB 打开和编辑；网络恢复、页面聚焦或周期定时器会继续同步。
 - 正常退出先撤销服务端 Session，再只清理当前账户的 IndexedDB 缓存，不影响游客空间和其他账户缓存。
-- Agent 需要已验证且在线的账户。Run、Step、Change、来源引用、审计与撤销均由服务端持久化；生产 Provider 必须使用 HTTPS。
+- Agent 功能当前暂未接入：Web 隐藏入口，相关 API 返回 `503 AGENT_NOT_AVAILABLE`，Worker 不调用任何 Agent Provider。现有领域模型和数据表保留，等待后续重构。
 
 ## 测试与构建
 
@@ -111,7 +112,7 @@ PostgreSQL 不发布主机端口；公网只开放 Caddy 的 80/443。上线、�
 
 ## ConfigHub PostgreSQL 配置
 
-ConfigHub CLI 在当前接入中是只读客户端：配置值需要在 ConfigHub Web 中维护，CLI 只负责读取并注入当前进程。数据库配置固定存放在项目/环境 `shier/prod`，需要以下七个键：`db_address`、`db_port`、`db_username`、`db_password`、`db_migrator_password`、`db_api_password`、`db_worker_password`。`db_username` 不得使用三个固定运行时角色名，四个数据库密码必须彼此不同。本地 `.confighub.yaml` 包含 Machine Token，已被 Git 忽略，不得复制到其他项目文件。
+ConfigHub CLI 在当前接入中是只读客户端：配置值需要在 ConfigHub Web 中维护，CLI 只负责读取并注入当前进程。数据库配置固定存放在项目/环境 `shier/prod`，需要以下七个键：`db_address`、`db_port`、`db_username`、`db_password`、`db_migrator_password`、`db_api_password`、`db_worker_password`。认证 HMAC 和 Worker 的 SMTP 密码分别使用同一环境中的 `dayorder_auth_hmac_key`、`dayorder_smtp_password`。`db_username` 不得使用三个固定运行时角色名，四个数据库密码必须彼此不同。本地 `.confighub.yaml` 包含 Machine Token，已被 Git 忽略，不得复制到其他项目文件。
 
 首次初始化或角色密码轮换时执行：
 
@@ -150,7 +151,7 @@ npm run config:dev:worker
 | `DAYORDER_ADDR` | API 监听地址 |
 | `DAYORDER_PUBLIC_URL` | 邮件链接和公开服务根地址；生产必须 HTTPS |
 | `DAYORDER_ALLOWED_ORIGINS` | 允许携带凭据的 Web Origin |
-| `DAYORDER_AUTH_HMAC_KEY` | 至少 32 字节的认证/游标签名密钥 |
+| `DAYORDER_AUTH_HMAC_KEY` | 认证/游标签名密钥的旧版显式覆盖；Release 默认使用 ConfigHub 的 `dayorder_auth_hmac_key` |
 | `DAYORDER_MAIL_SINK` | `log` 或 `smtp`；生产必须 `smtp` |
 | `VITE_API_BASE_URL` | 前端 API 根地址；开发默认 `/api/v1`，生产默认 `https://better-api.shier.art/api/v1`，仅当显式设置值去除首尾空白后为非空值时覆盖默认值 |
 | `VITE_API_PROXY_TARGET` | Vite `/api` 代理目标 |
@@ -173,19 +174,14 @@ chmod 0755 dayorder-deploy.sh
 
 首次运行 Server 或 Worker 时，脚本会创建 `~/a/dayorder-config/{api.env,migrate.env,worker.env,secrets/}` 并停止。把包含 ConfigHub Server 和 Machine Token 的 `.confighub.yaml` 放到 `~/a/dayorder-config/`；启动脚本会在该目录执行 `confighub run --project shier --env prod`，不再使用数据库 URL 密钥文件。ConfigHub CLI 自行处理配置文件、连接和权限错误，任一失败都会原样输出并停止部署。
 
-仍需创建三个非数据库密钥文件：`secrets/auth_hmac_key`、`secrets/smtp_password`、`secrets/agent_http_key`。每个文件必须是 exactly one non-empty single-line value，不能把多行值静默拼接。填写后按脚本输出限制权限，再重新运行 `./dayorder-deploy.sh all`：
+认证 HMAC 和 SMTP 密码分别从 ConfigHub 的 `dayorder_auth_hmac_key`、`dayorder_smtp_password` 注入，Release 不再要求本地 `secrets/auth_hmac_key`、`secrets/smtp_password` 或 `secrets/agent_http_key`。Agent 当前暂未接入，Web 入口和 Worker Provider 均已屏蔽。填写环境文件后限制权限，再重新运行 `./dayorder-deploy.sh all`：
 
 ```bash
-touch ~/a/dayorder-config/secrets/auth_hmac_key \
-  ~/a/dayorder-config/secrets/smtp_password \
-  ~/a/dayorder-config/secrets/agent_http_key
 chmod 0700 ~/a/dayorder-config ~/a/dayorder-config/secrets
-chmod 0600 ~/a/dayorder-config/api.env ~/a/dayorder-config/migrate.env ~/a/dayorder-config/worker.env \
-  ~/a/dayorder-config/secrets/auth_hmac_key \
-  ~/a/dayorder-config/secrets/smtp_password ~/a/dayorder-config/secrets/agent_http_key
+chmod 0600 ~/a/dayorder-config/api.env ~/a/dayorder-config/migrate.env ~/a/dayorder-config/worker.env
 ```
 
-从旧版本升级时，部署器不会覆盖已有的 `migrate.env`；必须确认其中包含 `DAYORDER_ENV=production`，否则会在实际 migration 以及 Migrator 的 ConfigHub 调用之前安全失败。旧版环境文件引用的三个数据库 URL 密钥文件应保留到相邻 Release 的回滚窗口结束：新脚本会忽略这些旧覆盖，但回滚后的旧脚本仍需要它们。
+从旧版本升级时，部署器不会覆盖已有的 `migrate.env`；必须确认其中包含 `DAYORDER_ENV=production`，否则会在实际 migration 以及 Migrator 的 ConfigHub 调用之前安全失败。旧版环境文件引用的数据库 URL、`auth_hmac_key`、`smtp_password` 和 `agent_http_key` 密钥文件应保留到相邻 Release 的回滚窗口结束。新包装器会清除数据库 URL 覆盖；存在的旧 HMAC/SMTP 文件仍作为兼容回退读取，但 ConfigHub 小写键优先；Agent 密钥不再使用。回滚后的旧脚本仍需要这些文件。
 
 如果脚本要求启用用户级 systemd linger，只需执行一次 `sudo loginctl enable-linger "$USER"`，然后再次运行部署命令。
 
@@ -240,9 +236,9 @@ GOARCH=arm64 npm run build:release:backend
 上传完整后端发布目录：
 
 ```bash
-ssh deploy@api.example.com 'sudo install -d -o deploy -g deploy /opt/dayorder/releases/0.2.0'
-rsync -av release/backend/ deploy@api.example.com:/opt/dayorder/releases/0.2.0/
-ssh deploy@api.example.com 'sudo chown -R dayorder:dayorder /opt/dayorder/releases/0.2.0'
+ssh deploy@api.example.com 'sudo install -d -o deploy -g deploy /opt/dayorder/releases/0.3.0'
+rsync -av release/backend/ deploy@api.example.com:/opt/dayorder/releases/0.3.0/
+ssh deploy@api.example.com 'sudo chown -R dayorder:dayorder /opt/dayorder/releases/0.3.0'
 ```
 
 `release/backend/` 包含：
@@ -265,12 +261,12 @@ config/migrate.env.example
 
 ```bash
 sudo install -d -m 0750 -o root -g dayorder /etc/dayorder /etc/dayorder/secrets
-sudo install -m 0640 -o root -g dayorder /opt/dayorder/releases/0.2.0/config/api.env.example /etc/dayorder/api.env
-sudo install -m 0640 -o root -g dayorder /opt/dayorder/releases/0.2.0/config/worker.env.example /etc/dayorder/worker.env
-sudo install -m 0640 -o root -g dayorder /opt/dayorder/releases/0.2.0/config/migrate.env.example /etc/dayorder/migrate.env
+sudo install -m 0640 -o root -g dayorder /opt/dayorder/releases/0.3.0/config/api.env.example /etc/dayorder/api.env
+sudo install -m 0640 -o root -g dayorder /opt/dayorder/releases/0.3.0/config/worker.env.example /etc/dayorder/worker.env
+sudo install -m 0640 -o root -g dayorder /opt/dayorder/releases/0.3.0/config/migrate.env.example /etc/dayorder/migrate.env
 ```
 
-把 `.confighub.yaml` 放在三个环境文件所在的 `/etc/dayorder/`，并在 `/etc/dayorder/secrets/` 只创建环境文件引用的认证密钥、SMTP 密码和 Agent 密钥文件。启动脚本通过 `confighub run --project shier --env prod` 为 API、Worker、Migrator 注入各自角色所需的数据库配置。
+把 `.confighub.yaml` 放在三个环境文件所在的 `/etc/dayorder/`。启动脚本通过 `confighub run --project shier --env prod` 为 API、Worker、Migrator 注入各自角色所需的数据库配置，并为 API/Worker 注入 `dayorder_auth_hmac_key`、为 Worker 注入 `dayorder_smtp_password`；无需创建应用密钥文件。Agent 当前暂未接入。
 
 前端部署在 `https://app.example.com` 时，API 配置至少需要调整：
 
@@ -284,7 +280,7 @@ DAYORDER_ALLOWED_ORIGINS=https://app.example.com
 每次启动新版本前先执行 migration，再检查 schema 版本：
 
 ```bash
-cd /opt/dayorder/releases/0.2.0
+cd /opt/dayorder/releases/0.3.0
 sudo -u dayorder ./scripts/migrate.sh up /etc/dayorder/migrate.env
 sudo -u dayorder ./scripts/migrate.sh check /etc/dayorder/migrate.env
 ```
@@ -296,14 +292,14 @@ sudo -u dayorder ./scripts/migrate.sh check /etc/dayorder/migrate.env
 API 和 Worker 是两个独立的前台服务：
 
 ```bash
-cd /opt/dayorder/releases/0.2.0
+cd /opt/dayorder/releases/0.3.0
 sudo -u dayorder ./scripts/start-api.sh /etc/dayorder/api.env
 ```
 
 另一个终端或独立的 systemd/Supervisor 服务启动 Worker：
 
 ```bash
-cd /opt/dayorder/releases/0.2.0
+cd /opt/dayorder/releases/0.3.0
 sudo -u dayorder ./scripts/start-worker.sh /etc/dayorder/worker.env
 ```
 
@@ -323,11 +319,11 @@ curl --fail --silent --show-error http://127.0.0.1:9091/metrics >/dev/null
 
 所有业务接口位于 `/api/v1`：
 
-- 认证：注册、邮箱验证/重发、登录、退出、Session、忘记/重置密码。
+- 认证：注册、登录、退出和 Session；邮箱验证/重发及忘记/重置密码当前返回 `503` 未接入错误。
 - 账户：资料、邮箱、密码、设置和设备管理。
 - 资源：Goals/Milestones、Tasks、Calendar Events/Reminders、Records、Notes、Daily Reviews、Tags。
 - 同步：`GET /sync/bootstrap`、`GET /sync/changes`、`POST /sync/mutations`。
-- Agent/审计：Agent Runs、Agent Changes、Audit Events 和服务端撤销。
+- Agent/审计：Agent 路径暂时返回 `503 AGENT_NOT_AVAILABLE`；Audit Events 和服务端撤销保持可用。
 - 运维：`GET /health/live`、`GET /health/ready`；指标使用独立内部监听端口。
 
 资源写入使用 `Idempotency-Key`、`X-Device-ID` 和 `If-Match`；错误采用统一 envelope，并区分认证、验证、冲突、限流和暂时不可用。

@@ -114,11 +114,6 @@ func main() {
 		logger.Error("create device service", "error", err)
 		os.Exit(1)
 	}
-	agents, err := service.NewAgentService(postgresstore.NewAgentRepository(), transactor, commands, cursors)
-	if err != nil {
-		logger.Error("create agent service", "error", err)
-		os.Exit(1)
-	}
 	audits, err := service.NewAuditQueryService(auditRepository, transactor, cursors)
 	if err != nil {
 		logger.Error("create audit query service", "error", err)
@@ -131,7 +126,7 @@ func main() {
 	}
 	handler, err := httpapi.NewRouter(httpapi.RouterOptions{
 		Accounts: accounts, Sessions: sessions, Goals: goals, Tasks: tasks, Calendar: calendar,
-		Content: content, Settings: settings, Devices: devices, Sync: syncService, Agents: agents, Audits: audits, Undos: undos, AllowedOrigins: configuration.AllowedOrigins, Logger: logger, Metrics: metrics,
+		Content: content, Settings: settings, Devices: devices, Sync: syncService, Audits: audits, Undos: undos, AllowedOrigins: configuration.AllowedOrigins, Logger: logger, Metrics: metrics,
 		Ready: func(ctx context.Context) error {
 			if err := database.Ping(ctx, pool, configuration.Database.HealthTimeout); err != nil {
 				return err

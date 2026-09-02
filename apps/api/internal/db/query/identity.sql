@@ -135,7 +135,6 @@ RETURNING *;
 UPDATE dayorder.users
 SET email = sqlc.arg(email),
     normalized_email = sqlc.arg(normalized_email),
-    status = 'pending_verification',
     email_verified_at = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(user_id)

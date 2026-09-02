@@ -17,7 +17,6 @@ esac
 dayorder_load_environment "$environment_file"
 [[ "${DAYORDER_ENV-}" == production ]] || dayorder_die "DAYORDER_ENV must be production for bare-metal migrations"
 dayorder_clear_database_overrides
-dayorder_load_runtime_secrets
 
 binary="$script_dir/../bin/dayorder-migrate"
 dayorder_require_executable "$binary"

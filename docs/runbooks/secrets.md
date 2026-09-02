@@ -1,6 +1,6 @@
 # 生产密钥管理
 
-DayOrder 的生产 Compose 只保存密钥文件路径。数据库 URL、密码、HMAC、SMTP、Agent Key 和备份加密口令均通过 `/run/secrets` 只读挂载，不能写入 `.env.production`、Compose、镜像层或 Git。
+DayOrder 的生产 Compose 只保存密钥文件路径。数据库 URL、密码、HMAC、SMTP 和备份加密口令均通过 `/run/secrets` 只读挂载，不能写入 `.env.production`、Compose、镜像层或 Git。Agent 当前暂未接入，不配置 Provider 或 Key。
 
 ## 首次生成
 
@@ -13,7 +13,6 @@ for name in postgres_admin_password migrator_db_password api_db_password worker_
   openssl rand -hex 32 > "secrets/$name"
 done
 openssl rand -hex 32 > secrets/smtp_password
-openssl rand -hex 32 > secrets/agent_http_key
 
 printf 'postgres://dayorder_migrator:%s@postgres:5432/dayorder?sslmode=disable&search_path=dayorder' "$(cat secrets/migrator_db_password)" > secrets/migration_database_url
 printf 'postgres://dayorder_api:%s@postgres:5432/dayorder?sslmode=disable' "$(cat secrets/api_db_password)" > secrets/api_database_url
@@ -24,13 +23,13 @@ chmod 640 secrets/*
 
 `10001` 是 Compose 应用容器使用的只读密钥组；PostgreSQL 容器只额外加入该组。密钥仍由当前部署用户拥有并且只有所有者可写，其他宿主机用户不得拥有 GID 10001，也不得读取这些文件。
 
-把 `smtp_password` 和 `agent_http_key` 替换为供应商实际签发的值。以上数据库密码使用十六进制字符，因此放入 URL 时不需要额外转义。内部数据库流量只走 Docker 的 `data` 网络，PostgreSQL 没有主机端口；公网 TLS 在 Caddy 终止。
+把 `smtp_password` 替换为供应商实际签发的值。以上数据库密码使用十六进制字符，因此放入 URL 时不需要额外转义。内部数据库流量只走 Docker 的 `data` 网络，PostgreSQL 没有主机端口；公网 TLS 在 Caddy 终止。
 
 `pgbackrest_cipher_pass` 一旦投入使用必须单独离线保管。丢失它会使全部加密备份不可恢复。建议将密钥副本存入云厂商 KMS/Secret Manager 和独立的应急保管位置，而不是只留在同一台服务器。
 
 ## 环境文件
 
-复制 `deploy/env.production.example` 为 `deploy/.env.production`，只填写域名、SMTP 地址、Agent URL、镜像版本等非密钥配置。文件仍应设为 `0600`，因为它描述生产拓扑：
+复制 `deploy/env.production.example` 为 `deploy/.env.production`，只填写域名、SMTP 地址、镜像版本等非密钥配置。文件仍应设为 `0600`，因为它描述生产拓扑：
 
 ```bash
 cp deploy/env.production.example deploy/.env.production
@@ -58,8 +57,8 @@ docker compose --env-file deploy/.env.production -f deploy/compose.yaml config
 
 `DAYORDER_AUTH_HMAC_KEY` 轮换会同时使现有 Session、资源游标和同步游标失效，应安排维护窗口并提前通知用户重新登录。pgBackRest 加密口令不能直接覆盖：必须建立新仓库并完成一次全量备份与恢复演练后，才能退役旧仓库。
 
-SMTP 与 Agent Key 先在供应商侧创建第二把 Key，更新 secret、重建 Worker、确认邮件与 Agent Run 成功，再撤销旧 Key。
+SMTP Key 先在供应商侧创建第二把 Key，更新 secret、重建 Worker、确认邮件成功，再撤销旧 Key。
 
 ## 泄露处置
 
-立即停止受影响入口，吊销或轮换密钥，保留审计日志，检查从最早可能泄露时间起的 Session、登录限流、Agent 调用和数据库连接。不得把泄露值写进事件报告；用密钥名称和指纹后 6 位标识即可。
+立即停止受影响入口，吊销或轮换密钥，保留审计日志，检查从最早可能泄露时间起的 Session、登录限流和数据库连接。不得把泄露值写进事件报告；用密钥名称和指纹后 6 位标识即可。

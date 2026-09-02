@@ -17,9 +17,8 @@ export interface SessionResponse {
   expiresAt: string;
 }
 
-export interface RegisterResponse {
-  user: AuthUser;
-  verificationRequired: true;
+export interface RegisterResponse extends SessionResponse {
+  verificationRequired: false;
 }
 
 export function getSession(signal?: AbortSignal): Promise<SessionResponse> {

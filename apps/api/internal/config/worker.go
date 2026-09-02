@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -19,14 +18,6 @@ type WorkerMailConfig struct {
 	Timeout  time.Duration
 }
 
-type WorkerAgentConfig struct {
-	Provider string
-	Model    string
-	HTTPURL  string
-	HTTPKey  string
-	Timeout  time.Duration
-}
-
 type WorkerConfig struct {
 	Environment    Environment
 	PublicURL      string
@@ -35,8 +26,9 @@ type WorkerConfig struct {
 	Database       DatabaseConfig
 	PollInterval   time.Duration
 	Mail           WorkerMailConfig
-	Agent          WorkerAgentConfig
 }
+
+const configHubSMTPPasswordKey = "dayorder_smtp_password"
 
 func LoadWorker() (WorkerConfig, error) {
 	config, err := LoadWorkerFrom(os.LookupEnv)
@@ -44,6 +36,8 @@ func LoadWorker() (WorkerConfig, error) {
 		return WorkerConfig{}, err
 	}
 	ScrubConfigHubDatabaseEnvironment()
+	_ = os.Unsetenv(configHubAuthHMACKey)
+	_ = os.Unsetenv(configHubSMTPPasswordKey)
 	return config, nil
 }
 
@@ -104,7 +98,7 @@ func LoadWorkerFrom(lookup LookupFunc) (WorkerConfig, error) {
 	mailConfig := WorkerMailConfig{
 		Sink:    strings.ToLower(valueOr(lookup, "DAYORDER_MAIL_SINK", "log")),
 		Address: valueOr(lookup, "DAYORDER_SMTP_ADDRESS", ""), From: valueOr(lookup, "DAYORDER_SMTP_FROM", ""),
-		Username: valueOr(lookup, "DAYORDER_SMTP_USERNAME", ""), Password: valueOr(lookup, "DAYORDER_SMTP_PASSWORD", ""),
+		Username: valueOr(lookup, "DAYORDER_SMTP_USERNAME", ""), Password: resolveSMTPPassword(lookup),
 		TLSMode: strings.ToLower(valueOr(lookup, "DAYORDER_SMTP_TLS_MODE", "starttls")),
 	}
 	mailConfig.Timeout, err = parseDuration(lookup, "DAYORDER_SMTP_TIMEOUT", 15*time.Second)
@@ -117,10 +111,7 @@ func LoadWorkerFrom(lookup LookupFunc) (WorkerConfig, error) {
 	if environment == Production && mailConfig.Sink != "smtp" {
 		return WorkerConfig{}, errors.New("DAYORDER_MAIL_SINK must be smtp in production")
 	}
-	hmacKey := valueOr(lookup, "DAYORDER_AUTH_HMAC_KEY", "")
-	if hmacKey == "" && environment != Production {
-		hmacKey = "development-only-hmac-key-change-before-production"
-	}
+	hmacKey := resolveAuthHMACKey(lookup, environment)
 	if len([]byte(hmacKey)) < 32 {
 		return WorkerConfig{}, errors.New("DAYORDER_AUTH_HMAC_KEY must contain at least 32 bytes")
 	}
@@ -132,36 +123,15 @@ func LoadWorkerFrom(lookup LookupFunc) (WorkerConfig, error) {
 			return WorkerConfig{}, errors.New("SMTP TLS is required in production")
 		}
 	}
-	agentConfig := WorkerAgentConfig{
-		Provider: strings.ToLower(valueOr(lookup, "DAYORDER_AGENT_PROVIDER", "deterministic")),
-		Model:    valueOr(lookup, "DAYORDER_AGENT_MODEL", "rules-v1"),
-		HTTPURL:  valueOr(lookup, "DAYORDER_AGENT_HTTP_URL", ""),
-		HTTPKey:  valueOr(lookup, "DAYORDER_AGENT_HTTP_KEY", ""),
-	}
-	agentConfig.Timeout, err = parseDuration(lookup, "DAYORDER_AGENT_TIMEOUT", 30*time.Second)
-	if err != nil || agentConfig.Timeout < time.Second || agentConfig.Timeout > 2*time.Minute {
-		return WorkerConfig{}, errors.New("DAYORDER_AGENT_TIMEOUT must be between 1s and 2m")
-	}
-	if agentConfig.Provider != "deterministic" && agentConfig.Provider != "http" {
-		return WorkerConfig{}, errors.New("DAYORDER_AGENT_PROVIDER must be deterministic or http")
-	}
-	if environment == Production && agentConfig.Provider != "http" {
-		return WorkerConfig{}, errors.New("DAYORDER_AGENT_PROVIDER must be http in production")
-	}
-	if agentConfig.Provider == "http" {
-		parsedAgentURL, parseErr := url.Parse(agentConfig.HTTPURL)
-		if parseErr != nil || parsedAgentURL.Host == "" || (parsedAgentURL.Scheme != "http" && parsedAgentURL.Scheme != "https") || parsedAgentURL.User != nil || parsedAgentURL.Fragment != "" {
-			return WorkerConfig{}, errors.New("DAYORDER_AGENT_HTTP_URL must be an absolute HTTP or HTTPS URL")
-		}
-		if environment == Production && parsedAgentURL.Scheme != "https" {
-			return WorkerConfig{}, errors.New("DAYORDER_AGENT_HTTP_URL must use HTTPS in production")
-		}
-		if agentConfig.HTTPKey == "" || agentConfig.Model == "" {
-			return WorkerConfig{}, errors.New("Agent HTTP key and model are required")
-		}
-	}
 	return WorkerConfig{
 		Environment: environment, PublicURL: strings.TrimSuffix(parsedPublicURL.String(), "/"), MetricsAddress: metricsAddress,
-		AuthHMACKey: []byte(hmacKey), Database: database, PollInterval: pollInterval, Mail: mailConfig, Agent: agentConfig,
+		AuthHMACKey: []byte(hmacKey), Database: database, PollInterval: pollInterval, Mail: mailConfig,
 	}, nil
+}
+
+func resolveSMTPPassword(lookup LookupFunc) string {
+	if password, ok := lookup(configHubSMTPPasswordKey); ok {
+		return password
+	}
+	return valueOr(lookup, "DAYORDER_SMTP_PASSWORD", "")
 }

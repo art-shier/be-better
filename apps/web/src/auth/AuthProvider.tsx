@@ -6,7 +6,6 @@ import {
   logoutAccount,
   registerAccount,
   requestPasswordReset as requestPasswordResetRequest,
-  resendVerification as resendVerificationRequest,
   updateEmail as requestEmailUpdate,
   updatePassword as requestPasswordUpdate,
   updateProfile as requestProfileUpdate,
@@ -30,7 +29,7 @@ import {
 } from "../store/storage";
 import { migrateGuestData } from "./guest-migration";
 
-export type AuthMode = "loading" | "guest" | "verification-pending" | "authenticated" | "offline-account" | "expired";
+export type AuthMode = "loading" | "guest" | "authenticated" | "offline-account" | "expired";
 export type AuthDialogReason = "account" | "agent" | "expired";
 
 interface AuthContextValue {
@@ -51,7 +50,6 @@ interface AuthContextValue {
   login(email: string, password: string): Promise<void>;
   register(input: { displayName: string; email: string; password: string; migrate: boolean; data: AppData }): Promise<void>;
   verifyEmail(token: string): Promise<void>;
-  resendVerification(): Promise<void>;
   requestPasswordReset(email: string): Promise<void>;
   completePasswordReset(token: string, password: string): Promise<void>;
   logout(): Promise<void>;
@@ -90,7 +88,7 @@ export function AuthProvider({
   guestMigrator = migrateGuestData,
 }: AuthProviderProps) {
   const initialPending = readPendingRegistration();
-  const [mode, setMode] = useState<AuthMode>(initialSession ? "authenticated" : sessionCheckEnabled ? "loading" : initialPending ? "verification-pending" : "guest");
+  const [mode, setMode] = useState<AuthMode>(initialSession ? "authenticated" : sessionCheckEnabled ? "loading" : "guest");
   const [user, setUser] = useState<AuthUser | null>(initialSession?.user ?? null);
   const [expiresAt, setExpiresAt] = useState<string | null>(initialSession?.expiresAt ?? null);
   const [online, setOnline] = useState(navigator.onLine);
@@ -112,11 +110,11 @@ export function AuthProvider({
     saveLastAccount({ id: nextUser.id, email: nextUser.email, displayName: nextUser.displayName });
   }, []);
 
-  const finishPendingMigration = useCallback(async (nextUser: AuthUser) => {
-    const pending = pendingVerification;
+  const finishPendingMigration = useCallback(async (nextUser: AuthUser, registration: PendingRegistration | null = pendingVerification, suppliedData?: AppData) => {
+    const pending = registration;
     if (!pending || pending.user.id !== nextUser.id) return;
     if (pending.migrate) {
-      const guestData = pendingDataRef.current ?? readGuestState();
+      const guestData = suppliedData ?? pendingDataRef.current ?? readGuestState();
       if (guestData) {
         try {
           await guestMigrator(nextUser.id, guestData);
@@ -158,7 +156,7 @@ export function AuthProvider({
         setServiceOnline(!(error instanceof TypeError));
         setUser(null);
         setExpiresAt(null);
-        setMode(pendingVerification ? "verification-pending" : "guest");
+        setMode("guest");
       }
     } finally {
       checkingRef.current = false;
@@ -200,11 +198,10 @@ export function AuthProvider({
     setPendingVerification(pending);
     setVerificationError(null);
     setMigrationError(null);
-    setUser(null);
-    setExpiresAt(null);
-    setMode("verification-pending");
+    acceptSession(result.user, result.expiresAt);
     setDialog(guestDialog);
-  }, []);
+    await finishPendingMigration(result.user, pending, input.data);
+  }, [acceptSession, finishPendingMigration]);
 
   const verifyEmail = useCallback(async (token: string) => {
     setVerificationBusy(true);
@@ -228,11 +225,6 @@ export function AuthProvider({
     routeTokenRef.current = token;
     void verifyEmail(token).then(() => window.history.replaceState({}, "", "/")).catch(() => undefined);
   }, [verifyEmail]);
-
-  const resendVerification = useCallback(async () => {
-    if (!pendingVerification) throw new Error("没有待验证的邮箱");
-    await resendVerificationRequest(pendingVerification.user.email);
-  }, [pendingVerification]);
 
   const requestPasswordReset = useCallback(async (email: string) => {
     await requestPasswordResetRequest(email);
@@ -293,7 +285,6 @@ export function AuthProvider({
     login,
     register,
     verifyEmail,
-    resendVerification,
     requestPasswordReset,
     completePasswordReset,
     logout,
@@ -303,7 +294,7 @@ export function AuthProvider({
     markSessionExpired,
     markServiceOffline,
     markServiceOnline,
-  }), [completePasswordReset, dialog, expiresAt, login, logout, markServiceOffline, markServiceOnline, markSessionExpired, migrationError, mode, online, pendingVerification, register, requestPasswordReset, resendVerification, serviceOnline, updateDisplayName, updateEmail, updatePassword, user, verificationBusy, verificationError, verifyEmail]);
+  }), [completePasswordReset, dialog, expiresAt, login, logout, markServiceOffline, markServiceOnline, markSessionExpired, migrationError, mode, online, pendingVerification, register, requestPasswordReset, serviceOnline, updateDisplayName, updateEmail, updatePassword, user, verificationBusy, verificationError, verifyEmail]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

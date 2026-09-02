@@ -18,11 +18,12 @@ const nav = [
   { id: "agent" as const, label: "Agent", icon: Sparkles },
 ];
 
-export function AppShell({ view, onNavigate, online, children }: { view: ViewName; onNavigate(view: ViewName): void; online: boolean; children: ReactNode }) {
+export function AppShell({ view, onNavigate, online, agentAvailable, children }: { view: ViewName; onNavigate(view: ViewName): void; online: boolean; agentAvailable: boolean; children: ReactNode }) {
   const { data, syncStatus, lastSyncedAt } = useAppStore();
   const { openCapture, openSearch, toast } = useUi();
   const auth = useAuth();
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const availableNavigation = agentAvailable ? nav : nav.filter((item) => item.id !== "agent");
   const inboxCount = data.records.filter((record) => record.kind === "inbox" && !record.archivedAt && !record.parsedEntityId).length;
 
   useEffect(() => {
@@ -51,6 +52,7 @@ export function AppShell({ view, onNavigate, online, children }: { view: ViewNam
   const SyncIcon = !online || syncStatus === "offline" ? CloudOff : syncStatus === "connecting" ? RefreshCw : syncStatus === "synced" ? Cloud : HardDrive;
   const showOfflineBanner = Boolean(auth.user) && (!online || syncStatus === "offline" || auth.mode === "expired");
   const selectView = (next: ViewName) => {
+    if (next === "agent" && !agentAvailable) return;
     if (next === "agent" && !auth.canUseAgent) { auth.openAuth("agent"); return; }
     onNavigate(next);
   };
@@ -61,12 +63,12 @@ export function AppShell({ view, onNavigate, online, children }: { view: ViewNam
       <header className="app-header">
         <button className="brand" type="button" onClick={() => onNavigate("today")} aria-label="返回今天"><span className="brand-mark">序</span><span className="brand-copy"><strong>日序</strong><small>DayOrder</small></span></button>
         <nav className="primary-nav" aria-label="主导航">
-          {nav.map((item) => <button key={item.id} className={`nav-button ${view === item.id ? "active" : ""}`} type="button" onClick={() => selectView(item.id)} aria-current={view === item.id ? "page" : undefined}>{item.label}{badge(item.id) > 0 && <span className="nav-count">{badge(item.id)}</span>}</button>)}
+          {availableNavigation.map((item) => <button key={item.id} className={`nav-button ${view === item.id ? "active" : ""}`} type="button" onClick={() => selectView(item.id)} aria-current={view === item.id ? "page" : undefined}>{item.label}{badge(item.id) > 0 && <span className="nav-count">{badge(item.id)}</span>}</button>)}
         </nav>
         <div className="header-tools">
           <button className="command-button" type="button" onClick={openSearch}><Search size={17} /><span>查找任何内容</span><kbd>Ctrl K</kbd></button>
           <button className="header-icon" type="button" onClick={() => toast(syncMessage)} aria-label={syncMessage}><SyncIcon className={syncStatus === "connecting" ? "sync-spinning" : undefined} size={18} /></button>
-          <button className="header-icon assistant-trigger" type="button" onClick={() => auth.canUseAgent ? setAssistantOpen(true) : auth.openAuth("agent")} aria-label="打开 Agent 快捷面板"><Bot size={19} /></button>
+          {agentAvailable && <button className="header-icon assistant-trigger" type="button" onClick={() => auth.canUseAgent ? setAssistantOpen(true) : auth.openAuth("agent")} aria-label="打开 Agent 快捷面板"><Bot size={19} /></button>}
           <button className="quick-button" type="button" onClick={() => openCapture()}><Plus size={18} /><span>快速记录</span></button>
           <AccountControls syncStatus={syncStatus} lastSyncedAt={lastSyncedAt} />
         </div>
@@ -74,10 +76,10 @@ export function AppShell({ view, onNavigate, online, children }: { view: ViewNam
       {showOfflineBanner && <div className="offline-banner" role="status">{auth.mode === "expired" ? "登录已过期" : !online ? "当前离线" : "本地服务暂不可用"}：更改仍会保存在浏览器，恢复连接后继续同步。</div>}
       <main className="workspace">{children}</main>
       <nav className="bottom-nav" aria-label="移动端主导航">
-        {nav.map((item) => { const Icon = item.icon; return <button key={item.id} className={`bottom-button ${view === item.id ? "active" : ""}`} type="button" onClick={() => selectView(item.id)} aria-current={view === item.id ? "page" : undefined}><Icon size={18} /><span>{item.label}</span>{badge(item.id) > 0 && <b>{badge(item.id)}</b>}</button>; })}
+        {availableNavigation.map((item) => { const Icon = item.icon; return <button key={item.id} className={`bottom-button ${view === item.id ? "active" : ""}`} type="button" onClick={() => selectView(item.id)} aria-current={view === item.id ? "page" : undefined}><Icon size={18} /><span>{item.label}</span>{badge(item.id) > 0 && <b>{badge(item.id)}</b>}</button>; })}
       </nav>
       <button className="mobile-capture" type="button" onClick={() => openCapture()} aria-label="快速记录"><Plus size={20} /></button>
-      <AssistantDrawer open={assistantOpen && auth.canUseAgent} onClose={() => setAssistantOpen(false)} onOpenAgent={() => { setAssistantOpen(false); selectView("agent"); }} />
+      {agentAvailable && <AssistantDrawer open={assistantOpen && auth.canUseAgent} onClose={() => setAssistantOpen(false)} onOpenAgent={() => { setAssistantOpen(false); selectView("agent"); }} />}
     </>
   );
 }

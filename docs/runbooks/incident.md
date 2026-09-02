@@ -50,7 +50,7 @@ pwsh -File deploy/scripts/backup-check.ps1
 
 ### Worker 或 Outbox 堆积
 
-检查 Worker 日志、`dayorder_outbox_*` 指标、SMTP 和 Agent Provider 可用性。修复依赖后让 Worker 的幂等重试继续消费；不得批量把 `pending`/`dead` 行直接改成 `processed`，也不得删除失败行来消警。
+检查 Worker 日志、`dayorder_outbox_*` 指标和 SMTP 可用性。修复依赖后让 Worker 的幂等重试继续消费；不得批量把 `pending`/`dead` 行直接改成 `processed`，也不得删除失败行来消警。Agent 当前暂未接入，不存在 Provider 依赖。
 
 ### 同步冲突激增
 

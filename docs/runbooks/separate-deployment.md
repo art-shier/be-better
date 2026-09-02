@@ -40,9 +40,6 @@ chmod 0755 dayorder-deploy.sh
     ├── migrate.env
     ├── worker.env
     └── secrets/
-        ├── auth_hmac_key
-        ├── smtp_password
-        └── agent_http_key
 ```
 
 首次 Server 部署缺少 `api.env` 或 `migrate.env`、或首次 Worker 部署缺少 `worker.env` 时，脚本会创建权限受限的 `dayorder-config` 和 `secrets/`，从已校验产物复制缺失模板，然后在 migration、链接切换和服务启动之前停止。已有配置永不覆盖，历史版本不会自动删除。
@@ -51,19 +48,14 @@ chmod 0755 dayorder-deploy.sh
 
 部署器会解析预检通过的 ConfigHub CLI 绝对路径并写入 API、Worker 的 systemd unit，因此服务启动不依赖 systemd 是否继承交互 shell 的 PATH。
 
-三个非数据库密钥的完整路径是 `secrets/auth_hmac_key`、`secrets/smtp_password` 和 `secrets/agent_http_key`。每个文件必须包含 exactly one non-empty single-line value；空文件、多行文件、符号链接、非部署用户拥有的文件或宽松权限都会在 migration 前被拒绝。首次填写后执行：
+认证 HMAC 和 SMTP 密码分别由 ConfigHub 的 `dayorder_auth_hmac_key`、`dayorder_smtp_password` 注入，不写入本地环境文件。Release 不再要求本地应用密钥文件；Agent 当前暂未接入，Web 入口、API 业务处理和 Worker Provider 均已屏蔽。首次填写环境文件后执行：
 
 ```bash
-touch dayorder-config/secrets/auth_hmac_key \
-  dayorder-config/secrets/smtp_password \
-  dayorder-config/secrets/agent_http_key
 chmod 0700 dayorder-config dayorder-config/secrets
-chmod 0600 dayorder-config/api.env dayorder-config/migrate.env dayorder-config/worker.env \
-  dayorder-config/secrets/auth_hmac_key \
-  dayorder-config/secrets/smtp_password dayorder-config/secrets/agent_http_key
+chmod 0600 dayorder-config/api.env dayorder-config/migrate.env dayorder-config/worker.env
 ```
 
-从旧版本升级时，已有环境文件不会自动覆盖。确认 `dayorder-config/migrate.env` 包含 `DAYORDER_ENV=production`；缺失或设置为其他值会在实际 migration 以及 Migrator 的 ConfigHub 调用之前失败。旧版环境文件引用的 `api_database_url`、`worker_database_url` 和 `migration_database_url` 密钥文件应保留到相邻 Release 的回滚窗口结束，新脚本虽然不读取它们，但回滚后的旧脚本仍然需要。
+从旧版本升级时，已有环境文件不会自动覆盖。确认 `dayorder-config/migrate.env` 包含 `DAYORDER_ENV=production`；缺失或设置为其他值会在实际 migration 以及 Migrator 的 ConfigHub 调用之前失败。旧版环境文件引用的数据库 URL、`auth_hmac_key`、`smtp_password` 和 `agent_http_key` 密钥文件应保留到相邻 Release 的回滚窗口结束。新包装器会清除数据库 URL 覆盖；存在的旧 HMAC/SMTP 文件仍作为兼容回退读取，但 ConfigHub 小写键优先；Agent 密钥不再使用。回滚后的旧脚本仍然需要这些文件。
 
 Server 与 Worker 需要可用的用户级 systemd 管理器。若脚本要求启用 linger，请执行一次：
 
@@ -110,7 +102,7 @@ API 和 Worker 的启停、重启与状态检查也可以统一通过部署脚�
 
 这些生命周期命令不会访问 GitHub Release、运行 ConfigHub 预检或修改部署目录，并且必须由最初部署服务的同一用户执行。`stop` 只停止当前服务，不会取消 unit 的开机启用状态。`all` 只对 `dayorder-api.service` 和 `dayorder-worker.service` 执行 systemd 操作，同时报告 `<root>/current-web`；Web 没有由脚本管理的 systemd 服务，`start|stop|restart web` 只报告当前 Web 链接，不会启动或停止 Nginx/Caddy。
 
-`all` 会先完成 Server migration 与就绪检查，再激活 Worker，最后切换 Web 链接。Server 或 Worker 激活失败时，应用链接会恢复到本次部署之前的版本并重新启动旧服务；`all` 后续步骤失败也会按逆序恢复本次已切换的应用链接。恢复旧 Server 后还会重新轮询 API 就绪端点；若旧 API 仍不健康，脚本会输出 `restored API failed readiness; manual intervention required` 并失败退出，运维必须检查链接、服务状态和日志。
+`all` 会先记录 API/Worker 的运行状态，按 Worker、API 的顺序停止旧服务，再执行 Server migration，避免旧进程在 schema 切换窗口继续写入旧认证状态。Migration 失败或在链接切换前中断时，部署器会按原运行状态恢复旧 API/Worker；新 API 就绪后先恢复旧 Worker，再激活新 Worker，最后切换 Web 链接。因此涉及 Server 的升级会产生一个短暂的 API/Worker 停机窗口，应在维护窗口执行。Server 或 Worker 激活失败时，应用链接会恢复到本次部署之前的版本并重新启动旧服务；`all` 后续步骤失败也会按逆序恢复本次已切换的应用链接。恢复旧 Server 后还会重新轮询 API 就绪端点；若旧 API 仍不健康，脚本会输出 `restored API failed readiness; manual intervention required` 并失败退出，运维必须检查链接、服务状态和日志。
 
 Web 只下载、校验并切换 `current-web`；Web 部署不安装、配置或启动 Nginx/Caddy，也不启动静态服务器。Nginx/Caddy 必须将站点根目录指向 `<root>/current-web`。Server 与 Worker 是两个独立的 `systemd --user` 服务，分别使用持久化的 `api.env`、`migrate.env` 与 `worker.env`，并从同目录的 `.confighub.yaml` 读取数据库配置。
 
@@ -133,7 +125,7 @@ API 默认就绪检查地址为 `http://127.0.0.1:8080/health/ready`；可用 `D
 
 每个 Release 提供 Web、Linux `amd64`/`arm64` Server 与 Worker 压缩包，以及 `dayorder-deploy.sh`、`release-manifest.json` 和 `SHA256SUMS`。脚本在解压和激活前校验 HTTPS 下载、资产名、Manifest、SHA-256 和归档内容。
 
-Migration 只会在切换 Server 前向前执行并检查 schema；migration、下载、校验、解压或配置预检失败时不切换链接。干净但高于当前二进制 floor 的 schema 仅因相邻 Release 的 expand/contract 保证而被接受，不能据此把旧二进制用于任意未来 schema。请在确认不再需要的版本后自行清理 `releases/`，不要删除 `dayorder-config`。
+Migration 只会在停止旧 API/Worker 后、切换 Server 前向前执行并检查 schema；migration、下载、校验、解压或配置预检失败时不切换链接。Migration 失败会尝试恢复迁移前仍在运行的服务；若 schema 被标记为 dirty 或旧 API 无法通过就绪检查，部署器会明确要求人工介入。干净但高于当前二进制 floor 的 schema 仅因相邻 Release 的 expand/contract 保证而被接受，不能据此把旧二进制用于任意未来 schema。请在确认不再需要的版本后自行清理 `releases/`，不要删除 `dayorder-config`。
 
 ## 本地构建/离线传输
 

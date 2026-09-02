@@ -63,10 +63,11 @@ for (const variable of [
   "WORKER_DATABASE_URL_FILE",
   "MIGRATION_DATABASE_URL_FILE",
   "DAYORDER_AUTH_HMAC_KEY_FILE",
-  "DAYORDER_AGENT_HTTP_KEY_FILE",
 ]) {
   requireMatch(environment, new RegExp(`^${variable}=`, "m"), `production environment example is missing ${variable}`);
 }
+rejectMatch(compose, /DAYORDER_AGENT_/, "disabled Agent configuration must not be present in Compose");
+rejectMatch(environment, /^DAYORDER_AGENT_/m, "disabled Agent configuration must not be present in the production environment example");
 rejectMatch(environment, /(development-only|change-me|replace-with)/i, "production environment example contains an unsafe placeholder secret");
 
 console.log("Production deployment configuration passes static security checks.");

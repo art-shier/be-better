@@ -3,12 +3,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthDialog } from "../components/AuthDialog";
+import { VerificationNotice } from "../components/VerificationNotice";
 import { createSeedData } from "../domain/seed";
 import type { AppData } from "../domain/types";
 import { getCachedEntities, hasAccountCache, putCachedEntity } from "../offline/cache";
 import { deleteDayOrderDB } from "../offline/db";
 import { AppStoreProvider } from "../store/AppStore";
-import { GUEST_STORAGE_KEY, LAST_ACCOUNT_KEY } from "../store/storage";
+import { GUEST_STORAGE_KEY, LAST_ACCOUNT_KEY, PENDING_REGISTRATION_KEY } from "../store/storage";
 import { UiProvider } from "../ui/UiProvider";
 import { AuthProvider, useAuth } from "./AuthProvider";
 
@@ -26,7 +27,7 @@ function Probe() {
 
 function GuestAuthHarness({ sessionCheckEnabled = false, guestMigrator }: { sessionCheckEnabled?: boolean; guestMigrator?: (accountId: string, data: AppData) => Promise<void> }) {
   return <AuthProvider sessionCheckEnabled={sessionCheckEnabled} guestMigrator={guestMigrator}>
-    <AppStoreProvider><UiProvider><Probe /><AuthDialog /></UiProvider></AppStoreProvider>
+    <AppStoreProvider><UiProvider><VerificationNotice /><Probe /><AuthDialog /></UiProvider></AppStoreProvider>
   </AuthProvider>;
 }
 
@@ -38,13 +39,13 @@ describe("账户状态与游客迁移", () => {
     await deleteDayOrderDB();
   });
 
-  it("注册后等待邮箱验证，验证成功才建立会话并启动游客迁移", async () => {
+  it("注册后直接建立会话并启动游客迁移", async () => {
     const seed = createSeedData();
     localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(seed));
-    const user = { id: crypto.randomUUID(), email: "new@example.com", displayName: "新用户", status: "pending_verification" };
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ user, verificationRequired: true }, 201))
-      .mockResolvedValueOnce(jsonResponse({ user: { ...user, status: "active" }, expiresAt: "2026-09-26T08:00:00Z" }));
+    const user = { id: crypto.randomUUID(), email: "new@example.com", displayName: "新用户", status: "active" };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+      user, verificationRequired: false, expiresAt: "2026-09-26T08:00:00Z",
+    }, 201));
     vi.stubGlobal("fetch", fetchMock);
     const guestMigrator = vi.fn().mockResolvedValue(undefined);
     const actions = userEvent.setup();
@@ -57,14 +58,13 @@ describe("账户状态与游客迁移", () => {
     await actions.type(screen.getByLabelText("密码"), "safe-password-123");
     await actions.click(screen.getByRole("button", { name: "创建账户" }));
 
-    await waitFor(() => expect(screen.getByTestId("auth-mode")).toHaveTextContent("verification-pending"));
+    await waitFor(() => expect(screen.getByTestId("auth-mode")).toHaveTextContent("authenticated"));
     expect(localStorage.getItem(GUEST_STORAGE_KEY)).not.toBeNull();
     const request = fetchMock.mock.calls[0][1] as RequestInit;
     expect(JSON.parse(String(request.body))).toEqual({ displayName: "新用户", email: "new@example.com", password: "safe-password-123" });
 
-    await actions.click(screen.getByRole("button", { name: "验证邮箱" }));
-    await waitFor(() => expect(screen.getByTestId("auth-mode")).toHaveTextContent("authenticated"));
     expect(guestMigrator).toHaveBeenCalledWith(user.id, expect.objectContaining({ goals: seed.goals }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("注册失败保留完整游客数据", async () => {
@@ -97,6 +97,30 @@ describe("账户状态与游客迁移", () => {
     await waitFor(() => expect(screen.getByTestId("auth-mode")).toHaveTextContent("authenticated"));
     expect(localStorage.getItem(GUEST_STORAGE_KEY)).not.toBeNull();
     expect(await hasAccountCache(user.id)).toBe(false);
+  });
+
+  it("升级后旧待验证账户使用原密码登录并继续游客迁移", async () => {
+    const seed = createSeedData();
+    const user = { id: crypto.randomUUID(), email: "legacy@example.com", displayName: "旧版用户", status: "active" };
+    localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(seed));
+    localStorage.setItem(PENDING_REGISTRATION_KEY, JSON.stringify({ user, migrate: true }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ user, expiresAt: "2026-09-26T08:00:00Z" })));
+    const guestMigrator = vi.fn().mockResolvedValue(undefined);
+    const actions = userEvent.setup();
+
+    render(<GuestAuthHarness guestMigrator={guestMigrator} />);
+
+    expect(screen.getByTestId("auth-mode")).toHaveTextContent("guest");
+    expect(screen.getByText("账户已创建，请使用原密码登录")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重新发送" })).not.toBeInTheDocument();
+    await actions.click(screen.getByRole("button", { name: "打开账户" }));
+    await actions.type(screen.getByLabelText("邮箱"), user.email);
+    await actions.type(screen.getByLabelText("密码"), "safe-password-123");
+    await actions.click(screen.getByRole("button", { name: "登录账户" }));
+
+    await waitFor(() => expect(screen.getByTestId("auth-mode")).toHaveTextContent("authenticated"));
+    expect(guestMigrator).toHaveBeenCalledWith(user.id, expect.objectContaining({ goals: seed.goals }));
+    expect(localStorage.getItem(PENDING_REGISTRATION_KEY)).toBeNull();
   });
 
   it("在线校验为 401 时保留账户缓存并进入过期状态", async () => {

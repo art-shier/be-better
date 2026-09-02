@@ -1,21 +1,26 @@
 package migrations
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	schema "dayorder.local/api/migrations"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/jackc/pgx/v5"
 )
 
-const LatestVersion uint = 7
+const LatestVersion uint = 8
+
+const directRegistrationReconciliationTimeout = 30 * time.Second
 
 var (
 	ErrDatabaseURLRequired = errors.New("migration database URL is required")
@@ -37,6 +42,26 @@ func Up(databaseURL string) (returnErr error) {
 
 	if err = runner.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("apply database migrations: %w", err)
+	}
+	return reconcileDirectRegistration(databaseURL)
+}
+
+func reconcileDirectRegistration(databaseURL string) (returnErr error) {
+	ctx, cancel := context.WithTimeout(context.Background(), directRegistrationReconciliationTimeout)
+	defer cancel()
+
+	connection, err := pgx.Connect(ctx, strings.TrimSpace(databaseURL))
+	if err != nil {
+		return fmt.Errorf("connect for direct registration reconciliation: %w", err)
+	}
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer closeCancel()
+		returnErr = errors.Join(returnErr, connection.Close(closeCtx))
+	}()
+
+	if _, err = connection.Exec(ctx, "SELECT dayorder.reconcile_direct_registration()"); err != nil {
+		return fmt.Errorf("reconcile direct registration state: %w", err)
 	}
 	return nil
 }

@@ -13,27 +13,33 @@ import { RecordsPage } from "./pages/RecordsPage";
 import { TodayPage } from "./pages/TodayPage";
 
 const views: ViewName[] = ["today", "goals", "calendar", "records", "notes", "agent"];
-const viewFromHash = (): ViewName => {
+const viewFromHash = (agentAvailable: boolean): ViewName => {
   const value = window.location.hash.slice(1) as ViewName;
-  return views.includes(value) ? value : "today";
+  return views.includes(value) && (agentAvailable || value !== "agent") ? value : "today";
 };
 
-export default function App() {
+export default function App({ agentAvailable = false }: { agentAvailable?: boolean }) {
   const auth = useAuth();
-  const [view, setView] = useState<ViewName>(viewFromHash);
+  const [view, setView] = useState<ViewName>(() => viewFromHash(agentAvailable));
   const [online, setOnline] = useState(navigator.onLine);
 
   useEffect(() => {
-    const onHash = () => setView(viewFromHash());
+    const onHash = () => {
+      const next = viewFromHash(agentAvailable);
+      if (!agentAvailable && window.location.hash === "#agent") window.history.replaceState(window.history.state, "", `#${next}`);
+      setView(next);
+    };
     const onOnline = () => setOnline(true);
     const onOffline = () => setOnline(false);
+    onHash();
     window.addEventListener("hashchange", onHash);
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
     return () => { window.removeEventListener("hashchange", onHash); window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); };
-  }, []);
+  }, [agentAvailable]);
 
   const navigate = (next: ViewName) => {
+    if (next === "agent" && !agentAvailable) return;
     if (next === "agent" && !auth.canUseAgent) { auth.openAuth("agent"); return; }
     window.location.hash = next;
     setView(next);
@@ -47,13 +53,13 @@ export default function App() {
   return (
     <>
       <VerificationNotice />
-      <AppShell view={view} onNavigate={navigate} online={online}>
+      <AppShell view={view} onNavigate={navigate} online={online} agentAvailable={agentAvailable}>
         {view === "today" && <TodayPage />}
         {view === "goals" && <GoalsPage />}
         {view === "calendar" && <CalendarPage />}
         {view === "records" && <RecordsPage />}
         {view === "notes" && <NotesPage />}
-        {view === "agent" && (auth.canUseAgent ? <AgentPage /> : <AgentGate onLogin={() => auth.openAuth("agent")} />)}
+        {agentAvailable && view === "agent" && (auth.canUseAgent ? <AgentPage /> : <AgentGate onLogin={() => auth.openAuth("agent")} />)}
       </AppShell>
       <AuthDialog />
     </>

@@ -59,7 +59,7 @@ $composeText = Get-Content -Encoding utf8 -LiteralPath $ComposeFile -Raw
 $postgresBlock = [regex]::Match($composeText, "(?ms)^  postgres:\r?\n(?:(?!^  [a-zA-Z0-9_-]+:).)*").Value
 Assert-True ($composeText -match "(?m)^\s{2}data:\r?\n\s{4}internal:\s*true") "the PostgreSQL data network is internal"
 Assert-True ($postgresBlock -and $postgresBlock -notmatch "(?m)^\s{4}ports:") "PostgreSQL has no published host port"
-Assert-True ($composeText -match "DAYORDER_AGENT_HTTP_URL") "the production worker has an explicit Agent provider URL"
+Assert-True ($composeText -notmatch "DAYORDER_AGENT_") "the disabled Agent has no production provider configuration"
 
 if ($EnvironmentFile -and $null -ne (Get-Command docker -ErrorAction SilentlyContinue)) {
     $configuration = & docker compose --env-file $EnvironmentFile -f $ComposeFile config --format json 2>&1
