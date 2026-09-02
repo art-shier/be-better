@@ -455,6 +455,12 @@ systemd_quote() {
   printf '"%s"' "$value"
 }
 
+systemd_path() {
+  local value="$1"
+  value="${value//%/%%}"
+  printf '%s' "$value"
+}
+
 validate_systemd_value() {
   [[ "$1" =~ [[:cntrl:]] ]] && die "systemd unit value contains control characters"
   return 0
@@ -494,7 +500,7 @@ write_unit() {
   temporary="$(mktemp "$unit_dir/.$service.service.XXXXXX")" || return 1
   if ! {
     printf '[Unit]\nDescription=DayOrder %s\nAfter=network-online.target\nWants=network-online.target\n\n' "$service"
-    printf '[Service]\nType=simple\nWorkingDirectory=%s\n' "$(systemd_quote "$current")"
+    printf '[Service]\nType=simple\nWorkingDirectory=%s\n' "$(systemd_path "$current")"
     printf 'Environment=%s\n' "$(systemd_quote "DAYORDER_CONFIGHUB_EXECUTABLE=$confighub_path")"
     printf 'ExecStart=%s %s\n' "$(systemd_quote "$current/scripts/$script")" "$(systemd_quote "$config")"
     printf 'Restart=on-failure\nRestartSec=5\nTimeoutStopSec=%s\n\n[Install]\nWantedBy=default.target\n' "$timeout"

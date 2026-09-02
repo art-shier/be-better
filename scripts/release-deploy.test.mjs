@@ -737,6 +737,10 @@ test("Server migrates up and checks before activation, then passes readiness", (
   assert.ok(log.indexOf("migrate check") < log.indexOf("systemctl --user daemon-reload"));
   assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-server")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.3/server")));
   const unit = readFileSync(resolve(f.home, ".config/systemd/user/dayorder-api.service"), "utf8");
+  assert.match(
+    unit,
+    new RegExp(`^WorkingDirectory=${deploymentPath(resolve(f.runDirectory, "current-server")).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"),
+  );
   assert.match(unit, /Restart=on-failure/);
   assert.match(unit, /TimeoutStopSec=30/);
   assert.match(
@@ -752,8 +756,29 @@ test("Worker is a separate enabled user service with a 60 second stop timeout", 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(deploymentRealpath(resolve(f.runDirectory, "current-worker")), deploymentRealpath(resolve(f.runDirectory, "releases/v1.2.3/worker")));
   const unit = readFileSync(resolve(f.home, ".config/systemd/user/dayorder-worker.service"), "utf8");
+  assert.match(
+    unit,
+    new RegExp(`^WorkingDirectory=${deploymentPath(resolve(f.runDirectory, "current-worker")).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"),
+  );
   assert.match(unit, /TimeoutStopSec=60/);
   assert.match(unit, /worker\.env/);
+});
+
+test("service units preserve custom roots with spaces and literal percent signs", (t) => {
+  const f = fixture(t);
+  makeAssetRelease(f, "v1.2.3");
+  const customRoot = resolve(f.base, "custom root%files");
+  const first = runDeploy(f, ["all", "--root", customRoot]);
+  assert.notEqual(first.status, 0);
+
+  const result = runDeploy(f, ["server", "--root", customRoot]);
+  assert.equal(result.status, 0, result.stderr);
+  const unit = readFileSync(resolve(f.home, ".config/systemd/user/dayorder-api.service"), "utf8");
+  const workingDirectory = deploymentPath(resolve(customRoot, "current-server")).replaceAll("%", "%%");
+  assert.match(
+    unit,
+    new RegExp(`^WorkingDirectory=${workingDirectory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"),
+  );
 });
 
 test("migration failure leaves the Server link unchanged", (t) => {
