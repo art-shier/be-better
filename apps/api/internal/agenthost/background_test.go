@@ -35,12 +35,24 @@ import (
 type recordingHostObserver struct {
 	mu           sync.Mutex
 	observations []agentexecution.Observation
+	provider     chan timedProviderObservation
+}
+
+type timedProviderObservation struct {
+	observation agentexecution.Observation
+	emittedAt   time.Time
 }
 
 func (observer *recordingHostObserver) ObserveAgent(observation agentexecution.Observation) {
 	observer.mu.Lock()
 	defer observer.mu.Unlock()
 	observer.observations = append(observer.observations, observation)
+	if observation.Kind == "provider" && observer.provider != nil {
+		select {
+		case observer.provider <- timedProviderObservation{observation: observation, emittedAt: time.Now()}:
+		default:
+		}
+	}
 }
 
 func (observer *recordingHostObserver) snapshot() []agentexecution.Observation {
@@ -593,7 +605,7 @@ func TestBackgroundCancellationAndInterruptionDoNotPublishLateResultsOrReplay(t 
 
 	t.Run("persisted user cancellation", func(t *testing.T) {
 		adapter := &lateResultAdapter{started: make(chan struct{}), exited: make(chan struct{})}
-		observer := &recordingHostObserver{}
+		observer := &recordingHostObserver{provider: make(chan timedProviderObservation, 1)}
 		host, event := newBackgroundHarness(t, ctx, fixture, api, workerServices, adapter, backgroundHarnessObservability{observer: observer})
 		result := make(chan error, 1)
 		go func() { result <- host.Process(ctx, event) }()
@@ -624,14 +636,29 @@ func TestBackgroundCancellationAndInterruptionDoNotPublishLateResultsOrReplay(t 
 		if err = waitBackgroundResult(result); err != nil {
 			t.Fatal(err)
 		}
-		var cancellation *agentexecution.Observation
-		for _, observation := range observer.snapshot() {
-			if observation.Kind == "provider" && observation.ErrorCode == string(agentprotocol.ErrorCodeCancelled) {
-				copy := observation
-				cancellation = &copy
+		// Process may return before the Provider's bounded accounting cleanup
+		// emits its observation. Wait for that event, not for an arbitrary sleep;
+		// the actual Provider exit above must still occur within one second.
+		observeBy := cancelEnteredAt.Add(backgroundFinalizeWindow)
+		observationTimer := time.NewTimer(time.Until(observeBy))
+		defer observationTimer.Stop()
+		var recorded timedProviderObservation
+		select {
+		case recorded = <-observer.provider:
+		case <-observationTimer.C:
+			// Process may have returned after both signals became ready. Use
+			// the emission timestamp instead of randomly rejecting a buffered event.
+			select {
+			case recorded = <-observer.provider:
+			default:
+				t.Fatal("Provider did not emit a cancellation observation within the bounded finalization window")
 			}
 		}
-		if cancellation == nil || cancellation.CancelLatency <= 0 || cancellation.CancelLatency > time.Second ||
+		if recorded.emittedAt.After(observeBy) {
+			t.Fatal("Provider cancellation observation exceeded the bounded finalization window")
+		}
+		cancellation := recorded.observation
+		if cancellation.ErrorCode != string(agentprotocol.ErrorCodeCancelled) || cancellation.CancelLatency <= 0 || cancellation.CancelLatency > time.Second ||
 			cancellation.Usage != (agentprotocol.Usage{}) || cancellation.UsageComplete {
 			t.Fatalf("Provider cancellation observation = %#v, want stored transition to actual exit <=1s without fabricated Usage", cancellation)
 		}
