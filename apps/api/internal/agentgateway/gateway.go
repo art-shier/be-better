@@ -294,6 +294,7 @@ func (turn *Turn) consume(yield func(agentprotocol.ProviderEvent, error) bool) {
 	for {
 		attemptStartedAt := time.Now()
 		terminal := false
+		consumerStopped := false
 		var completed agentprotocol.ProviderEvent
 		var streamErr error
 		for event, err := range turn.profile.Adapter.Stream(turn.ctx, turn.request, agentprovider.TurnOptions{Model: turn.profile.Model, MaxOutputTokens: maximumOutputTokens}) {
@@ -316,6 +317,7 @@ func (turn *Turn) consume(yield func(agentprotocol.ProviderEvent, error) bool) {
 			}
 			published = true
 			if !yield(event, nil) {
+				consumerStopped = true
 				turn.cancel(context.Canceled)
 				break
 			}
@@ -351,7 +353,11 @@ func (turn *Turn) consume(yield func(agentprotocol.ProviderEvent, error) bool) {
 		if !retry {
 			turn.finishFailure(code, usage, false)
 			turn.observeProviderAttempt(providerOutcome(code), code, usage, usageComplete, attempt, attemptStartedAt, attemptExitedAt)
-			turn.publishFinalError(yield)
+			// A stopped consumer still requires settlement, but must never be
+			// called again after its yield returned false.
+			if !consumerStopped {
+				turn.publishFinalError(yield)
+			}
 			return
 		}
 		if !turn.settleAttempt(usage, false, string(code)) {
