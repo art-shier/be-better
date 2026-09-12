@@ -41,6 +41,17 @@ async function seedAccount(accountId: string, data: AppData): Promise<string> {
 }
 
 describe("appReducer", () => {
+  it("保存笔记时会把新名称加入全局标签目录并忽略大小写重复项", () => {
+    const seed = createSeedData();
+    const note = { ...seed.notes[0], id: crypto.randomUUID(), tags: ["产品", "新标签", "新标签"] };
+
+    const saved = appReducer(seed, { type: "add-note", note });
+
+    expect(saved.tags.filter((tag) => tag.name.toLocaleLowerCase() === "产品")).toHaveLength(1);
+    expect(saved.tags.filter((tag) => tag.name === "新标签")).toHaveLength(1);
+    expect(saved.tags.find((tag) => tag.name === "新标签")).toMatchObject({ version: 0 });
+  });
+
   it("快速记录同时创建原文和关联的派生任务", () => {
     const seed = createSeedData();
     const draft = parseCapture("明早跑 5 公里", seed.goals);
@@ -105,6 +116,21 @@ describe("AppStoreProvider", () => {
 
     render(<AppStoreProvider><Probe /></AppStoreProvider>);
     expect(screen.getByText(data.goals[0].title)).toBeInTheDocument();
+  });
+
+  it("恢复旧版游客数据时会从内容引用补建全局标签目录", () => {
+    const legacy: Partial<AppData> = createSeedData();
+    delete legacy.tags;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(legacy));
+
+    function Probe() {
+      const { data } = useAppStore();
+      return <output>{data.tags.map((tag) => tag.name).join("|")}</output>;
+    }
+
+    render(<AppStoreProvider><Probe /></AppStoreProvider>);
+    expect(screen.getByText(/产品/)).toBeInTheDocument();
+    expect(screen.getByText(/晨间状态/)).toBeInTheDocument();
   });
 
   it("游客数据只保存在本机且不请求状态接口", async () => {

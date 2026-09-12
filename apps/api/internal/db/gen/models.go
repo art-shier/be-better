@@ -65,6 +65,40 @@ type DayorderAgentRun struct {
 	UpdatedAt    pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
+type DayorderAgentRunExecution struct {
+	UserID          pgtype.UUID        `db:"user_id" json:"user_id"`
+	RunID           pgtype.UUID        `db:"run_id" json:"run_id"`
+	Token           pgtype.UUID        `db:"token" json:"token"`
+	ExecutionMode   string             `db:"execution_mode" json:"execution_mode"`
+	ProtocolVersion string             `db:"protocol_version" json:"protocol_version"`
+	RuntimeVersion  string             `db:"runtime_version" json:"runtime_version"`
+	ModelProfile    string             `db:"model_profile" json:"model_profile"`
+	Timezone        string             `db:"timezone" json:"timezone"`
+	Capabilities    []byte             `db:"capabilities" json:"capabilities"`
+	Budget          []byte             `db:"budget" json:"budget"`
+	Deadline        pgtype.Timestamptz `db:"deadline" json:"deadline"`
+	KnownUsage      []byte             `db:"known_usage" json:"known_usage"`
+	ReservedTokens  int32              `db:"reserved_tokens" json:"reserved_tokens"`
+	UsageComplete   bool               `db:"usage_complete" json:"usage_complete"`
+	ResultOrigin    string             `db:"result_origin" json:"result_origin"`
+}
+
+type DayorderAgentRunOperation struct {
+	UserID         pgtype.UUID        `db:"user_id" json:"user_id"`
+	RunID          pgtype.UUID        `db:"run_id" json:"run_id"`
+	Kind           string             `db:"kind" json:"kind"`
+	OperationID    string             `db:"operation_id" json:"operation_id"`
+	State          string             `db:"state" json:"state"`
+	OperationHash  []byte             `db:"operation_hash" json:"operation_hash"`
+	Attempts       int32              `db:"attempts" json:"attempts"`
+	ReservedTokens int32              `db:"reserved_tokens" json:"reserved_tokens"`
+	Usage          []byte             `db:"usage" json:"usage"`
+	UsageComplete  bool               `db:"usage_complete" json:"usage_complete"`
+	ErrorCode      string             `db:"error_code" json:"error_code"`
+	StartedAt      pgtype.Timestamptz `db:"started_at" json:"started_at"`
+	FinishedAt     pgtype.Timestamptz `db:"finished_at" json:"finished_at"`
+}
+
 type DayorderAgentSourceRef struct {
 	ID            pgtype.UUID        `db:"id" json:"id"`
 	UserID        pgtype.UUID        `db:"user_id" json:"user_id"`

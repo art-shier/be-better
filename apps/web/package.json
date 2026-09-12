@@ -12,12 +12,18 @@
     "test:watch": "cross-env NODE_ENV=test vitest"
   },
   "dependencies": {
+    "@mdxeditor/editor": "4.2.3",
     "@radix-ui/react-dialog": "1.1.15",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
     "date-fns": "3.6.0",
     "idb": "^8.0.3",
     "lucide-react": "0.468.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "7.0.1",

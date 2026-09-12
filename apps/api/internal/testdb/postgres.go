@@ -30,6 +30,12 @@ type Postgres struct {
 	MigrationURL string
 	APIURL       string
 	WorkerURL    string
+
+	closeMu       sync.Mutex
+	closed        bool
+	databaseName  string
+	serverVersion string
+	owned         *ownedConfigHubDatabase
 }
 
 var (
@@ -68,8 +74,8 @@ func StartForTest(t testing.TB) *Postgres {
 	t.Cleanup(func() {
 		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cleanupCancel()
-		if terminateErr := database.Container.Terminate(cleanupContext); terminateErr != nil {
-			t.Errorf("terminate PostgreSQL test container: %v", terminateErr)
+		if closeErr := database.Close(cleanupContext); closeErr != nil {
+			t.Errorf("close PostgreSQL test container: %v", closeErr)
 		}
 	})
 	return database
@@ -100,12 +106,42 @@ func Start(ctx context.Context) (*Postgres, error) {
 		MigrationURL: connectionURL(adminURL, "dayorder_migrator", testMigratorPassword, "dayorder"),
 		APIURL:       connectionURL(adminURL, "dayorder_api", testAPIPassword),
 		WorkerURL:    connectionURL(adminURL, "dayorder_worker", testWorkerPassword),
+		databaseName: testDatabase,
 	}
 	if err = bootstrapRoles(ctx, adminURL); err != nil {
 		_ = container.Terminate(context.Background())
 		return nil, err
 	}
 	return database, nil
+}
+
+func (database *Postgres) DatabaseName() string {
+	if database == nil {
+		return ""
+	}
+	return database.databaseName
+}
+
+func (database *Postgres) Close(ctx context.Context) error {
+	if database == nil {
+		return nil
+	}
+	database.closeMu.Lock()
+	defer database.closeMu.Unlock()
+	if database.closed {
+		return nil
+	}
+
+	var err error
+	if database.owned != nil {
+		err = database.owned.close(ctx)
+	} else if database.Container != nil {
+		err = database.Container.Terminate(ctx)
+	}
+	if err == nil {
+		database.closed = true
+	}
+	return err
 }
 
 func connectionURL(adminURL, username, password string, searchPath ...string) string {

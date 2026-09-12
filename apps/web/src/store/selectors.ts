@@ -10,7 +10,7 @@ import type {
   ServerTask,
   ServerUserSettings,
 } from "../api/resources";
-import type { AppData, AppSettings, CalendarEvent, CalendarReminder, DailyReview, Goal, Milestone, Note, RecordEntry, Task } from "../domain/types";
+import type { AppData, AppSettings, CalendarEvent, CalendarReminder, DailyReview, Goal, Milestone, Note, RecordEntry, Tag, Task } from "../domain/types";
 import { createEmptyData } from "../domain/seed";
 import { getCachedEntities } from "../offline/cache";
 
@@ -19,8 +19,11 @@ type CachedEvent = ServerCalendarEvent & { reminderMinutes?: number[]; reminders
 type CachedRecord = ServerRecord & { parsedEntityId?: string };
 type CachedNote = ServerNote & { linkedEntityIds?: string[] };
 
-function tagNames(tags?: Array<ServerTag | string>): string[] {
-  return (tags ?? []).map((tag) => typeof tag === "string" ? tag : tag.name);
+function tagNames(values: Array<ServerTag | string> | undefined, tagsById: Map<string, Tag>, tagsByName: Map<string, Tag>): string[] {
+  return (values ?? []).flatMap((value) => {
+    const tag = typeof value === "string" ? tagsByName.get(value.toLocaleLowerCase()) : tagsById.get(value.id);
+    return tag ? [tag.name] : [];
+  });
 }
 
 function milestone(value: ServerMilestone): Milestone {
@@ -76,12 +79,12 @@ function event(value: CachedEvent, reminders: ServerReminder[]): CalendarEvent {
   };
 }
 
-function record(value: CachedRecord): RecordEntry {
-  return { ...value, kind: value.kind as RecordEntry["kind"], tags: tagNames(value.tags) };
+function record(value: CachedRecord, tagsById: Map<string, Tag>, tagsByName: Map<string, Tag>): RecordEntry {
+  return { ...value, kind: value.kind as RecordEntry["kind"], tags: tagNames(value.tags, tagsById, tagsByName) };
 }
 
-function note(value: CachedNote): Note {
-  return { ...value, category: value.category as Note["category"], tags: tagNames(value.tags), linkedEntityIds: value.linkedEntityIds ?? [] };
+function note(value: CachedNote, tagsById: Map<string, Tag>, tagsByName: Map<string, Tag>): Note {
+  return { ...value, category: value.category as Note["category"], tags: tagNames(value.tags, tagsById, tagsByName), linkedEntityIds: value.linkedEntityIds ?? [] };
 }
 
 function review(value: ServerDailyReview): DailyReview {
@@ -103,7 +106,7 @@ function settings(value: CachedSettings | undefined): AppSettings {
 }
 
 export async function loadCachedAppData(accountId: string): Promise<AppData> {
-  const [goals, milestones, tasks, events, reminders, records, notes, reviews, userSettings] = await Promise.all([
+  const [goals, milestones, tasks, events, reminders, records, notes, reviews, tags, userSettings] = await Promise.all([
     getCachedEntities<ServerGoal>(accountId, "goal"),
     getCachedEntities<ServerMilestone>(accountId, "goal_milestone"),
     getCachedEntities<ServerTask>(accountId, "task"),
@@ -112,15 +115,19 @@ export async function loadCachedAppData(accountId: string): Promise<AppData> {
     getCachedEntities<CachedRecord>(accountId, "record"),
     getCachedEntities<CachedNote>(accountId, "note"),
     getCachedEntities<ServerDailyReview>(accountId, "daily_review"),
+    getCachedEntities<ServerTag>(accountId, "tag"),
     getCachedEntities<CachedSettings>(accountId, "user_settings"),
   ]);
+  const tagsById = new Map(tags.map((tag) => [tag.id, tag]));
+  const tagsByName = new Map(tags.map((tag) => [tag.name.toLocaleLowerCase(), tag]));
   return {
     version: 1,
     goals: goals.map((value) => goal(value, milestones)),
     tasks: tasks.map(task),
     events: events.map((value) => event(value, reminders)),
-    records: records.map(record),
-    notes: notes.map(note),
+    records: records.map((value) => record(value, tagsById, tagsByName)),
+    notes: notes.map((value) => note(value, tagsById, tagsByName)),
+    tags,
     reviews: reviews.map(review),
     settings: settings(userSettings[0]),
   };

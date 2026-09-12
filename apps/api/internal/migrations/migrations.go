@@ -18,7 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const LatestVersion uint = 8
+const LatestVersion uint = 9
 
 const directRegistrationReconciliationTimeout = 30 * time.Second
 

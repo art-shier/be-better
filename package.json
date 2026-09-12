@@ -10,10 +10,14 @@
     "dev:web": "npm run dev --workspace @dayorder/web",
     "dev:api": "go run ./apps/api/cmd/server",
     "dev:worker": "go run ./apps/api/cmd/worker",
+    "agent:generate": "node scripts/generate-agent-contracts.mjs",
+    "agent:generate:check": "npm run agent:generate && git diff --exit-code -- apps/web/src/agent/generated apps/api/internal/agentprotocol/generated_types.go apps/api/internal/agentprotocol/protocol.schema.json apps/api/internal/agentassets/generated",
     "start": "go run ./apps/api/cmd/server",
     "preview": "npm run preview --workspace @dayorder/web",
     "typecheck": "npm run typecheck --workspace @dayorder/web",
     "test": "npm run test:web && npm run test:api",
+    "test:agent-foundation": "node --test scripts/agent-contracts.test.mjs scripts/agent-architecture-rules.test.mjs && npm run test --workspace @dayorder/web -- src/agent && go test ./apps/api/internal/agentassets ./apps/api/internal/agentprotocol ./apps/api/internal/agentruntime ./apps/api/internal/agenttool ./apps/api/internal/agentskill ./apps/api/internal/agentprovider ./apps/api/internal/agentworker",
+    "test:agent-integration": "node scripts/agent-integration.mjs",
     "test:web": "npm run test --workspace @dayorder/web",
     "test:api": "go test ./apps/api/...",
     "test:integration": "go test -count=1 ./apps/api/internal/testdb ./apps/api/internal/database/...",
@@ -45,6 +49,10 @@
     "build:api": "go build ./apps/api/..."
   },
   "devDependencies": {
-    "concurrently": "10.0.5"
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.13.3",
+    "ajv-formats": "3.0.1",
+    "concurrently": "10.0.5",
+    "json-schema-to-typescript": "16.0.0"
   }
 }

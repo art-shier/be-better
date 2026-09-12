@@ -31,9 +31,20 @@ type Runner struct {
 	newUUID     func() (uuid.UUID, error)
 }
 
+type RunnerOptions struct {
+	BatchSize int
+}
+
 func NewRunner(repository OutboxRepository, handlers map[string]Handler) (*Runner, error) {
+	return NewRunnerWithOptions(repository, handlers, RunnerOptions{BatchSize: 25})
+}
+
+func NewRunnerWithOptions(repository OutboxRepository, handlers map[string]Handler, options RunnerOptions) (*Runner, error) {
 	if repository == nil {
 		return nil, errors.New("outbox repository is required")
+	}
+	if options.BatchSize <= 0 {
+		return nil, errors.New("outbox batch size must be positive")
 	}
 	copyHandlers := make(map[string]Handler, len(handlers))
 	for eventType, handler := range handlers {
@@ -43,7 +54,7 @@ func NewRunner(repository OutboxRepository, handlers map[string]Handler) (*Runne
 		copyHandlers[eventType] = handler
 	}
 	return &Runner{
-		repository: repository, handlers: copyHandlers, batchSize: 25,
+		repository: repository, handlers: copyHandlers, batchSize: options.BatchSize,
 		staleAfter: 5 * time.Minute, maxAttempts: 10,
 		now: func() time.Time { return time.Now().UTC() }, newUUID: uuid.NewRandom,
 	}, nil

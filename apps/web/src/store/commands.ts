@@ -1,4 +1,4 @@
-import type { AppData, AppSettings, CalendarEvent, DailyReview, Goal, Milestone, Note, RecordEntry, Task } from "../domain/types";
+import type { AppData, AppSettings, CalendarEvent, DailyReview, Goal, Milestone, Note, RecordEntry, Tag, Task } from "../domain/types";
 import type { CachedEntityType, MutationOperation } from "../offline/db";
 import { enqueueMutations } from "../offline/mutations";
 import type { Action } from "./reducer";
@@ -29,7 +29,7 @@ const resourceOrder: Record<CachedEntityType, number> = {
   calendar_reminder: 55,
   note: 60,
   daily_review: 70,
-  tag: 75,
+  tag: 25,
   user_settings: 80,
 };
 
@@ -87,6 +87,11 @@ function noteSnapshot(value: Note): Snapshot {
   return { entityType: "note", entityId: value.id, version: value.version, payload, optimisticEntity: metadata(value, { ...payload, linkedEntityIds: value.linkedEntityIds }) };
 }
 
+function tagSnapshot(value: Tag): Snapshot {
+  const payload = { id: value.id, name: value.name };
+  return { entityType: "tag", entityId: value.id, version: value.version, payload, optimisticEntity: metadata(value, payload) };
+}
+
 function reviewSnapshot(value: DailyReview): Snapshot {
   const payload = withoutUndefined({ id: value.id, reviewDate: value.date, wins: value.wins, blockers: value.blockers, mood: value.mood, energy: value.energy, tomorrowFocus: value.tomorrowFocus, aiSummary: value.aiSummary });
   return { entityType: "daily_review", entityId: value.id, version: value.version, payload, optimisticEntity: metadata(value, payload) };
@@ -105,6 +110,7 @@ function collect(accountId: string, data: AppData): Map<string, Snapshot> {
     ...data.tasks.map(taskSnapshot),
     ...data.events.map(eventSnapshot),
     ...data.notes.map(noteSnapshot),
+    ...data.tags.map(tagSnapshot),
     ...data.reviews.map(reviewSnapshot),
   ];
   const settings = settingsPayload(data.settings);
@@ -147,6 +153,7 @@ export function prepareMutations(accountId: string, before: AppData, after: AppD
       continue;
     }
     if (oldValue && newValue && payloadChanged(oldValue, newValue)) {
+      if ((action.type === "update-tag" || action.type === "delete-tag") && (oldValue.entityType === "record" || oldValue.entityType === "note")) continue;
       if (action.type === "delete-goal" && oldValue.entityType === "task") continue;
       mutations.push({ ...newValue, operation: oldValue.version === 0 ? "create" : "update", baseVersion: oldValue.version });
     }

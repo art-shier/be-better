@@ -4,6 +4,51 @@ import { appReducer, type Action } from "./AppStore";
 import { prepareInitialMutations, prepareMutations } from "./commands";
 
 describe("store commands", () => {
+  it("全局重命名标签只提交一个标签 Mutation，并立即更新所有引用名称", () => {
+    const timestamp = "2026-09-03T08:00:00.000Z";
+    const tag = { id: crypto.randomUUID(), name: "产品", version: 2, createdAt: timestamp, updatedAt: timestamp };
+    const before = { ...createSeedData(), tags: [tag] };
+    const action = { type: "update-tag", tag: { ...tag, name: "产品设计", updatedAt: "2026-09-03T09:00:00.000Z" } } as never;
+
+    const after = appReducer(before, action);
+    const mutations = prepareMutations("user-a", before, after, action);
+
+    expect(after.tags).toEqual([expect.objectContaining({ id: tag.id, name: "产品设计" })]);
+    expect(after.notes.find((note) => note.id === "note_loop")?.tags).toContain("产品设计");
+    expect(after.notes.find((note) => note.id === "note_loop")?.tags).not.toContain("产品");
+    expect(mutations).toHaveLength(1);
+    expect(mutations[0]).toMatchObject({ entityType: "tag", entityId: tag.id, operation: "update", baseVersion: 2, payload: { name: "产品设计" } });
+  });
+
+  it("可以创建暂未被内容引用的全局标签", () => {
+    const before = createSeedData();
+    const timestamp = "2026-09-03T08:00:00.000Z";
+    const tag = { id: crypto.randomUUID(), name: "灵感", version: 0, createdAt: timestamp, updatedAt: timestamp };
+    const action = { type: "add-tag", tag } as never;
+
+    const after = appReducer(before, action);
+    const mutations = prepareMutations("user-a", before, after, action);
+
+    expect(after.tags).toContainEqual(tag);
+    expect(mutations).toHaveLength(1);
+    expect(mutations[0]).toMatchObject({ entityType: "tag", entityId: tag.id, operation: "create", baseVersion: 0, payload: { name: "灵感" } });
+  });
+
+  it("全局删除标签会移除全部引用且只提交一个标签 Mutation", () => {
+    const before = createSeedData();
+    const tag = before.tags.find((item) => item.name === "产品")!;
+    const action = { type: "delete-tag", id: tag.id } as never;
+
+    const after = appReducer(before, action);
+    const mutations = prepareMutations("user-a", before, after, action);
+
+    expect(after.tags.some((item) => item.id === tag.id)).toBe(false);
+    expect(after.notes.some((note) => note.tags.includes("产品"))).toBe(false);
+    expect(after.records.some((record) => record.tags.includes("产品"))).toBe(false);
+    expect(mutations).toHaveLength(1);
+    expect(mutations[0]).toMatchObject({ entityType: "tag", entityId: tag.id, operation: "delete", baseVersion: 1 });
+  });
+
   it("把单任务乐观更新转换为带基础版本的资源 Mutation", () => {
     const before = createSeedData();
     const task = before.tasks[0];
@@ -27,7 +72,9 @@ describe("store commands", () => {
 
     const mutations = prepareMutations("user-a", before, after, action);
 
-    expect(mutations.filter((item) => item.operation === "create").map((item) => item.entityType)).toEqual(["goal", "record"]);
+    const creates = mutations.filter((item) => item.operation === "create");
+    expect(creates.map((item) => item.entityType)).toEqual(["goal", "tag", "tag", "record"]);
+    expect(creates.filter((item) => item.entityType === "tag").map((item) => item.payload.name)).toEqual(["已整理", "goal"]);
   });
 
   it("删除目标不重复提交服务端已经级联处理的任务变化", () => {

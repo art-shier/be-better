@@ -164,6 +164,8 @@ func (router *Router) currentSyncEntity(ctx context.Context, userID uuid.UUID, i
 		return router.content.GetNote(ctx, userID, item.EntityID)
 	case "daily_review":
 		return router.content.GetReview(ctx, userID, item.EntityID)
+	case "tag":
+		return router.content.GetTag(ctx, userID, item.EntityID)
 	case "settings":
 		return router.settings.Get(ctx, userID)
 	default:
@@ -343,6 +345,23 @@ func (router *Router) applySyncMutation(ctx context.Context, mutation service.Mu
 			return router.content.UpdateReview(ctx, mutation, item.EntityID, item.BaseVersion, input)
 		}
 		return nil, router.content.DeleteReview(ctx, mutation, item.EntityID, item.BaseVersion)
+	case "tag":
+		if router.content == nil {
+			return nil, service.ErrValidation
+		}
+		var input struct {
+			Name string `json:"name"`
+		}
+		if err := decodeSyncPayload(item.Payload, &input); err != nil {
+			return nil, err
+		}
+		if item.Operation == "create" {
+			return router.content.CreateTag(ctx, mutation, item.EntityID, input.Name)
+		}
+		if item.Operation == "update" {
+			return router.content.UpdateTag(ctx, mutation, item.EntityID, item.BaseVersion, input.Name)
+		}
+		return nil, router.content.DeleteTag(ctx, mutation, item.EntityID, item.BaseVersion)
 	case "settings":
 		if router.settings == nil || item.Operation != "update" {
 			return nil, service.ErrValidation

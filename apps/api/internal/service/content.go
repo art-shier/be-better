@@ -33,6 +33,9 @@ type ContentStore interface {
 	UpdateReview(context.Context, database.Tx, uuid.UUID, model.DailyReview, int64) (model.DailyReview, error)
 	DeleteReview(context.Context, database.Tx, uuid.UUID, uuid.UUID, int64) (model.DailyReview, error)
 	EnsureTag(context.Context, database.Tx, uuid.UUID, uuid.UUID, string, string) (model.Tag, bool, error)
+	GetTag(context.Context, database.Tx, uuid.UUID, uuid.UUID) (model.Tag, error)
+	UpdateTag(context.Context, database.Tx, uuid.UUID, model.Tag, int64, string) (model.Tag, error)
+	DeleteTag(context.Context, database.Tx, uuid.UUID, uuid.UUID, int64) (model.Tag, error)
 	ListTags(context.Context, database.Tx, uuid.UUID, int) ([]model.Tag, error)
 	ReplaceRecordTags(context.Context, database.Tx, uuid.UUID, uuid.UUID, []model.Tag) error
 	ReplaceNoteTags(context.Context, database.Tx, uuid.UUID, uuid.UUID, []model.Tag) error
@@ -220,13 +223,6 @@ func (service *ContentService) UpdateRecord(ctx context.Context, mutation Mutati
 		if e = service.store.ReplaceRecordTags(ctx, tx, mutation.UserID, id, tags); e != nil {
 			return CommandResult{}, e
 		}
-		removed, e := service.store.CleanupTags(ctx, tx, mutation.UserID)
-		if e != nil {
-			return CommandResult{}, e
-		}
-		for _, tag := range removed {
-			tagChanges = append(tagChanges, model.SyncChangeDraft{EntityType: "tag", EntityID: tag.ID, Operation: "delete", EntityVersion: tag.Version})
-		}
 		updated.Tags = tags
 		return CommandResult{Status: 200, Body: resourceJSON(updated), Changes: append([]model.SyncChangeDraft{{EntityType: "record", EntityID: id, Operation: "update", EntityVersion: updated.Version}}, tagChanges...), Audits: []model.AuditDraft{{Action: "record.update", BeforeData: resourceJSON(before), AfterData: resourceJSON(updated), Entities: []model.AuditEntity{{EntityType: "record", EntityID: id}}}}}, nil
 	})
@@ -395,13 +391,6 @@ func (service *ContentService) UpdateNote(ctx context.Context, mutation Mutation
 		if e = service.store.ReplaceNoteTags(ctx, tx, mutation.UserID, id, tags); e != nil {
 			return CommandResult{}, e
 		}
-		removed, e := service.store.CleanupTags(ctx, tx, mutation.UserID)
-		if e != nil {
-			return CommandResult{}, e
-		}
-		for _, tag := range removed {
-			tagChanges = append(tagChanges, model.SyncChangeDraft{EntityType: "tag", EntityID: tag.ID, Operation: "delete", EntityVersion: tag.Version})
-		}
 		updated.Tags = tags
 		updated.LinkedEntityIDs, e = service.replaceNoteLinks(ctx, tx, mutation.UserID, id, linkedIDs)
 		if e != nil {
@@ -540,6 +529,96 @@ func (service *ContentService) ListTags(ctx context.Context, userID uuid.UUID) (
 	return tags, err
 }
 
+func (service *ContentService) GetTag(ctx context.Context, userID, id uuid.UUID) (model.Tag, error) {
+	var tag model.Tag
+	err := service.transactor.WithUser(ctx, userID, func(ctx context.Context, tx database.Tx) error {
+		var e error
+		tag, e = service.store.GetTag(ctx, tx, userID, id)
+		return e
+	})
+	return tag, err
+}
+
+func (service *ContentService) CreateTag(ctx context.Context, mutation MutationContext, id uuid.UUID, name string) (model.Tag, error) {
+	if id == uuid.Nil {
+		return model.Tag{}, fmt.Errorf("%w: tag ID is required", ErrValidation)
+	}
+	names, err := normalizeTagNames([]string{name})
+	if err != nil {
+		return model.Tag{}, err
+	}
+	payload, _ := json.Marshal(map[string]any{"id": id, "name": names[0]})
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "tag.create", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+		tag, created, createErr := service.store.EnsureTag(ctx, tx, mutation.UserID, id, names[0], strings.ToLower(names[0]))
+		if createErr != nil {
+			return CommandResult{}, createErr
+		}
+		if !created || tag.ID != id {
+			return CommandResult{}, model.ErrConflict
+		}
+		return CommandResult{
+			Status:  201,
+			Body:    resourceJSON(tag),
+			Changes: []model.SyncChangeDraft{{EntityType: "tag", EntityID: tag.ID, Operation: "create", EntityVersion: tag.Version}},
+			Audits:  []model.AuditDraft{{Action: "tag.create", AfterData: resourceJSON(tag), Entities: []model.AuditEntity{{EntityType: "tag", EntityID: tag.ID}}}},
+		}, nil
+	})
+	if err != nil {
+		return model.Tag{}, err
+	}
+	var tag model.Tag
+	if err = json.Unmarshal(response.Body, &tag); err != nil {
+		return model.Tag{}, fmt.Errorf("decode tag command response: %w", err)
+	}
+	return tag, nil
+}
+
+func (service *ContentService) UpdateTag(ctx context.Context, mutation MutationContext, id uuid.UUID, expected int64, name string) (model.Tag, error) {
+	if id == uuid.Nil || expected < 1 {
+		return model.Tag{}, fmt.Errorf("%w: tag ID and version are required", ErrValidation)
+	}
+	names, err := normalizeTagNames([]string{name})
+	if err != nil {
+		return model.Tag{}, err
+	}
+	payload, _ := json.Marshal(map[string]any{"id": id, "expectedVersion": expected, "name": names[0]})
+	response, err := executeResourceCommand(ctx, service.commands, mutation, "tag.update", payload, func(ctx context.Context, tx database.Tx) (CommandResult, error) {
+		before, updateErr := service.store.GetTag(ctx, tx, mutation.UserID, id)
+		if updateErr != nil {
+			return CommandResult{}, updateErr
+		}
+		updated, updateErr := service.store.UpdateTag(ctx, tx, mutation.UserID, model.Tag{ID: id, Name: names[0]}, expected, strings.ToLower(names[0]))
+		if updateErr != nil {
+			return CommandResult{}, updateErr
+		}
+		return CommandResult{
+			Status:  200,
+			Body:    resourceJSON(updated),
+			Changes: []model.SyncChangeDraft{{EntityType: "tag", EntityID: updated.ID, Operation: "update", EntityVersion: updated.Version}},
+			Audits:  []model.AuditDraft{{Action: "tag.update", BeforeData: resourceJSON(before), AfterData: resourceJSON(updated), Entities: []model.AuditEntity{{EntityType: "tag", EntityID: updated.ID}}}},
+		}, nil
+	})
+	if err != nil {
+		return model.Tag{}, err
+	}
+	var tag model.Tag
+	if err = json.Unmarshal(response.Body, &tag); err != nil {
+		return model.Tag{}, fmt.Errorf("decode tag command response: %w", err)
+	}
+	return tag, nil
+}
+
+func (service *ContentService) DeleteTag(ctx context.Context, mutation MutationContext, id uuid.UUID, expected int64) error {
+	return service.deleteContent(ctx, mutation, "tag", id, expected, func(ctx context.Context, tx database.Tx) (any, any, int64, error) {
+		before, err := service.store.GetTag(ctx, tx, mutation.UserID, id)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		deleted, err := service.store.DeleteTag(ctx, tx, mutation.UserID, id, expected)
+		return before, deleted, deleted.Version, err
+	})
+}
+
 func (service *ContentService) deleteContent(ctx context.Context, mutation MutationContext, entityType string, id uuid.UUID, expected int64, remove func(context.Context, database.Tx) (any, any, int64, error)) error {
 	if id == uuid.Nil || expected < 1 {
 		return fmt.Errorf("%w: resource ID and version are required", ErrValidation)
@@ -550,17 +629,7 @@ func (service *ContentService) deleteContent(ctx context.Context, mutation Mutat
 		if e != nil {
 			return CommandResult{}, e
 		}
-		removedTags := []model.Tag{}
-		if entityType == "record" || entityType == "note" {
-			removedTags, e = service.store.CleanupTags(ctx, tx, mutation.UserID)
-			if e != nil {
-				return CommandResult{}, e
-			}
-		}
 		changes := []model.SyncChangeDraft{{EntityType: entityType, EntityID: id, Operation: "delete", EntityVersion: version}}
-		for _, tag := range removedTags {
-			changes = append(changes, model.SyncChangeDraft{EntityType: "tag", EntityID: tag.ID, Operation: "delete", EntityVersion: tag.Version})
-		}
 		return CommandResult{Status: 200, Body: resourceJSON(map[string]any{"id": id, "version": version}), Changes: changes, Audits: []model.AuditDraft{{Action: entityType + ".delete", BeforeData: resourceJSON(before), AfterData: resourceJSON(deleted), Entities: []model.AuditEntity{{EntityType: entityType, EntityID: id}}}}}, nil
 	})
 	return err

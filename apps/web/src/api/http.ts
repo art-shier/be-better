@@ -68,7 +68,7 @@ function newRequestId(): string {
   return "00000000-0000-4000-8000-000000000000";
 }
 
-async function readResponse(response: Response): Promise<unknown> {
+export async function readResponse(response: Response): Promise<unknown> {
   if (response.status === 204 || !response.headers.get("content-type")?.includes("application/json")) return undefined;
   try {
     return await response.json();
@@ -77,7 +77,7 @@ async function readResponse(response: Response): Promise<unknown> {
   }
 }
 
-function errorBody(value: unknown): ApiErrorBody {
+export function errorBody(value: unknown): ApiErrorBody {
   if (!value || typeof value !== "object") return {};
   const envelope = value as ApiErrorEnvelope & ApiErrorBody;
   return envelope.error && typeof envelope.error === "object" ? envelope.error : envelope;

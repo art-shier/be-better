@@ -1,0 +1,345 @@
+{
+  "name": "capability unavailable",
+  "protocolVersion": "2.0",
+  "initialState": {
+    "protocolVersion": "2.0",
+    "runId": "run-1",
+    "executionMode": "foreground",
+    "phase": "idle",
+    "sequence": 0,
+    "stepCount": 0,
+    "messages": [],
+    "capabilitySnapshot": {
+      "runtimeVersion": "2.0.0",
+      "executionMode": "foreground",
+      "toolIds": [
+        "test.clock.read"
+      ],
+      "skills": [],
+      "scope": {
+        "domains": [
+          "test"
+        ]
+      }
+    },
+    "budget": {
+      "maxSteps": 4,
+      "maxTokens": 1000,
+      "maxDurationMs": 30000,
+      "maxWorkers": 1,
+      "maxConcurrency": 1,
+      "maxRepeatedToolCalls": 2
+    },
+    "usage": {
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "totalTokens": 0
+    },
+    "repeatedToolCalls": 0
+  },
+  "inputs": [
+    {
+      "type": "user_message",
+      "text": "Read the clock."
+    },
+    {
+      "type": "provider_event",
+      "providerEvent": {
+        "type": "tool_call",
+        "call": {
+          "id": "call-1",
+          "name": "test.clock.read",
+          "input": {}
+        }
+      }
+    },
+    {
+      "type": "provider_event",
+      "providerEvent": {
+        "type": "completed",
+        "stopReason": "tool_use",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        }
+      }
+    },
+    {
+      "type": "tool_resolution",
+      "toolResolution": {
+        "callId": "call-1",
+        "decision": "unavailable",
+        "error": {
+          "code": "capability_unavailable",
+          "message": "test.clock.read is unavailable",
+          "retryable": false
+        }
+      }
+    }
+  ],
+  "expectedTransitions": [
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "model_pending",
+        "sequence": 1,
+        "stepCount": 0,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the clock."
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 0
+      },
+      "effects": [
+        {
+          "type": "request_model_turn",
+          "turnId": "turn-1"
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "model_streaming",
+        "sequence": 2,
+        "stepCount": 0,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the clock."
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 0,
+        "pendingToolCall": {
+          "id": "call-1",
+          "name": "test.clock.read",
+          "input": {}
+        }
+      },
+      "effects": []
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "tool_pending",
+        "sequence": 3,
+        "stepCount": 0,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the clock."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {}
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "pendingToolCall": {
+          "id": "call-1",
+          "name": "test.clock.read",
+          "input": {}
+        },
+        "lastToolFingerprint": "test.clock.read:{}",
+        "repeatedToolCalls": 1
+      },
+      "effects": [
+        {
+          "type": "resolve_tool",
+          "toolCall": {
+            "id": "call-1",
+            "name": "test.clock.read",
+            "input": {}
+          }
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "failed",
+        "sequence": 4,
+        "stepCount": 0,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the clock."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {}
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "lastToolFingerprint": "test.clock.read:{}",
+        "repeatedToolCalls": 1,
+        "error": {
+          "code": "capability_unavailable",
+          "message": "test.clock.read is unavailable",
+          "retryable": false
+        }
+      },
+      "effects": [
+        {
+          "type": "fail_run",
+          "error": {
+            "code": "capability_unavailable",
+            "message": "test.clock.read is unavailable",
+            "retryable": false
+          }
+        }
+      ]
+    }
+  ]
+}

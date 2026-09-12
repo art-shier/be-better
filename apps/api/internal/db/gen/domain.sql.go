@@ -1989,6 +1989,29 @@ func (q *Queries) SoftDeleteRecord(ctx context.Context, userID pgtype.UUID, iD p
 	return &i, err
 }
 
+const softDeleteTag = `-- name: SoftDeleteTag :one
+UPDATE dayorder.tags SET deleted_at = now(), version = version + 1, updated_at = now()
+WHERE user_id = $1 AND id = $2
+  AND version = $3 AND deleted_at IS NULL
+RETURNING id, user_id, name, normalized_name, version, created_at, updated_at, deleted_at
+`
+
+func (q *Queries) SoftDeleteTag(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderTag, error) {
+	row := q.db.QueryRow(ctx, softDeleteTag, userID, iD, expectedVersion)
+	var i DayorderTag
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.NormalizedName,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
 const softDeleteTask = `-- name: SoftDeleteTask :one
 UPDATE dayorder.tasks
 SET deleted_at = now(),
@@ -2447,6 +2470,44 @@ func (q *Queries) UpdateRecord(ctx context.Context, arg UpdateRecordParams) (*Da
 		&i.Mood,
 		&i.Energy,
 		&i.ArchivedAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return &i, err
+}
+
+const updateTag = `-- name: UpdateTag :one
+UPDATE dayorder.tags
+SET name = $1, normalized_name = $2, version = version + 1, updated_at = now()
+WHERE user_id = $3 AND id = $4
+  AND version = $5 AND deleted_at IS NULL
+RETURNING id, user_id, name, normalized_name, version, created_at, updated_at, deleted_at
+`
+
+type UpdateTagParams struct {
+	Name            string      `db:"name" json:"name"`
+	NormalizedName  string      `db:"normalized_name" json:"normalized_name"`
+	UserID          pgtype.UUID `db:"user_id" json:"user_id"`
+	ID              pgtype.UUID `db:"id" json:"id"`
+	ExpectedVersion int64       `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) UpdateTag(ctx context.Context, arg UpdateTagParams) (*DayorderTag, error) {
+	row := q.db.QueryRow(ctx, updateTag,
+		arg.Name,
+		arg.NormalizedName,
+		arg.UserID,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i DayorderTag
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.NormalizedName,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,

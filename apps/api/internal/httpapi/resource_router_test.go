@@ -42,6 +42,42 @@ type stubSyncApplication struct {
 	cursor   string
 }
 
+type stubTagContentApplication struct {
+	ContentApplication
+	createdTag     model.Tag
+	createdID      uuid.UUID
+	createdName    string
+	updatedID      uuid.UUID
+	updatedVersion int64
+	updatedName    string
+	deletedID      uuid.UUID
+	deletedVersion int64
+}
+
+func (app *stubTagContentApplication) CreateTag(_ context.Context, _ service.MutationContext, id uuid.UUID, name string) (model.Tag, error) {
+	app.createdID = id
+	app.createdName = name
+	app.createdTag = model.Tag{ID: id, Name: name, Version: 1}
+	return app.createdTag, nil
+}
+
+func (app *stubTagContentApplication) GetTag(_ context.Context, _ uuid.UUID, id uuid.UUID) (model.Tag, error) {
+	return model.Tag{ID: id, Name: "产品", Version: 2}, nil
+}
+
+func (app *stubTagContentApplication) UpdateTag(_ context.Context, _ service.MutationContext, id uuid.UUID, version int64, name string) (model.Tag, error) {
+	app.updatedID = id
+	app.updatedVersion = version
+	app.updatedName = name
+	return model.Tag{ID: id, Name: name, Version: version + 1}, nil
+}
+
+func (app *stubTagContentApplication) DeleteTag(_ context.Context, _ service.MutationContext, id uuid.UUID, version int64) error {
+	app.deletedID = id
+	app.deletedVersion = version
+	return nil
+}
+
 func (app *stubSyncApplication) Bootstrap(_ context.Context, _ uuid.UUID, deviceID uuid.UUID) (service.SyncBootstrap, error) {
 	app.deviceID = deviceID
 	return service.SyncBootstrap{Cursor: "bootstrap-cursor"}, nil
@@ -128,6 +164,90 @@ func TestResourceRouterRequiresMergePatchMediaType(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusUnsupportedMediaType || goals.updateVersion != 0 {
 		t.Fatalf("wrong media type status=%d updateVersion=%d body=%s", response.Code, goals.updateVersion, response.Body.String())
+	}
+}
+
+func TestTagCreateRouteCreatesStandaloneGlobalTag(t *testing.T) {
+	userID := uuid.New()
+	sessions := &stubSessionApplication{authenticated: model.AuthenticatedSession{Account: model.Account{ID: userID, Status: model.AccountActive}}}
+	content := &stubTagContentApplication{}
+	handler, err := NewRouter(RouterOptions{Accounts: &stubAccountApplication{}, Sessions: sessions, Content: content, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "http://dayorder.example/api/v1/tags", bytes.NewBufferString(`{"name":" 灵感 "}`))
+	request.AddCookie(&http.Cookie{Name: sessionCookie, Value: "token"})
+	request.Header.Set("X-Device-ID", uuid.NewString())
+	request.Header.Set("Idempotency-Key", uuid.NewString())
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated || content.createdID == uuid.Nil || content.createdName != "灵感" {
+		t.Fatalf("create tag status=%d id=%s name=%q body=%s", response.Code, content.createdID, content.createdName, response.Body.String())
+	}
+}
+
+func TestTagPatchRouteRenamesGlobalTagWithVersionCheck(t *testing.T) {
+	userID, tagID := uuid.New(), uuid.New()
+	sessions := &stubSessionApplication{authenticated: model.AuthenticatedSession{Account: model.Account{ID: userID, Status: model.AccountActive}}}
+	content := &stubTagContentApplication{}
+	handler, err := NewRouter(RouterOptions{Accounts: &stubAccountApplication{}, Sessions: sessions, Content: content, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPatch, "http://dayorder.example/api/v1/tags/"+tagID.String(), bytes.NewBufferString(`{"name":" 产品设计 "}`))
+	request.AddCookie(&http.Cookie{Name: sessionCookie, Value: "token"})
+	request.Header.Set("X-Device-ID", uuid.NewString())
+	request.Header.Set("Idempotency-Key", uuid.NewString())
+	request.Header.Set("If-Match", `"2"`)
+	request.Header.Set("Content-Type", "application/merge-patch+json")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || content.updatedID != tagID || content.updatedVersion != 2 || content.updatedName != "产品设计" {
+		t.Fatalf("patch tag status=%d id=%s version=%d name=%q body=%s", response.Code, content.updatedID, content.updatedVersion, content.updatedName, response.Body.String())
+	}
+}
+
+func TestTagDeleteRouteRemovesGlobalTagWithVersionCheck(t *testing.T) {
+	userID, tagID := uuid.New(), uuid.New()
+	sessions := &stubSessionApplication{authenticated: model.AuthenticatedSession{Account: model.Account{ID: userID, Status: model.AccountActive}}}
+	content := &stubTagContentApplication{}
+	handler, err := NewRouter(RouterOptions{Accounts: &stubAccountApplication{}, Sessions: sessions, Content: content, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodDelete, "http://dayorder.example/api/v1/tags/"+tagID.String(), nil)
+	request.AddCookie(&http.Cookie{Name: sessionCookie, Value: "token"})
+	request.Header.Set("X-Device-ID", uuid.NewString())
+	request.Header.Set("Idempotency-Key", uuid.NewString())
+	request.Header.Set("If-Match", `"4"`)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent || content.deletedID != tagID || content.deletedVersion != 4 {
+		t.Fatalf("delete tag status=%d id=%s version=%d body=%s", response.Code, content.deletedID, content.deletedVersion, response.Body.String())
+	}
+}
+
+func TestSyncMutationDispatchesGlobalTagUpdate(t *testing.T) {
+	tagID := uuid.New()
+	content := &stubTagContentApplication{}
+	router := &Router{content: content}
+	item := syncMutationItem{EntityType: "tag", EntityID: tagID, Operation: "update", BaseVersion: 3, Payload: json.RawMessage(`{"name":"新名称"}`)}
+
+	value, err := router.applySyncMutation(context.Background(), service.MutationContext{UserID: uuid.New(), DeviceID: uuid.New(), MutationID: uuid.New()}, item)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, ok := value.(model.Tag)
+	if !ok || tag.Name != "新名称" || content.updatedID != tagID || content.updatedVersion != 3 {
+		t.Fatalf("value=%#v id=%s version=%d", value, content.updatedID, content.updatedVersion)
 	}
 }
 

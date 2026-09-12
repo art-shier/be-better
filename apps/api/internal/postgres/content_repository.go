@@ -180,6 +180,29 @@ func (*ContentRepository) EnsureTag(ctx context.Context, tx database.Tx, userID,
 	}
 	return tagFromRow(row), row.ID.Bytes == id, nil
 }
+func (*ContentRepository) GetTag(ctx context.Context, tx database.Tx, userID, id uuid.UUID) (model.Tag, error) {
+	row, err := db.New(tx).GetTag(ctx, pgUUID(userID), pgUUID(id))
+	if err != nil {
+		return model.Tag{}, mapDatabaseError("get tag", err)
+	}
+	return tagFromRow(row), nil
+}
+func (*ContentRepository) UpdateTag(ctx context.Context, tx database.Tx, userID uuid.UUID, value model.Tag, expected int64, normalized string) (model.Tag, error) {
+	q := db.New(tx)
+	row, err := q.UpdateTag(ctx, db.UpdateTagParams{UserID: pgUUID(userID), ID: pgUUID(value.ID), Name: value.Name, NormalizedName: normalized, ExpectedVersion: expected})
+	if err != nil {
+		return model.Tag{}, contentWriteError(ctx, func() error { _, readErr := q.GetTag(ctx, pgUUID(userID), pgUUID(value.ID)); return readErr }, "update tag", err)
+	}
+	return tagFromRow(row), nil
+}
+func (*ContentRepository) DeleteTag(ctx context.Context, tx database.Tx, userID, id uuid.UUID, expected int64) (model.Tag, error) {
+	q := db.New(tx)
+	row, err := q.SoftDeleteTag(ctx, pgUUID(userID), pgUUID(id), expected)
+	if err != nil {
+		return model.Tag{}, contentWriteError(ctx, func() error { _, readErr := q.GetTag(ctx, pgUUID(userID), pgUUID(id)); return readErr }, "delete tag", err)
+	}
+	return tagFromRow(row), nil
+}
 func (*ContentRepository) ListTags(ctx context.Context, tx database.Tx, userID uuid.UUID, limit int) ([]model.Tag, error) {
 	rows, err := db.New(tx).ListTags(ctx, pgUUID(userID), int32(limit))
 	if err != nil {

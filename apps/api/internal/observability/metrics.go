@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -21,14 +22,24 @@ type outboxQueryer interface {
 }
 
 type Metrics struct {
-	service          string
-	registry         *prometheus.Registry
-	httpRequests     *prometheus.CounterVec
-	httpDuration     *prometheus.HistogramVec
-	syncMutations    *prometheus.CounterVec
-	syncCursorResets prometheus.Counter
-	loginRateLimited prometheus.Counter
-	passwordDuration *prometheus.HistogramVec
+	service                    string
+	registry                   *prometheus.Registry
+	httpRequests               *prometheus.CounterVec
+	httpDuration               *prometheus.HistogramVec
+	syncMutations              *prometheus.CounterVec
+	syncCursorResets           prometheus.Counter
+	loginRateLimited           prometheus.Counter
+	passwordDuration           *prometheus.HistogramVec
+	agentOperations            *prometheus.CounterVec
+	agentRuns                  *prometheus.CounterVec
+	agentOperationDuration     *prometheus.HistogramVec
+	agentRunDuration           *prometheus.HistogramVec
+	agentQueueWait             *prometheus.HistogramVec
+	agentCancelLatency         *prometheus.HistogramVec
+	agentUsageTokens           *prometheus.CounterVec
+	agentUsageUnknown          *prometheus.CounterVec
+	agentRetries               *prometheus.CounterVec
+	agentActiveBackgroundSlots prometheus.Gauge
 }
 
 func NewMetrics(service string, pool poolStater, outbox outboxQueryer) *Metrics {
@@ -56,10 +67,48 @@ func NewMetrics(service string, pool poolStater, outbox outboxQueryer) *Metrics 
 			Namespace: "dayorder", Name: "password_operation_duration_seconds", Help: "Argon2id hash and verification latency.",
 			Buckets: []float64{0.025, 0.05, 0.075, 0.1, 0.15, 0.25, 0.5, 1},
 		}, []string{"operation"}),
+		agentOperations: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "dayorder", Subsystem: "agent", Name: "operations_total", Help: "Terminal readonly Agent operation attempts.",
+		}, []string{"kind", "mode", "tool", "profile", "outcome", "code"}),
+		agentRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "dayorder", Subsystem: "agent", Name: "runs_total", Help: "Durably committed readonly Agent run outcomes.",
+		}, []string{"mode", "profile", "outcome", "code"}),
+		agentOperationDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "dayorder", Subsystem: "agent", Name: "operation_duration_seconds", Help: "Readonly Agent operation duration.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"kind", "mode", "tool", "profile", "outcome", "code"}),
+		agentRunDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "dayorder", Subsystem: "agent", Name: "run_duration_seconds", Help: "Readonly Agent run duration.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"mode", "profile", "outcome", "code"}),
+		agentQueueWait: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "dayorder", Subsystem: "agent", Name: "queue_wait_seconds", Help: "Readonly background Agent queue wait.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"mode", "profile"}),
+		agentCancelLatency: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "dayorder", Subsystem: "agent", Name: "cancel_latency_seconds", Help: "Cancellation request to cooperative dependency exit latency.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"kind", "mode", "tool", "profile", "outcome", "code"}),
+		agentUsageTokens: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "dayorder", Subsystem: "agent", Name: "usage_tokens_total", Help: "Known readonly Agent Provider tokens by attempt.",
+		}, []string{"kind", "mode", "tool", "profile", "component"}),
+		agentUsageUnknown: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "dayorder", Subsystem: "agent", Name: "usage_unknown_total", Help: "Readonly Agent Provider attempts with incomplete usage.",
+		}, []string{"kind", "mode", "tool", "profile", "outcome", "code"}),
+		agentRetries: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "dayorder", Subsystem: "agent", Name: "retries_total", Help: "Terminal readonly Agent Provider retry attempts.",
+		}, []string{"mode", "profile", "outcome", "code"}),
+		agentActiveBackgroundSlots: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "dayorder", Subsystem: "agent", Name: "active_background_slots", Help: "Readonly background Agent executions currently owned by this process.",
+		}),
 	}
 	registry.MustRegister(
 		metrics.httpRequests, metrics.httpDuration, metrics.syncMutations,
 		metrics.syncCursorResets, metrics.loginRateLimited, metrics.passwordDuration,
+		metrics.agentOperations, metrics.agentRuns, metrics.agentOperationDuration,
+		metrics.agentRunDuration, metrics.agentQueueWait, metrics.agentCancelLatency,
+		metrics.agentUsageTokens, metrics.agentUsageUnknown, metrics.agentRetries,
+		metrics.agentActiveBackgroundSlots, collectors.NewGoCollector(),
 	)
 	if pool != nil {
 		registry.MustRegister(newPoolCollector(service, pool))
