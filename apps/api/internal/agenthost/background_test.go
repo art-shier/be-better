@@ -660,9 +660,16 @@ func TestBackgroundCancellationAndInterruptionDoNotPublishLateResultsOrReplay(t 
 			t.Fatal(err)
 		}
 		failed, err := api.Runs.Get(ctx, fixture.UserA, event.AggregateID)
-		if err != nil || failed.Status != agentprotocol.ReadonlyRunViewStatusFailed || failed.Error == nil ||
+		if err != nil {
+			t.Fatal(err)
+		}
+		if failed.Error == nil {
+			t.Fatalf("interrupted run status=%q has no error", failed.Status)
+		}
+		if failed.Status != agentprotocol.ReadonlyRunViewStatusFailed ||
 			failed.Error.Code != agentprotocol.ErrorCodeInternalError || failed.Error.Message != "runtime interrupted" {
-			t.Fatalf("interrupted run = %#v, error=%v", failed, err)
+			t.Fatalf("interrupted run status=%q code=%q message=%q retryable=%t; want failed/internal_error/runtime interrupted",
+				failed.Status, failed.Error.Code, failed.Error.Message, failed.Error.Retryable)
 		}
 		before := adapter.calls.Load()
 		event.Attempts++

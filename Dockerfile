@@ -12,6 +12,7 @@ COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/package.json
 RUN npm ci --workspace @dayorder/web
 COPY apps/web apps/web
+COPY contracts/agent contracts/agent
 RUN npm run build:web
 
 FROM ${GO_IMAGE} AS go-build

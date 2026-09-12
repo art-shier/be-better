@@ -648,11 +648,11 @@ test("orchestrates one host and scrubs database and Provider secrets from every 
     (call) => call.label === "typecheck-browser",
   );
   assert.deepEqual(
-    browserTypecheck.args.map((value) => value.replaceAll("\\", "/")),
+    browserTypecheck.args,
     [
-      "C:/repo/node_modules/typescript/bin/tsc",
+      resolve("C:/repo/node_modules/typescript/bin/tsc"),
       "--project",
-      "C:/repo/apps/web/tests/agent-integration/tsconfig.json",
+      resolve("C:/repo/apps/web/tests/agent-integration/tsconfig.json"),
     ],
   );
   const host = calls.find((call) => call.label === "host");
