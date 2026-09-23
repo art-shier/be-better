@@ -28,7 +28,7 @@ jobs:
       - run: npm audit --audit-level=high
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./apps/api/...
       - name: Filesystem vulnerability scan
-        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -67,7 +67,7 @@ jobs:
           name: sbom-${{ matrix.target }}
           path: dayorder-${{ matrix.target }}.spdx.json
       - name: Block high and critical image vulnerabilities
-        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: dayorder-${{ matrix.target }}:security-scan
           severity: HIGH,CRITICAL
