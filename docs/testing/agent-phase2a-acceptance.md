@@ -4,7 +4,7 @@ This gate verifies the fake-provider, readonly Agent path across the browser for
 
 ## CI command
 
-CI runs the gate on Node 24.15.0 and Go 1.25 with Docker and Playwright Chromium available:
+CI runs the gate on Node 24.15.0 and Go 1.26.8 with Docker and Playwright Chromium available:
 
 ```text
 npm run test:agent-integration -- --require-docker

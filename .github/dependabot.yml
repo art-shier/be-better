@@ -12,6 +12,18 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
 
+  - package-ecosystem: gomod
+    directory: /deploy/caddy
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
+    directory: /deploy/gosu
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

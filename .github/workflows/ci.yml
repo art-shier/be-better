@@ -23,7 +23,7 @@ jobs:
           cache: npm
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.25.0"
+          go-version: "1.26.8"
           cache-dependency-path: apps/api/go.sum
       - run: npm ci
       - run: npm run typecheck
@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.25.0"
+          go-version: "1.26.8"
           cache-dependency-path: apps/api/go.sum
       - run: go test ./apps/api/...
       - run: go test -race ./apps/api/...
@@ -62,7 +62,7 @@ jobs:
           node-version: "24.15.0"
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.25.0"
+          go-version: "1.26.8"
           cache-dependency-path: apps/api/go.sum
       - name: Test runtime acceptance diagnostics
         shell: pwsh
@@ -84,7 +84,7 @@ jobs:
           cache: npm
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.25.0"
+          go-version: "1.26.8"
           cache-dependency-path: apps/api/go.sum
       - run: npm ci
       - name: Install Playwright Chromium

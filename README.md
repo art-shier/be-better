@@ -32,7 +32,7 @@ scripts/         构建与真实运行验收脚本
 
 ## 本地开发
 
-环境要求：Node.js 22.22+（或 24.15+）、Go 1.25+、Docker 与 Docker Compose。
+环境要求：Node.js 22.22+（或 24.15+）、Go 1.26.8+、Docker 与 Docker Compose。
 
 ```powershell
 npm install
@@ -210,7 +210,7 @@ Schema 检查拒绝 dirty schema 和低于二进制内嵌 migration floor 的版
 
 ### 本地构建/离线传输
 
-项目提供不依赖 Docker 的 Linux 构建与运行脚本。构建机需要 Node.js 22.22+（或 24.15+）、npm、Go 1.25+ 和 Bash；后端运行服务器不需要安装 Node.js 或 Go。
+项目提供不依赖 Docker 的 Linux 构建与运行脚本。构建机需要 Node.js 22.22+（或 24.15+）、npm、Go 1.26.8+ 和 Bash；后端运行服务器不需要安装 Node.js 或 Go。
 
 #### 1. 构建并部署前端
 

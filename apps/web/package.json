@@ -12,7 +12,7 @@
     "test:watch": "cross-env NODE_ENV=test vitest"
   },
   "dependencies": {
-    "@mdxeditor/editor": "4.2.3",
+    "@mdxeditor/editor": "4.2.5",
     "@radix-ui/react-dialog": "1.1.15",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
