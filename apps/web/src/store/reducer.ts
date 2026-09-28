@@ -11,6 +11,7 @@ import type {
   Area,
   Note,
   RecordEntry,
+  Tag,
   Task,
 } from "../domain/types";
 
@@ -33,6 +34,9 @@ export type Action =
   | { type: "add-note"; note: Note }
   | { type: "update-note"; note: Note }
   | { type: "delete-note"; id: string }
+  | { type: "add-tag"; tag: Tag }
+  | { type: "update-tag"; tag: Tag }
+  | { type: "delete-tag"; id: string }
   | { type: "save-capture"; draft: CaptureDraft }
   | { type: "accept-record"; recordId: string; draft: CaptureDraft }
   | { type: "save-review"; review: DailyReview }
@@ -81,6 +85,20 @@ function unlinkNotes(notes: Note[], entityId: string): { notes: Note[]; linked: 
   };
 }
 
+function includeTagNames(state: AppData, names: string[]): AppData {
+  const tags = [...state.tags];
+  const known = new Set(tags.map((tag) => tag.name.toLocaleLowerCase()));
+  for (const rawName of names) {
+    const name = rawName.trim();
+    const normalized = name.toLocaleLowerCase();
+    if (!name || known.has(normalized)) continue;
+    const timestamp = new Date().toISOString();
+    tags.push({ id: createId("tag"), name, version: 0, createdAt: timestamp, updatedAt: timestamp });
+    known.add(normalized);
+  }
+  return tags.length === state.tags.length ? state : { ...state, tags };
+}
+
 export function appReducer(state: AppData, action: Action): AppData {
   switch (action.type) {
     case "replace": return action.data;
@@ -114,11 +132,15 @@ export function appReducer(state: AppData, action: Action): AppData {
       if (!before) return state;
       return { ...state, goals: state.goals.filter((item) => item.id !== action.id), tasks: state.tasks.map((item) => item.goalId === action.id ? { ...item, goalId: undefined } : item), events: state.events.map((item) => item.goalId === action.id ? { ...item, goalId: undefined } : item), notes: state.notes.map((item) => item.linkedEntityIds.includes(action.id) ? { ...item, linkedEntityIds: item.linkedEntityIds.filter((id) => id !== action.id), updatedAt: new Date().toISOString() } : item) };
     }
-    case "add-record": return { ...state, records: [action.record, ...state.records] };
+    case "add-record": {
+      const next = includeTagNames(state, action.record.tags);
+      return { ...next, records: [action.record, ...next.records] };
+    }
     case "update-record": {
       const before = state.records.find((item) => item.id === action.record.id);
       if (!before) return state;
-      return { ...state, records: state.records.map((item) => item.id === action.record.id ? action.record : item) };
+      const next = includeTagNames(state, action.record.tags);
+      return { ...next, records: next.records.map((item) => item.id === action.record.id ? action.record : item) };
     }
     case "delete-record": {
       const before = state.records.find((item) => item.id === action.id);
@@ -132,8 +154,14 @@ export function appReducer(state: AppData, action: Action): AppData {
       const updated = { ...before, archivedAt: new Date().toISOString() };
       return { ...state, records: state.records.map((item) => item.id === action.id ? updated : item) };
     }
-    case "add-note": return { ...state, notes: [action.note, ...state.notes] };
-    case "update-note": return { ...state, notes: state.notes.map((item) => item.id === action.note.id ? action.note : item) };
+    case "add-note": {
+      const next = includeTagNames(state, action.note.tags);
+      return { ...next, notes: [action.note, ...next.notes] };
+    }
+    case "update-note": {
+      const next = includeTagNames(state, action.note.tags);
+      return { ...next, notes: next.notes.map((item) => item.id === action.note.id ? action.note : item) };
+    }
     case "delete-note": {
       const before = state.notes.find((item) => item.id === action.id);
       if (!before) return state;
@@ -141,13 +169,39 @@ export function appReducer(state: AppData, action: Action): AppData {
       const noteChanges = unlinkNotes(remaining, action.id);
       return { ...state, notes: noteChanges.notes };
     }
+    case "add-tag": return { ...state, tags: [...state.tags, action.tag] };
+    case "update-tag": {
+      const before = state.tags.find((item) => item.id === action.tag.id);
+      if (!before) return state;
+      const previousName = before.name.toLocaleLowerCase();
+      const rename = (values: string[]) => values.map((value) => value.toLocaleLowerCase() === previousName ? action.tag.name : value);
+      return {
+        ...state,
+        tags: state.tags.map((item) => item.id === action.tag.id ? action.tag : item),
+        notes: state.notes.map((note) => ({ ...note, tags: rename(note.tags) })),
+        records: state.records.map((record) => ({ ...record, tags: rename(record.tags) })),
+      };
+    }
+    case "delete-tag": {
+      const before = state.tags.find((item) => item.id === action.id);
+      if (!before) return state;
+      const deletedName = before.name.toLocaleLowerCase();
+      const remove = (values: string[]) => values.filter((value) => value.toLocaleLowerCase() !== deletedName);
+      return {
+        ...state,
+        tags: state.tags.filter((item) => item.id !== action.id),
+        notes: state.notes.map((note) => ({ ...note, tags: remove(note.tags) })),
+        records: state.records.map((record) => ({ ...record, tags: remove(record.tags) })),
+      };
+    }
     case "save-capture": {
       const { draft } = action;
       const recordId = createId("record");
       const created = createEntityFromDraft(state, draft, recordId);
       const now = new Date().toISOString();
       const record: RecordEntry = { id: recordId, rawText: draft.rawText, kind: draft.kind === "record" ? draft.recordKind ?? "idea" : "inbox", occurredAt: draft.occurredAt, mood: draft.mood, energy: draft.energy, tags: draft.kind === "record" ? ["快速记录"] : ["已整理", draft.kind], parsedEntityId: created.parsedEntityId, version: 0, createdAt: now, updatedAt: now };
-      return { ...created.data, records: [record, ...created.data.records] };
+      const next = includeTagNames(created.data, record.tags);
+      return { ...next, records: [record, ...next.records] };
     }
     case "accept-record": {
       const before = state.records.find((item) => item.id === action.recordId);
@@ -155,7 +209,8 @@ export function appReducer(state: AppData, action: Action): AppData {
       const created = createEntityFromDraft(state, action.draft, before.id);
       if (!created.parsedEntityId) return state;
       const updated: RecordEntry = { ...before, parsedEntityId: created.parsedEntityId, tags: [...new Set([...before.tags.filter((tag) => tag !== "待确认"), "已整理", action.draft.kind])] };
-      return { ...created.data, records: created.data.records.map((item) => item.id === before.id ? updated : item) };
+      const next = includeTagNames(created.data, updated.tags);
+      return { ...next, records: next.records.map((item) => item.id === before.id ? updated : item) };
     }
     case "save-review": {
       const exists = state.reviews.some((item) => item.date === action.review.date);

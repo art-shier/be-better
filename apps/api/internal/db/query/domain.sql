@@ -481,6 +481,19 @@ WHERE user_id = sqlc.arg(user_id) AND normalized_name = sqlc.arg(normalized_name
 SELECT * FROM dayorder.tags
 WHERE user_id = sqlc.arg(user_id) AND id = sqlc.arg(id) AND deleted_at IS NULL;
 
+-- name: UpdateTag :one
+UPDATE dayorder.tags
+SET name = sqlc.arg(name), normalized_name = sqlc.arg(normalized_name), version = version + 1, updated_at = now()
+WHERE user_id = sqlc.arg(user_id) AND id = sqlc.arg(id)
+  AND version = sqlc.arg(expected_version) AND deleted_at IS NULL
+RETURNING *;
+
+-- name: SoftDeleteTag :one
+UPDATE dayorder.tags SET deleted_at = now(), version = version + 1, updated_at = now()
+WHERE user_id = sqlc.arg(user_id) AND id = sqlc.arg(id)
+  AND version = sqlc.arg(expected_version) AND deleted_at IS NULL
+RETURNING *;
+
 -- name: ListTags :many
 SELECT * FROM dayorder.tags WHERE user_id = sqlc.arg(user_id) AND deleted_at IS NULL
 ORDER BY normalized_name, id LIMIT sqlc.arg(page_size);

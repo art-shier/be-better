@@ -1,7 +1,6 @@
 import { ArrowLeft, ArrowRight, Check, Plus, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createId } from "../domain/ids";
-import { useAuth } from "../auth/AuthProvider";
 import type { Area, DataMode, Goal } from "../domain/types";
 import { useAppStore } from "../store/AppStore";
 import { useUi } from "../ui/UiProvider";
@@ -12,19 +11,25 @@ const areas: Area[] = ["健康", "成长", "工作", "关系", "财务", "生活
 const stepLabels = ["关注领域", "近期目标", "数据模式", "今日行动"];
 const newGoal = (area: Area): GoalDraft => ({ id: createId("goal-draft"), title: "", why: "", area, dueDate: "" });
 
-export function OnboardingDialog() {
-  const auth = useAuth();
-  const { data, dispatch, syncStatus } = useAppStore();
+export function OnboardingDialog({ open, onClose }: { open: boolean; onClose(): void }) {
+  const { dispatch } = useAppStore();
   const { toast } = useUi();
   const [step, setStep] = useState(0);
   const [focusAreas, setFocusAreas] = useState<Area[]>(["工作"]);
   const [goals, setGoals] = useState<GoalDraft[]>([newGoal("工作")]);
   const [dataMode, setDataMode] = useState<DataMode>("local");
-  const open = !data.settings.onboardingCompleted && !(auth.mode === "authenticated" && syncStatus === "connecting");
   const goalsValid = goals.length > 0 && goals.every((goal) => goal.title.trim() && goal.why.trim());
   const canContinue = step === 0 ? focusAreas.length > 0 : step === 1 ? goalsValid : true;
   const primaryGoal = goals.find((goal) => goal.title.trim());
   const progress = useMemo(() => `${step + 1} / ${stepLabels.length}`, [step]);
+
+  useEffect(() => {
+    if (!open) return;
+    setStep(0);
+    setFocusAreas(["工作"]);
+    setGoals([newGoal("工作")]);
+    setDataMode("local");
+  }, [open]);
 
   const toggleArea = (area: Area) => {
     setFocusAreas((current) => current.includes(area) ? current.filter((item) => item !== area) : [...current, area]);
@@ -36,12 +41,13 @@ export function OnboardingDialog() {
     const now = new Date().toISOString();
     const created: Goal[] = goals.slice(0, 3).map((goal) => ({ id: createId("goal"), title: goal.title.trim(), why: goal.why.trim(), area: goal.area, metricType: "project", targetValue: 100, currentValue: 0, unit: "%", startAt: now, dueAt: goal.dueDate ? new Date(`${goal.dueDate}T23:59:00`).toISOString() : undefined, status: "active", health: "normal", milestones: [], version: 0, createdAt: now, updatedAt: now }));
     dispatch({ type: "complete-onboarding", goals: created, focusAreas, dataMode });
+    onClose();
     toast("首次设置已完成，已生成第一个今日行动");
   };
 
   const footer = <><span className="onboarding-progress">{progress} · {stepLabels[step]}</span>{step > 0 && <button className="button secondary" type="button" onClick={() => setStep((value) => value - 1)}><ArrowLeft size={16} />上一步</button>}<button className="button primary" type="button" disabled={!canContinue} onClick={() => step === 3 ? finish() : setStep((value) => value + 1)}>{step === 3 ? <><Check size={16} />开始使用</> : <>下一步<ArrowRight size={16} /></>}</button></>;
 
-  return <Modal open={open} title="把接下来想发生的变化放进日序" description="约 3 分钟；所有设置之后都可以调整。" onClose={() => undefined} dismissible={false} size="large" footer={footer}>
+  return <Modal open={open} title="把接下来想发生的变化放进日序" description="约 3 分钟；所有设置之后都可以调整。" onClose={onClose} size="large" footer={footer}>
     <div className="onboarding-steps" aria-label="设置进度">{stepLabels.map((label, index) => <span key={label} className={index <= step ? "active" : ""}><b>{index + 1}</b>{label}</span>)}</div>
     {step === 0 && <section className="onboarding-section"><h3>最近最想照顾哪些部分？</h3><p>选择 1–3 个领域，首页会优先展示相关目标。</p><div className="onboarding-areas">{areas.map((area) => <button key={area} className={focusAreas.includes(area) ? "active" : ""} type="button" aria-pressed={focusAreas.includes(area)} onClick={() => toggleArea(area)}>{focusAreas.includes(area) && <Check size={15} />}{area}</button>)}</div></section>}
     {step === 1 && <section className="onboarding-section"><h3>创建 1–3 个近期目标</h3><p>先写清楚变化和原因，衡量方式可以稍后细化。</p><div className="onboarding-goals">{goals.map((goal, index) => <fieldset key={goal.id}><legend>目标 {index + 1}</legend><label className="form-field"><span>目标名称</span><input data-autofocus={index === 0 || undefined} value={goal.title} onChange={(event) => updateGoal(goal.id, { title: event.target.value })} placeholder="例如：稳定跑完 10 公里" /></label><label className="form-field"><span>为什么重要</span><textarea value={goal.why} onChange={(event) => updateGoal(goal.id, { why: event.target.value })} placeholder="这个变化会带来什么？" /></label><div className="onboarding-goal-row"><label className="form-field"><span>领域</span><select value={goal.area} onChange={(event) => updateGoal(goal.id, { area: event.target.value as Area })}>{areas.map((area) => <option key={area}>{area}</option>)}</select></label><label className="form-field"><span>期望日期（可选）</span><input type="date" value={goal.dueDate} onChange={(event) => updateGoal(goal.id, { dueDate: event.target.value })} /></label></div>{goals.length > 1 && <button className="text-button danger-text" type="button" onClick={() => setGoals((current) => current.filter((item) => item.id !== goal.id))}><Trash2 size={14} />移除</button>}</fieldset>)}</div>{goals.length < 3 && <button className="button secondary add-onboarding-goal" type="button" onClick={() => setGoals((current) => [...current, newGoal(focusAreas[current.length] ?? focusAreas[0] ?? "生活")])}><Plus size={16} />再加一个目标</button>}</section>}

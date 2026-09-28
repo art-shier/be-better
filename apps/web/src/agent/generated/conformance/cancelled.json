@@ -1,0 +1,164 @@
+{
+  "name": "cancelled",
+  "protocolVersion": "2.0",
+  "initialState": {
+    "protocolVersion": "2.0",
+    "runId": "run-1",
+    "executionMode": "foreground",
+    "phase": "idle",
+    "sequence": 0,
+    "stepCount": 0,
+    "messages": [],
+    "capabilitySnapshot": {
+      "runtimeVersion": "2.0.0",
+      "executionMode": "foreground",
+      "toolIds": [
+        "test.clock.read"
+      ],
+      "skills": [],
+      "scope": {
+        "domains": [
+          "test"
+        ]
+      }
+    },
+    "budget": {
+      "maxSteps": 4,
+      "maxTokens": 1000,
+      "maxDurationMs": 30000,
+      "maxWorkers": 1,
+      "maxConcurrency": 1,
+      "maxRepeatedToolCalls": 2
+    },
+    "usage": {
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "totalTokens": 0
+    },
+    "repeatedToolCalls": 0
+  },
+  "inputs": [
+    {
+      "type": "user_message",
+      "text": "Start."
+    },
+    {
+      "type": "cancel",
+      "reason": "user cancelled"
+    }
+  ],
+  "expectedTransitions": [
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "model_pending",
+        "sequence": 1,
+        "stepCount": 0,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Start."
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 0
+      },
+      "effects": [
+        {
+          "type": "request_model_turn",
+          "turnId": "turn-1"
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "cancelled",
+        "sequence": 2,
+        "stepCount": 0,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Start."
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 0,
+        "error": {
+          "code": "cancelled",
+          "message": "user cancelled",
+          "retryable": false
+        }
+      },
+      "effects": [
+        {
+          "type": "cancel_run"
+        }
+      ]
+    }
+  ]
+}

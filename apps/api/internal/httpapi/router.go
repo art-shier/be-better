@@ -62,6 +62,10 @@ type CalendarApplication interface {
 }
 
 type ContentApplication interface {
+	CreateTag(context.Context, service.MutationContext, uuid.UUID, string) (model.Tag, error)
+	GetTag(context.Context, uuid.UUID, uuid.UUID) (model.Tag, error)
+	UpdateTag(context.Context, service.MutationContext, uuid.UUID, int64, string) (model.Tag, error)
+	DeleteTag(context.Context, service.MutationContext, uuid.UUID, int64) error
 	CreateRecord(context.Context, service.MutationContext, service.RecordInput) (model.Record, error)
 	GetRecord(context.Context, uuid.UUID, uuid.UUID) (model.Record, error)
 	ListRecords(context.Context, uuid.UUID, string, int) (service.RecordPage, error)
@@ -161,8 +165,17 @@ type Router struct {
 }
 
 func NewRouter(options RouterOptions) (http.Handler, error) {
+	router, mux, err := buildRouter(options)
+	if err != nil {
+		return nil, err
+	}
+	registerDisabledAgentIntegrationRoutes(mux, router)
+	return router.middleware(mux), nil
+}
+
+func buildRouter(options RouterOptions) (*Router, *http.ServeMux, error) {
 	if options.Accounts == nil || options.Sessions == nil {
-		return nil, errMissingApplications
+		return nil, nil, errMissingApplications
 	}
 	logger := options.Logger
 	if logger == nil {
@@ -227,6 +240,10 @@ func NewRouter(options RouterOptions) (http.Handler, error) {
 		mux.HandleFunc("DELETE /api/v1/calendar-events/{eventId}", router.deleteCalendarEvent)
 	}
 	if router.content != nil {
+		mux.HandleFunc("POST /api/v1/tags", router.createTag)
+		mux.HandleFunc("GET /api/v1/tags/{tagId}", router.getTag)
+		mux.HandleFunc("PATCH /api/v1/tags/{tagId}", router.updateTag)
+		mux.HandleFunc("DELETE /api/v1/tags/{tagId}", router.deleteTag)
 		mux.HandleFunc("GET /api/v1/records", router.listRecords)
 		mux.HandleFunc("POST /api/v1/records", router.createRecord)
 		mux.HandleFunc("GET /api/v1/records/{recordId}", router.getRecord)
@@ -270,7 +287,7 @@ func NewRouter(options RouterOptions) (http.Handler, error) {
 	if router.undos != nil {
 		mux.HandleFunc("POST /api/v1/audit-events/{auditEventId}/undo", router.undoAuditEvent)
 	}
-	return router.middleware(mux), nil
+	return router, mux, nil
 }
 
 func (router *Router) live(response http.ResponseWriter, request *http.Request) {

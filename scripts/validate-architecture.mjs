@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
+
+import { validateAgentArchitecture } from "./lib/agent-architecture-rules.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const failures = [];
@@ -20,6 +22,35 @@ function requireAbsentText(relativePath, pattern, reason) {
   if (pattern.test(content)) {
     failures.push(`${relativePath}: ${reason}`);
   }
+}
+
+function readTypeScriptSources(relativeDirectory) {
+  const directory = resolve(root, relativeDirectory);
+  const sources = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = resolve(directory, entry.name);
+    if (entry.isDirectory()) {
+      sources.push(...readTypeScriptSources(`${relativeDirectory}/${entry.name}`));
+    } else if (entry.isFile() && /\.tsx?$/.test(entry.name)) {
+      sources.push(readFileSync(path, "utf8"));
+    }
+  }
+  return sources;
+}
+
+function readProductionGoSources(relativeDirectory) {
+  const directory = resolve(root, relativeDirectory);
+  const sources = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const relativePath = `${relativeDirectory}/${entry.name}`;
+    const path = resolve(directory, entry.name);
+    if (entry.isDirectory()) {
+      sources.push(...readProductionGoSources(relativePath));
+    } else if (entry.isFile() && entry.name.endsWith(".go") && !entry.name.endsWith("_test.go")) {
+      sources.push({ path: relativePath, source: readFileSync(path, "utf8") });
+    }
+  }
+  return sources;
 }
 
 for (const relativePath of [
@@ -84,10 +115,19 @@ if (configHubIgnoreCheck.status !== 0) {
   failures.push(".confighub.yaml: local ConfigHub Machine Token file must be ignored by Git");
 }
 
+failures.push(...validateAgentArchitecture({
+  webPackage: JSON.parse(read("apps/web/package.json")),
+  webAgentSources: readTypeScriptSources("apps/web/src/agent"),
+  appSource: read("apps/web/src/App.tsx"),
+  agentHandlerSource: read("apps/api/internal/httpapi/agent_handlers.go"),
+  workerMainSource: read("apps/api/cmd/worker/main.go"),
+  productionGoSources: readProductionGoSources("apps/api"),
+}));
+
 if (failures.length > 0) {
   console.error("Architecture validation failed:\n");
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
 
-console.log("Architecture validation passed: PostgreSQL resource model has no active snapshot/SQLite compatibility path.");
+console.log("Architecture validation passed: PostgreSQL resource model has no active snapshot/SQLite compatibility path; Agent foundation has no Provider credentials, vendor SDKs, or production wiring.");

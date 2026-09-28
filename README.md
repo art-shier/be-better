@@ -32,7 +32,7 @@ scripts/         构建与真实运行验收脚本
 
 ## 本地开发
 
-环境要求：Node.js 22.22+（或 24.15+）、Go 1.25+、Docker 与 Docker Compose。
+环境要求：Node.js 22.22+（或 24.15+）、Go 1.26.8+、Docker 与 Docker Compose。
 
 ```powershell
 npm install
@@ -77,6 +77,7 @@ npm test
 go vet ./apps/api/...
 npm run build
 npm run test:architecture
+npm run test:agent-foundation
 npm run test:security
 npm run test:runtime
 ```
@@ -84,6 +85,22 @@ npm run test:runtime
 真实 PostgreSQL 集成测试和运行验收需要 Docker。Docker 或 daemon 不可用时会明确输出 `SKIPPED`；测试不会用 SQLite 冒充 PostgreSQL。
 
 `test:runtime` 使用隔离的 Compose project 和临时 volume，验证空库 migration、认证、两用户隔离、关系资源 CRUD、两设备增量同步、幂等与版本冲突、API/Worker 重启、Outbox 和并发负载；随后执行部署安全检查。结束后只删除它创建的隔离资源。CI 还会启动完整生产 Compose，验证 Caddy TLS、SPA 深链接、API 代理和容器安全属性。
+
+### Agent Foundation 开发流程
+
+`contracts/agent/` 是 Agent 协议、Conformance Case 和 Skill fixture 的唯一手写来源。修改这些规范后运行 `npm run agent:generate`，提交前运行 `npm run agent:generate:check`。`apps/web/src/agent/generated/`、`apps/api/internal/agentprotocol/generated_types.go` 和 `apps/api/internal/agentprotocol/protocol.schema.json` 由生成器拥有，不得手工编辑。
+
+聚焦验证可分别运行：
+
+```powershell
+node --test scripts/agent-contracts.test.mjs scripts/agent-architecture-rules.test.mjs
+npm run test --workspace @dayorder/web -- src/agent
+go test ./apps/api/internal/agentprotocol ./apps/api/internal/agentruntime ./apps/api/internal/agenttool ./apps/api/internal/agentskill ./apps/api/internal/agentprovider ./apps/api/internal/agentworker
+```
+
+`npm run test:agent-foundation` 聚合以上三组 Phase 1 检查；`npm run test:architecture` 额外守护 Web 不引入 Provider SDK 或凭据、Web 入口默认关闭、API 保留 `AGENT_NOT_AVAILABLE`，以及 Worker 不注册 Agent 事件。
+
+Phase 1 只提供禁用状态下的协议、运行时、Tool/Skill 边界、Mock Provider 和测试基础。生产 Agent 路径仍然关闭：Web 不展示入口，Agent API 返回 `503 AGENT_NOT_AVAILABLE`，Worker 不执行 Agent 任务。真实 Provider、领域 Tool、数据库 migration、Worker 注册及端到端集成属于 Phase 2，不在当前开发或验证范围内。
 
 ## 常用命令
 
@@ -94,6 +111,8 @@ npm run test:runtime
 | `npm run db:up` / `db:down` | 启停本地 PostgreSQL |
 | `npm run db:migrate` / `db:check` | 执行或检查 schema migration |
 | `npm run db:generate` | 使用独立 `tools.mod` 中的 sqlc 重新生成数据库访问代码 |
+| `npm run agent:generate` / `agent:generate:check` | 生成或校验 Agent 协议产物 |
+| `npm run test:agent-foundation` | 运行 Phase 1 Agent Foundation 聚焦测试 |
 | `npm run build` | 构建 Web、API 和 Worker |
 | `npm start` | 启动正式 PostgreSQL API；生产静态资源将由 Caddy 托管 |
 
@@ -191,7 +210,7 @@ Schema 检查拒绝 dirty schema 和低于二进制内嵌 migration floor 的版
 
 ### 本地构建/离线传输
 
-项目提供不依赖 Docker 的 Linux 构建与运行脚本。构建机需要 Node.js 22.22+（或 24.15+）、npm、Go 1.25+ 和 Bash；后端运行服务器不需要安装 Node.js 或 Go。
+项目提供不依赖 Docker 的 Linux 构建与运行脚本。构建机需要 Node.js 22.22+（或 24.15+）、npm、Go 1.26.8+ 和 Bash；后端运行服务器不需要安装 Node.js 或 Go。
 
 #### 1. 构建并部署前端
 

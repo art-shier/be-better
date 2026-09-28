@@ -105,6 +105,11 @@ export interface Note extends VersionedResource {
   archivedAt?: string;
 }
 
+export interface Tag extends VersionedResource {
+  id: string;
+  name: string;
+}
+
 export interface DailyReview extends VersionedResource {
   id: string;
   date: string;
@@ -142,6 +147,7 @@ export interface AppData {
   events: CalendarEvent[];
   records: RecordEntry[];
   notes: Note[];
+  tags: Tag[];
   reviews: DailyReview[];
   settings: AppSettings;
 }

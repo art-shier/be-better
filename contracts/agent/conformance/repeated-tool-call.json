@@ -1,0 +1,1209 @@
+{
+  "name": "repeated tool call",
+  "protocolVersion": "2.0",
+  "initialState": {
+    "protocolVersion": "2.0",
+    "runId": "run-1",
+    "executionMode": "foreground",
+    "phase": "idle",
+    "sequence": 0,
+    "stepCount": 0,
+    "messages": [],
+    "capabilitySnapshot": {
+      "runtimeVersion": "2.0.0",
+      "executionMode": "foreground",
+      "toolIds": [
+        "test.clock.read"
+      ],
+      "skills": [],
+      "scope": {
+        "domains": [
+          "test"
+        ]
+      }
+    },
+    "budget": {
+      "maxSteps": 4,
+      "maxTokens": 1000,
+      "maxDurationMs": 30000,
+      "maxWorkers": 1,
+      "maxConcurrency": 1,
+      "maxRepeatedToolCalls": 2
+    },
+    "usage": {
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "totalTokens": 0
+    },
+    "repeatedToolCalls": 0
+  },
+  "inputs": [
+    {
+      "type": "user_message",
+      "text": "Read the same clock."
+    },
+    {
+      "type": "provider_event",
+      "providerEvent": {
+        "type": "tool_call",
+        "call": {
+          "id": "call-1",
+          "name": "test.clock.read",
+          "input": {
+            "zone": "UTC",
+            "format": "iso"
+          }
+        }
+      }
+    },
+    {
+      "type": "provider_event",
+      "providerEvent": {
+        "type": "completed",
+        "stopReason": "tool_use",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        }
+      }
+    },
+    {
+      "type": "tool_resolution",
+      "toolResolution": {
+        "callId": "call-1",
+        "decision": "execute"
+      }
+    },
+    {
+      "type": "tool_result",
+      "toolResult": {
+        "callId": "call-1",
+        "result": {
+          "ok": true,
+          "data": {
+            "time": "10:00"
+          }
+        }
+      }
+    },
+    {
+      "type": "provider_event",
+      "providerEvent": {
+        "type": "tool_call",
+        "call": {
+          "id": "call-2",
+          "name": "test.clock.read",
+          "input": {
+            "zone": "UTC",
+            "format": "iso"
+          }
+        }
+      }
+    },
+    {
+      "type": "provider_event",
+      "providerEvent": {
+        "type": "completed",
+        "stopReason": "tool_use",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        }
+      }
+    },
+    {
+      "type": "tool_resolution",
+      "toolResolution": {
+        "callId": "call-2",
+        "decision": "execute"
+      }
+    },
+    {
+      "type": "tool_result",
+      "toolResult": {
+        "callId": "call-2",
+        "result": {
+          "ok": true,
+          "data": {
+            "time": "10:00"
+          }
+        }
+      }
+    },
+    {
+      "type": "provider_event",
+      "providerEvent": {
+        "type": "tool_call",
+        "call": {
+          "id": "call-3",
+          "name": "test.clock.read",
+          "input": {
+            "format": "iso",
+            "zone": "UTC"
+          }
+        }
+      }
+    },
+    {
+      "type": "provider_event",
+      "providerEvent": {
+        "type": "completed",
+        "stopReason": "tool_use",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        }
+      }
+    }
+  ],
+  "expectedTransitions": [
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "model_pending",
+        "sequence": 1,
+        "stepCount": 0,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the same clock."
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 0
+      },
+      "effects": [
+        {
+          "type": "request_model_turn",
+          "turnId": "turn-1"
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "model_streaming",
+        "sequence": 2,
+        "stepCount": 0,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the same clock."
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 0,
+        "pendingToolCall": {
+          "id": "call-1",
+          "name": "test.clock.read",
+          "input": {
+            "zone": "UTC",
+            "format": "iso"
+          }
+        }
+      },
+      "effects": []
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "tool_pending",
+        "sequence": 3,
+        "stepCount": 0,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the same clock."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 1,
+        "pendingToolCall": {
+          "id": "call-1",
+          "name": "test.clock.read",
+          "input": {
+            "zone": "UTC",
+            "format": "iso"
+          }
+        },
+        "lastToolFingerprint": "test.clock.read:{\"format\":\"iso\",\"zone\":\"UTC\"}"
+      },
+      "effects": [
+        {
+          "type": "resolve_tool",
+          "toolCall": {
+            "id": "call-1",
+            "name": "test.clock.read",
+            "input": {
+              "zone": "UTC",
+              "format": "iso"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "tool_pending",
+        "sequence": 4,
+        "stepCount": 1,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the same clock."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 1,
+        "lastToolFingerprint": "test.clock.read:{\"format\":\"iso\",\"zone\":\"UTC\"}"
+      },
+      "effects": [
+        {
+          "type": "execute_tool",
+          "toolCall": {
+            "id": "call-1",
+            "name": "test.clock.read",
+            "input": {
+              "zone": "UTC",
+              "format": "iso"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "model_pending",
+        "sequence": 5,
+        "stepCount": 1,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the same clock."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolResult": {
+                  "ok": true,
+                  "data": {
+                    "time": "10:00"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 1,
+        "lastToolFingerprint": "test.clock.read:{\"format\":\"iso\",\"zone\":\"UTC\"}"
+      },
+      "effects": [
+        {
+          "type": "request_model_turn",
+          "turnId": "turn-5"
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "model_streaming",
+        "sequence": 6,
+        "stepCount": 1,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the same clock."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolResult": {
+                  "ok": true,
+                  "data": {
+                    "time": "10:00"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 1,
+        "lastToolFingerprint": "test.clock.read:{\"format\":\"iso\",\"zone\":\"UTC\"}",
+        "pendingToolCall": {
+          "id": "call-2",
+          "name": "test.clock.read",
+          "input": {
+            "zone": "UTC",
+            "format": "iso"
+          }
+        }
+      },
+      "effects": []
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "tool_pending",
+        "sequence": 7,
+        "stepCount": 1,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the same clock."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolResult": {
+                  "ok": true,
+                  "data": {
+                    "time": "10:00"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-2",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 2,
+        "lastToolFingerprint": "test.clock.read:{\"format\":\"iso\",\"zone\":\"UTC\"}",
+        "pendingToolCall": {
+          "id": "call-2",
+          "name": "test.clock.read",
+          "input": {
+            "zone": "UTC",
+            "format": "iso"
+          }
+        }
+      },
+      "effects": [
+        {
+          "type": "resolve_tool",
+          "toolCall": {
+            "id": "call-2",
+            "name": "test.clock.read",
+            "input": {
+              "zone": "UTC",
+              "format": "iso"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "tool_pending",
+        "sequence": 8,
+        "stepCount": 2,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the same clock."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolResult": {
+                  "ok": true,
+                  "data": {
+                    "time": "10:00"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-2",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 2,
+        "lastToolFingerprint": "test.clock.read:{\"format\":\"iso\",\"zone\":\"UTC\"}"
+      },
+      "effects": [
+        {
+          "type": "execute_tool",
+          "toolCall": {
+            "id": "call-2",
+            "name": "test.clock.read",
+            "input": {
+              "zone": "UTC",
+              "format": "iso"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "model_pending",
+        "sequence": 9,
+        "stepCount": 2,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the same clock."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolResult": {
+                  "ok": true,
+                  "data": {
+                    "time": "10:00"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-2",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolResult": {
+                  "ok": true,
+                  "data": {
+                    "time": "10:00"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 2,
+        "lastToolFingerprint": "test.clock.read:{\"format\":\"iso\",\"zone\":\"UTC\"}"
+      },
+      "effects": [
+        {
+          "type": "request_model_turn",
+          "turnId": "turn-9"
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "model_streaming",
+        "sequence": 10,
+        "stepCount": 2,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the same clock."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolResult": {
+                  "ok": true,
+                  "data": {
+                    "time": "10:00"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-2",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolResult": {
+                  "ok": true,
+                  "data": {
+                    "time": "10:00"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 2,
+        "lastToolFingerprint": "test.clock.read:{\"format\":\"iso\",\"zone\":\"UTC\"}",
+        "pendingToolCall": {
+          "id": "call-3",
+          "name": "test.clock.read",
+          "input": {
+            "format": "iso",
+            "zone": "UTC"
+          }
+        }
+      },
+      "effects": []
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "failed",
+        "sequence": 11,
+        "stepCount": 2,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Read the same clock."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolResult": {
+                  "ok": true,
+                  "data": {
+                    "time": "10:00"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-2",
+                  "name": "test.clock.read",
+                  "input": {
+                    "zone": "UTC",
+                    "format": "iso"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolResult": {
+                  "ok": true,
+                  "data": {
+                    "time": "10:00"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-3",
+                  "name": "test.clock.read",
+                  "input": {
+                    "format": "iso",
+                    "zone": "UTC"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 3,
+        "lastToolFingerprint": "test.clock.read:{\"format\":\"iso\",\"zone\":\"UTC\"}",
+        "error": {
+          "code": "validation_failed",
+          "message": "maxRepeatedToolCalls exceeded",
+          "retryable": false
+        }
+      },
+      "effects": [
+        {
+          "type": "fail_run",
+          "error": {
+            "code": "validation_failed",
+            "message": "maxRepeatedToolCalls exceeded",
+            "retryable": false
+          }
+        }
+      ]
+    }
+  ]
+}

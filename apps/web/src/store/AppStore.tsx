@@ -12,8 +12,9 @@ import {
 } from "react";
 import { ApiError } from "../api/http";
 import type { ResourceMutationContext } from "../api/resources";
+import { createId } from "../domain/ids";
 import { createEmptyData, createSeedData } from "../domain/seed";
-import type { AppData } from "../domain/types";
+import type { AppData, Tag } from "../domain/types";
 import { getSyncMetadata, putSyncMetadata, type SyncMetadata } from "../offline/db";
 import { runSyncCycle, type SyncCycleResult } from "../sync/engine";
 import { loadCachedAppData } from "./selectors";
@@ -74,10 +75,25 @@ const defaultDependencies: AppStoreDependencies = {
   syncIntervalMs: DEFAULT_SYNC_INTERVAL_MS,
 };
 
+function normalizeTags(data: AppData): Tag[] {
+  const tags = [...(data.tags ?? [])];
+  const known = new Set(tags.map((tag) => tag.name.toLocaleLowerCase()));
+  const referenced = [...data.notes.flatMap((note) => note.tags), ...data.records.flatMap((record) => record.tags)];
+  for (const name of referenced) {
+    const normalized = name.trim().toLocaleLowerCase();
+    if (!normalized || known.has(normalized)) continue;
+    const timestamp = new Date().toISOString();
+    tags.push({ id: createId("tag"), name: name.trim(), version: 0, createdAt: timestamp, updatedAt: timestamp });
+    known.add(normalized);
+  }
+  return tags;
+}
+
 function normalizeData(data: AppData): AppData {
   const focusAreas = data.settings.focusAreas ?? [...new Set(data.goals.map((goal) => goal.area))];
   return {
     ...data,
+    tags: normalizeTags(data),
     reviews: data.reviews ?? [],
     settings: {
       ...data.settings,

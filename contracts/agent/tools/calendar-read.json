@@ -1,0 +1,63 @@
+{
+  "id": "dayorder.calendar.read",
+  "description": "Read calendar events intersecting an authorized time window with cursor pagination.",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "start": { "type": "string", "format": "date-time" },
+      "end": { "type": "string", "format": "date-time" },
+      "cursor": { "type": "string", "maxLength": 4096, "maxUtf8Bytes": 4096 },
+      "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 }
+    },
+    "required": ["start", "end"]
+  },
+  "outputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "events": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "format": "uuid" },
+            "title": { "type": "string" },
+            "startAt": { "type": "string", "format": "date-time" },
+            "endAt": { "type": "string", "format": "date-time" },
+            "timezone": { "type": "string" },
+            "kind": { "type": "string" },
+            "version": { "type": "integer", "minimum": 1 }
+          },
+          "required": ["id", "title", "startAt", "endAt", "timezone", "kind", "version"]
+        }
+      },
+      "window": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "start": { "type": "string", "format": "date-time" },
+          "end": { "type": "string", "format": "date-time" }
+        },
+        "required": ["start", "end"]
+      },
+      "hasMore": { "type": "boolean" },
+      "nextCursor": {
+        "type": ["string", "null"],
+        "maxLength": 4096,
+        "maxUtf8Bytes": 4096
+      }
+    },
+    "required": ["events", "window", "hasMore", "nextCursor"]
+  },
+  "sideEffect": "read",
+  "requiredDomains": ["calendar"],
+  "executionTargets": ["client", "server"],
+  "approvalPolicy": "never",
+  "idempotent": true,
+  "timeoutMs": 10000,
+  "resultMaxBytes": 65536
+}

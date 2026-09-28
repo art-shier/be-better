@@ -1,0 +1,12 @@
+{
+  "name": "canonical complete success ToolResult envelope",
+  "result": {
+    "ok": true,
+    "data": {
+      "value": "<>&\u2028\u2029"
+    },
+    "display": "visible"
+  },
+  "canonical": "{\"data\":{\"value\":\"<>&\u2028\u2029\"},\"display\":\"visible\",\"ok\":true}",
+  "canonicalUtf8Bytes": 60
+}

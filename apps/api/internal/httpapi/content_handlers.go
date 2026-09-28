@@ -2,13 +2,120 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 
 	"dayorder.local/api/internal/service"
+
+	"github.com/google/uuid"
 )
+
+func (router *Router) createTag(w http.ResponseWriter, r *http.Request) {
+	auth, ok := router.authenticateRequest(w, r)
+	if !ok {
+		return
+	}
+	mutation, ok := router.mutationContext(w, r, auth.Account.ID)
+	if !ok {
+		return
+	}
+	var input struct {
+		Name string `json:"name"`
+	}
+	if !router.decodeJSON(w, r, &input, maxResourceRequestBytes) {
+		return
+	}
+	value, err := router.content.CreateTag(r.Context(), mutation, uuid.New(), strings.TrimSpace(input.Name))
+	if err != nil {
+		router.handleServiceError(w, r, err)
+		return
+	}
+	setEntityVersion(w, value.Version)
+	router.writeJSON(w, http.StatusCreated, value)
+}
+
+func (router *Router) getTag(w http.ResponseWriter, r *http.Request) {
+	auth, ok := router.authenticateRequest(w, r)
+	if !ok {
+		return
+	}
+	id, ok := router.pathUUID(w, r, "tagId")
+	if !ok {
+		return
+	}
+	value, err := router.content.GetTag(r.Context(), auth.Account.ID, id)
+	if err != nil {
+		router.handleServiceError(w, r, err)
+		return
+	}
+	setEntityVersion(w, value.Version)
+	router.writeJSON(w, http.StatusOK, value)
+}
+
+func (router *Router) updateTag(w http.ResponseWriter, r *http.Request) {
+	auth, ok := router.authenticateRequest(w, r)
+	if !ok {
+		return
+	}
+	id, ok := router.pathUUID(w, r, "tagId")
+	if !ok {
+		return
+	}
+	version, ok := router.expectedVersion(w, r)
+	if !ok {
+		return
+	}
+	mutation, ok := router.mutationContext(w, r, auth.Account.ID)
+	if !ok {
+		return
+	}
+	current, err := router.content.GetTag(r.Context(), auth.Account.ID, id)
+	if err != nil {
+		router.handleServiceError(w, r, err)
+		return
+	}
+	input := struct {
+		Name string `json:"name"`
+	}{Name: current.Name}
+	if !router.decodeMergePatch(w, r, input, tagPatchFields, &input) {
+		return
+	}
+	value, err := router.content.UpdateTag(r.Context(), mutation, id, version, strings.TrimSpace(input.Name))
+	if err != nil {
+		router.handleServiceError(w, r, err)
+		return
+	}
+	setEntityVersion(w, value.Version)
+	router.writeJSON(w, http.StatusOK, value)
+}
+
+func (router *Router) deleteTag(w http.ResponseWriter, r *http.Request) {
+	auth, ok := router.authenticateRequest(w, r)
+	if !ok {
+		return
+	}
+	id, ok := router.pathUUID(w, r, "tagId")
+	if !ok {
+		return
+	}
+	version, ok := router.expectedVersion(w, r)
+	if !ok {
+		return
+	}
+	mutation, ok := router.mutationContext(w, r, auth.Account.ID)
+	if !ok {
+		return
+	}
+	if err := router.content.DeleteTag(r.Context(), mutation, id, version); err != nil {
+		router.handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
 
 var recordPatchFields = map[string]bool{"rawText": true, "kind": true, "occurredAt": true, "mood": true, "energy": true, "archivedAt": true, "tags": true}
 var notePatchFields = map[string]bool{"title": true, "bodyMarkdown": true, "category": true, "archivedAt": true, "tags": true, "linkedEntityIds": true}
 var reviewPatchFields = map[string]bool{"reviewDate": true, "wins": true, "blockers": true, "mood": true, "energy": true, "tomorrowFocus": true, "aiSummary": true}
+var tagPatchFields = map[string]bool{"name": true}
 
 func (router *Router) createRecord(w http.ResponseWriter, r *http.Request) {
 	auth, ok := router.authenticateRequest(w, r)

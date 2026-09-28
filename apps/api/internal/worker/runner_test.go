@@ -12,13 +12,15 @@ import (
 )
 
 type fakeOutbox struct {
-	events    []model.OutboxEvent
-	claimErr  error
-	completed []uuid.UUID
-	retried   []model.OutboxRetry
+	events     []model.OutboxEvent
+	claimErr   error
+	claimLimit int
+	completed  []uuid.UUID
+	retried    []model.OutboxRetry
 }
 
-func (repository *fakeOutbox) Claim(context.Context, int, uuid.UUID, time.Duration) ([]model.OutboxEvent, error) {
+func (repository *fakeOutbox) Claim(_ context.Context, limit int, _ uuid.UUID, _ time.Duration) ([]model.OutboxEvent, error) {
+	repository.claimLimit = limit
 	return repository.events, repository.claimErr
 }
 func (repository *fakeOutbox) Complete(_ context.Context, eventID, _ uuid.UUID) error {
@@ -55,6 +57,40 @@ func TestRunnerCompletesSuccessfulEvents(t *testing.T) {
 	}
 	if processed != 1 || len(handler.events) != 1 || len(repository.completed) != 1 || len(repository.retried) != 0 {
 		t.Fatalf("processed=%d handled=%d completed=%d retried=%d", processed, len(handler.events), len(repository.completed), len(repository.retried))
+	}
+}
+
+func TestRunnerBatchSizeDefaultsToTwentyFiveAndCanBeBounded(t *testing.T) {
+	tests := []struct {
+		name      string
+		newRunner func(OutboxRepository, map[string]Handler) (*Runner, error)
+		want      int
+	}{
+		{name: "default", newRunner: NewRunner, want: 25},
+		{name: "bounded", newRunner: func(repository OutboxRepository, handlers map[string]Handler) (*Runner, error) {
+			return NewRunnerWithOptions(repository, handlers, RunnerOptions{BatchSize: 1})
+		}, want: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repository := &fakeOutbox{}
+			runner, err := test.newRunner(repository, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = runner.RunOnce(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if repository.claimLimit != test.want {
+				t.Fatalf("Claim limit = %d, want %d", repository.claimLimit, test.want)
+			}
+		})
+	}
+}
+
+func TestRunnerWithOptionsRejectsNonPositiveBatchSize(t *testing.T) {
+	if _, err := NewRunnerWithOptions(&fakeOutbox{}, nil, RunnerOptions{}); err == nil {
+		t.Fatal("NewRunnerWithOptions accepted a zero batch size")
 	}
 }
 

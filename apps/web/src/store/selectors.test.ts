@@ -17,14 +17,17 @@ describe("cached AppData projection", () => {
     await putCachedEntities(accountId, "goal_milestone", [{ id: crypto.randomUUID(), goalId, title: "第一步", sortOrder: 1, ...metadata }]);
     await putCachedEntities(accountId, "calendar_event", [{ id: eventId, title: "日程", startAt: "2026-08-28T02:00:00Z", endAt: "2026-08-28T03:00:00Z", timezone: "Asia/Shanghai", kind: "focus", ...metadata }]);
     await putCachedEntities(accountId, "calendar_reminder", [{ id: crypto.randomUUID(), eventId, offsetMinutes: 10, channel: "in_app", scheduledAt: "2026-08-28T01:50:00Z", status: "pending", attempts: 0, ...metadata }]);
-    await putCachedEntities(accountId, "record", [{ id: crypto.randomUUID(), rawText: "记录", kind: "idea", occurredAt: "2026-08-28T01:00:00Z", tags: [{ id: crypto.randomUUID(), name: "想法", ...metadata }], ...metadata }]);
+    const tagId = crypto.randomUUID();
+    await putCachedEntities(accountId, "tag", [{ id: tagId, name: "新标签名", ...metadata }]);
+    await putCachedEntities(accountId, "record", [{ id: crypto.randomUUID(), rawText: "记录", kind: "idea", occurredAt: "2026-08-28T01:00:00Z", tags: [{ id: tagId, name: "旧标签名", ...metadata }], ...metadata }]);
     await putCachedEntities(accountId, "user_settings", [{ id: accountId, schemaVersion: 1, settings: { energy: 4, remindersEnabled: true }, ...metadata }]);
 
     const data = await loadCachedAppData(accountId);
 
     expect(data.goals[0].milestones[0]).toMatchObject({ goalId, title: "第一步" });
     expect(data.events[0]).toMatchObject({ reminderMinutes: [10], timezone: "Asia/Shanghai" });
-    expect(data.records[0].tags).toEqual(["想法"]);
+    expect(data.tags).toEqual([expect.objectContaining({ id: tagId, name: "新标签名" })]);
+    expect(data.records[0].tags).toEqual(["新标签名"]);
     expect(data.settings).toMatchObject({ version: 2, energy: 4, remindersEnabled: true });
   });
 });

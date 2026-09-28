@@ -11,7 +11,7 @@ const kindClass: Record<CalendarEvent["kind"], string> = { focus: "focus", fixed
 
 export function TodayPage() {
   const { data, dispatch } = useAppStore();
-  const { openCapture, openReview, editTask, editEvent, toast } = useUi();
+  const { openCapture, openReview, openOnboarding, editGoal, editTask, editEvent, toast } = useUi();
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [timerStartedAt, setTimerStartedAt] = useState<number | null>(null);
@@ -25,6 +25,7 @@ export function TodayPage() {
   const doneCount = todayTasks.filter((task) => task.status === "done").length;
   const planPreview = useMemo(() => buildTodayPlan(data), [data]);
   const leadPlan = planPreview.plans[0];
+  const showStarter = data.goals.length === 0 && data.tasks.length === 0;
 
   useEffect(() => {
     if (!timerStartedAt) return;
@@ -63,6 +64,8 @@ export function TodayPage() {
           {energyOpen && <div className="energy-popover" role="dialog" aria-label="选择精力"><strong>现在精力如何？</strong><div>{[1,2,3,4,5].map((value) => <button key={value} className={data.settings.energy === value ? "active" : ""} type="button" onClick={() => { dispatch({ type: "set-energy", value }); setEnergyOpen(false); toast(`精力已记录为 ${value} / 5`); }}>{value}</button>)}</div></div>}
         </div>
       </header>
+
+      {showStarter && <section className="starter-card" aria-labelledby="starter-title"><div><p className="eyebrow">从这里开始</p><h2 id="starter-title">开始安排你的日序</h2><p>先创建一个真实目标，或用四步向导一起整理关注领域和第一个今日行动。</p></div><div className="starter-actions"><button className="button primary" type="button" onClick={() => editGoal()}>创建第一个目标</button><button className="button secondary" type="button" onClick={openOnboarding}>使用入门向导</button></div></section>}
 
       <section className="day-board">
         <div className="focus-stage">

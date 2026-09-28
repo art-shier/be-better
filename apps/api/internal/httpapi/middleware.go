@@ -27,6 +27,10 @@ type responseStatusWriter struct {
 	status int
 }
 
+func (writer *responseStatusWriter) Unwrap() http.ResponseWriter {
+	return writer.ResponseWriter
+}
+
 func (writer *responseStatusWriter) WriteHeader(status int) {
 	if writer.status != 0 {
 		return
@@ -53,12 +57,21 @@ func (writer *responseStatusWriter) ReadFrom(reader io.Reader) (int64, error) {
 }
 
 func (writer *responseStatusWriter) Flush() {
+	_ = writer.FlushError()
+}
+
+func (writer *responseStatusWriter) FlushError() error {
 	if writer.status == 0 {
 		writer.WriteHeader(http.StatusOK)
 	}
+	if flusher, ok := writer.ResponseWriter.(interface{ FlushError() error }); ok {
+		return flusher.FlushError()
+	}
 	if flusher, ok := writer.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
+		return nil
 	}
+	return http.ErrNotSupported
 }
 
 func (router *Router) middleware(next http.Handler) http.Handler {

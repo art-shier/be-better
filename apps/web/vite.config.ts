@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { loadEnv } from "vite";
 
@@ -20,6 +20,7 @@ export default defineConfig(({ mode }) => {
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
     css: true,
+    exclude: [...configDefaults.exclude, "tests/agent-integration/**"],
   },
   };
 });

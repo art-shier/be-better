@@ -40,8 +40,8 @@ WHERE schemaname = 'dayorder'
 `).Scan(&tableCount); err != nil {
 		t.Fatal(err)
 	}
-	if tableCount != 29 {
-		t.Fatalf("tables in dayorder schema = %d, want 29 including schema_migrations", tableCount)
+	if tableCount != 31 {
+		t.Fatalf("tables in dayorder schema = %d, want 31 including schema_migrations", tableCount)
 	}
 
 	var rlsTableCount int
@@ -55,8 +55,8 @@ WHERE namespace.nspname = 'dayorder'
 `).Scan(&rlsTableCount); err != nil {
 		t.Fatal(err)
 	}
-	if rlsTableCount != 27 {
-		t.Fatalf("RLS-enabled tenant tables = %d, want 27", rlsTableCount)
+	if rlsTableCount != 29 {
+		t.Fatalf("RLS-enabled tenant tables = %d, want 29", rlsTableCount)
 	}
 
 	pool, err := pgxpool.New(ctx, database.APIURL)

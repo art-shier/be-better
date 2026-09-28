@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent 只读集成测试</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <style>
+      .agent-integration-harness { min-width: 0; }
+      .agent-integration-harness__actions { display: flex; flex-wrap: wrap; }
+      .agent-integration-harness__output {
+        max-width: 100%;
+        overflow: auto;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="content-panel agent-integration-harness" aria-labelledby="harness-title">
+      <h1 id="harness-title">Agent 只读集成测试</h1>
+      <div class="ai-buttons agent-integration-harness__actions" aria-label="Agent 测试操作">
+        <button id="foreground" type="button" disabled>前台运行</button>
+        <button id="background" type="button" disabled>后台运行</button>
+        <button id="cancel" type="button" disabled>取消</button>
+      </div>
+      <pre id="output" class="agent-integration-harness__output" role="status" aria-live="polite" aria-atomic="true">正在准备测试环境…</pre>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

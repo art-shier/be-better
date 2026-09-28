@@ -19,6 +19,7 @@ type Querier interface {
 	CompleteAgentRunIfResolved(ctx context.Context, resolvedAt pgtype.Timestamptz, userID pgtype.UUID, runID pgtype.UUID) (*DayorderAgentRun, error)
 	CompleteClientMutation(ctx context.Context, responseStatus pgtype.Int4, responseBody []byte, userID pgtype.UUID, iD pgtype.UUID) (*DayorderClientMutation, error)
 	ConsumeAccountToken(ctx context.Context, userID pgtype.UUID, tokenID pgtype.UUID) (int64, error)
+	CountReadonlyExecutionsCreatedSince(ctx context.Context, userID pgtype.UUID, createdSince pgtype.Timestamptz) (int64, error)
 	CreateAccountToken(ctx context.Context, arg CreateAccountTokenParams) (*DayorderAccountToken, error)
 	CreateAgentChange(ctx context.Context, arg CreateAgentChangeParams) (*DayorderAgentChange, error)
 	CreateAgentRun(ctx context.Context, arg CreateAgentRunParams) (*DayorderAgentRun, error)
@@ -35,6 +36,8 @@ type Querier interface {
 	CreateGoalMilestone(ctx context.Context, arg CreateGoalMilestoneParams) (*DayorderGoalMilestone, error)
 	CreateNote(ctx context.Context, arg CreateNoteParams) (*DayorderNote, error)
 	CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) error
+	CreateReadonlyAgentRun(ctx context.Context, arg CreateReadonlyAgentRunParams) error
+	CreateReadonlyExecution(ctx context.Context, arg CreateReadonlyExecutionParams) error
 	CreateRecord(ctx context.Context, arg CreateRecordParams) (*DayorderRecord, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (*DayorderSession, error)
 	CreateTag(ctx context.Context, iD pgtype.UUID, userID pgtype.UUID, name string, normalizedName string) (*DayorderTag, error)
@@ -60,6 +63,8 @@ type Querier interface {
 	GetGoal(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderGoal, error)
 	GetGoalMilestone(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderGoalMilestone, error)
 	GetNote(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderNote, error)
+	GetReadonlyExecution(ctx context.Context, userID pgtype.UUID, runID pgtype.UUID) (*DayorderAgentRunExecution, error)
+	GetReadonlyExecutionForUpdate(ctx context.Context, userID pgtype.UUID, runID pgtype.UUID) (*DayorderAgentRunExecution, error)
 	GetRecord(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderRecord, error)
 	GetReminderDelivery(ctx context.Context, userID pgtype.UUID, reminderID pgtype.UUID) (*GetReminderDeliveryRow, error)
 	GetReminderDeliveryForUpdate(ctx context.Context, userID pgtype.UUID, reminderID pgtype.UUID) (*GetReminderDeliveryForUpdateRow, error)
@@ -69,9 +74,12 @@ type Querier interface {
 	GetTask(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID) (*DayorderTask, error)
 	GetUser(ctx context.Context, userID pgtype.UUID) (*DayorderUser, error)
 	GetUserSettings(ctx context.Context, userID pgtype.UUID) (*DayorderUserSetting, error)
+	InsertReadonlyOperation(ctx context.Context, arg InsertReadonlyOperationParams) error
+	InsertReadonlySourceRef(ctx context.Context, arg InsertReadonlySourceRefParams) error
 	InvalidateAccountTokens(ctx context.Context, userID pgtype.UUID, purpose string) (int64, error)
 	LinkNoteTag(ctx context.Context, userID pgtype.UUID, noteID pgtype.UUID, tagID pgtype.UUID) error
 	LinkRecordTag(ctx context.Context, userID pgtype.UUID, recordID pgtype.UUID, tagID pgtype.UUID) error
+	ListActiveReadonlyExecutionIDs(ctx context.Context, userID pgtype.UUID) ([]pgtype.UUID, error)
 	ListAgentChanges(ctx context.Context, userID pgtype.UUID, runID pgtype.UUID) ([]*DayorderAgentChange, error)
 	ListAgentRuns(ctx context.Context, userID pgtype.UUID, afterCreatedAt pgtype.Timestamptz, afterID pgtype.UUID, pageSize int32) ([]*DayorderAgentRun, error)
 	ListAgentSourceRefs(ctx context.Context, userID pgtype.UUID, runID pgtype.UUID) ([]*DayorderAgentSourceRef, error)
@@ -86,17 +94,20 @@ type Querier interface {
 	ListGoals(ctx context.Context, userID pgtype.UUID, afterUpdatedAt pgtype.Timestamptz, afterID pgtype.UUID, pageSize int32) ([]*DayorderGoal, error)
 	ListNoteTags(ctx context.Context, userID pgtype.UUID, noteID pgtype.UUID) ([]*DayorderTag, error)
 	ListNotes(ctx context.Context, userID pgtype.UUID, afterUpdatedAt pgtype.Timestamptz, afterID pgtype.UUID, pageSize int32) ([]*DayorderNote, error)
+	ListReadonlyOperations(ctx context.Context, userID pgtype.UUID, runID pgtype.UUID) ([]*DayorderAgentRunOperation, error)
 	ListRecordTags(ctx context.Context, userID pgtype.UUID, recordID pgtype.UUID) ([]*DayorderTag, error)
 	ListRecords(ctx context.Context, userID pgtype.UUID, afterOccurredAt pgtype.Timestamptz, afterID pgtype.UUID, pageSize int32) ([]*DayorderRecord, error)
 	ListSyncChanges(ctx context.Context, userID pgtype.UUID, afterSequence int64, pageSize int32) ([]*DayorderSyncChange, error)
 	ListTags(ctx context.Context, userID pgtype.UUID, pageSize int32) ([]*DayorderTag, error)
 	ListTasks(ctx context.Context, arg ListTasksParams) ([]*DayorderTask, error)
 	ListUserDevices(ctx context.Context, userID pgtype.UUID) ([]*DayorderUserDevice, error)
+	LockAgentExecutionAccount(ctx context.Context, userID string) error
 	LoginThrottleStatus(ctx context.Context, dimension string, keyHash []byte) (*LoginThrottleStatusRow, error)
 	LookupAccountToken(ctx context.Context, tokenHash []byte) (*LookupAccountTokenRow, error)
 	LookupLoginAccount(ctx context.Context, normalizedEmail string) (*LookupLoginAccountRow, error)
 	MarkAgentChangeApplied(ctx context.Context, arg MarkAgentChangeAppliedParams) (*DayorderAgentChange, error)
 	MarkAgentChangeRejected(ctx context.Context, resolvedAt pgtype.Timestamptz, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderAgentChange, error)
+	NextReadonlyAgentStepSequence(ctx context.Context, userID pgtype.UUID, runID pgtype.UUID) (int32, error)
 	PasswordHashByUserID(ctx context.Context, userID pgtype.UUID) (string, error)
 	RecordLoginFailure(ctx context.Context, dimension string, keyHash []byte) (*RecordLoginFailureRow, error)
 	RecordReminderDeliveryResult(ctx context.Context, arg RecordReminderDeliveryResultParams) (*DayorderCalendarEventReminder, error)
@@ -106,6 +117,7 @@ type Querier interface {
 	RescheduleCalendarReminders(ctx context.Context, startAt pgtype.Timestamptz, userID pgtype.UUID, eventID pgtype.UUID) ([]*DayorderCalendarEventReminder, error)
 	RevokeAllUserSessions(ctx context.Context, userID pgtype.UUID) (int64, error)
 	RevokeSession(ctx context.Context, userID pgtype.UUID, sessionID pgtype.UUID) (int64, error)
+	SaveReadonlyExecution(ctx context.Context, arg SaveReadonlyExecutionParams) (int64, error)
 	SearchNotes(ctx context.Context, userID pgtype.UUID, query string, pageSize int32) ([]*DayorderNote, error)
 	SetUserContext(ctx context.Context, userID pgtype.UUID) error
 	SoftDeleteCalendarEvent(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderCalendarEvent, error)
@@ -117,6 +129,7 @@ type Querier interface {
 	SoftDeleteGoalMilestones(ctx context.Context, userID pgtype.UUID, goalID pgtype.UUID) ([]*DayorderGoalMilestone, error)
 	SoftDeleteNote(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderNote, error)
 	SoftDeleteRecord(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderRecord, error)
+	SoftDeleteTag(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderTag, error)
 	SoftDeleteTask(ctx context.Context, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderTask, error)
 	SoftDeleteUnusedTags(ctx context.Context, userID pgtype.UUID) ([]*DayorderTag, error)
 	StartAgentRunAnalysis(ctx context.Context, startedAt pgtype.Timestamptz, userID pgtype.UUID, iD pgtype.UUID, expectedVersion int64) (*DayorderAgentRun, error)
@@ -131,7 +144,9 @@ type Querier interface {
 	UpdateGoalProgress(ctx context.Context, arg UpdateGoalProgressParams) (*DayorderGoal, error)
 	UpdateNote(ctx context.Context, arg UpdateNoteParams) (*DayorderNote, error)
 	UpdatePasswordHash(ctx context.Context, passwordHash string, userID pgtype.UUID) (int64, error)
+	UpdateReadonlyOperation(ctx context.Context, arg UpdateReadonlyOperationParams) (int64, error)
 	UpdateRecord(ctx context.Context, arg UpdateRecordParams) (*DayorderRecord, error)
+	UpdateTag(ctx context.Context, arg UpdateTagParams) (*DayorderTag, error)
 	UpdateTask(ctx context.Context, arg UpdateTaskParams) (*DayorderTask, error)
 	UpsertUserSettings(ctx context.Context, userID pgtype.UUID, schemaVersion int32, settings []byte, expectedVersion int64) (*DayorderUserSetting, error)
 }

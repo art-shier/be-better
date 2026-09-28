@@ -1,0 +1,16 @@
+{
+  "name": "canonical JSON parity",
+  "input": {
+    "z": {
+      "greater": ">",
+      "less": "<",
+      "ampersand": "&",
+      "separators": "\u2028\u2029"
+    },
+    "numbers": [-0, 0, 1, 1.5, 0.000001, 1e-7, 100000000000000000000, 1e21],
+    "array": [{ "b": 2, "a": 1 }, ["preserve", { "d": 4, "c": 3 }]],
+    "\ue000": "bmp",
+    "😀": "astral"
+  },
+  "canonical": "{\"array\":[{\"a\":1,\"b\":2},[\"preserve\",{\"c\":3,\"d\":4}]],\"numbers\":[0,0,1,1.5,0.000001,1e-7,100000000000000000000,1e+21],\"z\":{\"ampersand\":\"&\",\"greater\":\">\",\"less\":\"<\",\"separators\":\"\u2028\u2029\"},\"😀\":\"astral\",\"\ue000\":\"bmp\"}"
+}

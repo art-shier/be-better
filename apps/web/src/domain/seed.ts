@@ -1,5 +1,6 @@
 import { addDays } from "date-fns";
-import type { AppData, CalendarEvent, Goal, Milestone, Note, RecordEntry, Task } from "./types";
+import { createId } from "./ids";
+import type { AppData, CalendarEvent, Goal, Milestone, Note, RecordEntry, Tag, Task } from "./types";
 import { atOffset, atToday, dateKey, toIso, todayStart } from "./dates";
 
 const nowIso = () => new Date().toISOString();
@@ -130,6 +131,12 @@ const notes: Note[] = [
   { id: "note_energy", title: "低精力日的任务选择", bodyMarkdown: "把任务分为创造、沟通和整理三种。精力不足时不靠意志力硬顶，而是切换到准备好的替代清单。", tags: ["方法", "精力"], category: "生活方法", linkedEntityIds: [], version: 1, createdAt: toIso(addDays(todayStart(), -12)), updatedAt: toIso(addDays(todayStart(), -7)) },
 ];
 
+const seedTagNames = [...new Set([...records.flatMap((item) => item.tags), ...notes.flatMap((item) => item.tags)])];
+const tags: Tag[] = seedTagNames.map((name) => {
+  const timestamp = nowIso();
+  return { id: createId("tag"), name, version: 1, createdAt: timestamp, updatedAt: timestamp };
+});
+
 export function createSeedData(): AppData {
   return {
     version: 1,
@@ -138,6 +145,7 @@ export function createSeedData(): AppData {
     events,
     records,
     notes,
+    tags,
     reviews: [],
     settings: { schemaVersion: 1, version: 1, updatedAt: nowIso(), energy: 3, aiEnabled: true, remindersEnabled: false, onboardingCompleted: true, focusAreas: ["工作", "健康", "成长"], dataMode: "local", localOnly: true, permissions: { goals: true, calendar: true, records: true, privateNotes: false } },
   };
@@ -151,6 +159,7 @@ export function createEmptyData(): AppData {
     events: [],
     records: [],
     notes: [],
+    tags: [],
     reviews: [],
     settings: { schemaVersion: 1, version: 0, updatedAt: nowIso(), energy: 3, aiEnabled: true, remindersEnabled: false, onboardingCompleted: false, focusAreas: [], dataMode: "local", localOnly: true, permissions: { goals: true, calendar: true, records: true, privateNotes: false } },
   };

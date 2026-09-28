@@ -7,6 +7,7 @@ import { SearchDialog } from "../components/SearchDialog";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { ToastViewport, type ToastItem } from "../components/Toast";
 import { OnboardingDialog } from "../components/OnboardingDialog";
+import { TagManagerDialog } from "../components/TagManagerDialog";
 
 type EditorTarget =
   | { kind: "goal"; value?: Goal }
@@ -16,10 +17,12 @@ type EditorTarget =
   | { kind: "note"; value?: Note };
 
 interface UiContextValue {
+  openOnboarding(): void;
   openCapture(preferred?: EntityKind): void;
   openSearch(): void;
   openSettings(): void;
   openReview(): void;
+  openTagManager(): void;
   editGoal(value?: Goal): void;
   editTask(value?: Task): void;
   editEvent(value?: CalendarEvent): void;
@@ -31,10 +34,12 @@ interface UiContextValue {
 const UiContext = createContext<UiContextValue | null>(null);
 
 export function UiProvider({ children }: { children: ReactNode }) {
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [capture, setCapture] = useState<EntityKind | "auto" | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [editor, setEditor] = useState<EditorTarget | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -45,10 +50,12 @@ export function UiProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<UiContextValue>(() => ({
+    openOnboarding: () => setOnboardingOpen(true),
     openCapture: (preferred) => setCapture(preferred ?? "auto"),
     openSearch: () => setSearchOpen(true),
     openSettings: () => setSettingsOpen(true),
     openReview: () => setReviewOpen(true),
+    openTagManager: () => setTagManagerOpen(true),
     editGoal: (goal) => setEditor({ kind: "goal", value: goal }),
     editTask: (task) => setEditor({ kind: "task", value: task }),
     editEvent: (event) => setEditor({ kind: "event", value: event }),
@@ -60,11 +67,12 @@ export function UiProvider({ children }: { children: ReactNode }) {
   return (
     <UiContext.Provider value={value}>
       {children}
-      <OnboardingDialog />
+      <OnboardingDialog open={onboardingOpen} onClose={() => setOnboardingOpen(false)} />
       <QuickCaptureDialog preferred={capture} onClose={() => setCapture(null)} />
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <ReviewDialog open={reviewOpen} onClose={() => setReviewOpen(false)} />
+      <TagManagerDialog open={tagManagerOpen} onClose={() => setTagManagerOpen(false)} />
       <EntityDialog target={editor} onClose={() => setEditor(null)} />
       <ToastViewport items={toasts} onDismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))} />
     </UiContext.Provider>

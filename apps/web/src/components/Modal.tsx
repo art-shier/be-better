@@ -11,9 +11,10 @@ interface ModalProps {
   footer?: ReactNode;
   size?: "small" | "medium" | "large";
   dismissible?: boolean;
+  onEscape?(): boolean | void;
 }
 
-export function Modal({ open, title, description, onClose, children, footer, size = "medium", dismissible = true }: ModalProps) {
+export function Modal({ open, title, description, onClose, children, footer, size = "medium", dismissible = true, onEscape }: ModalProps) {
   useEffect(() => {
     if (!open) return;
     document.body.classList.add("modal-open");
@@ -26,13 +27,14 @@ export function Modal({ open, title, description, onClose, children, footer, siz
         <DialogOverlay>
           <DialogContent
             className={`modal modal-${size}`}
+            {...description ? {} : { "aria-describedby": undefined }}
             onOpenAutoFocus={(event) => {
               const target = (event.currentTarget as HTMLElement).querySelector<HTMLElement>("[data-autofocus]");
               if (!target) return;
               event.preventDefault();
               target.focus();
             }}
-            onEscapeKeyDown={(event) => { if (!dismissible) event.preventDefault(); }}
+            onEscapeKeyDown={(event) => { if (!dismissible || onEscape?.() === false) event.preventDefault(); }}
             onPointerDownOutside={(event) => { if (!dismissible) event.preventDefault(); }}
           >
             <div className="modal-head">

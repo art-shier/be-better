@@ -1,0 +1,621 @@
+{
+  "name": "react tool success",
+  "protocolVersion": "2.0",
+  "initialState": {
+    "protocolVersion": "2.0",
+    "runId": "run-1",
+    "executionMode": "foreground",
+    "phase": "idle",
+    "sequence": 0,
+    "stepCount": 0,
+    "messages": [],
+    "capabilitySnapshot": {
+      "runtimeVersion": "2.0.0",
+      "executionMode": "foreground",
+      "toolIds": [
+        "test.clock.read"
+      ],
+      "skills": [],
+      "scope": {
+        "domains": [
+          "test"
+        ]
+      }
+    },
+    "budget": {
+      "maxSteps": 4,
+      "maxTokens": 1000,
+      "maxDurationMs": 30000,
+      "maxWorkers": 1,
+      "maxConcurrency": 1,
+      "maxRepeatedToolCalls": 2
+    },
+    "usage": {
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "totalTokens": 0
+    },
+    "repeatedToolCalls": 0
+  },
+  "inputs": [
+    {
+      "type": "user_message",
+      "text": "What time is it?"
+    },
+    {
+      "type": "provider_event",
+      "providerEvent": {
+        "type": "tool_call",
+        "call": {
+          "id": "call-1",
+          "name": "test.clock.read",
+          "input": {}
+        }
+      }
+    },
+    {
+      "type": "provider_event",
+      "providerEvent": {
+        "type": "completed",
+        "stopReason": "tool_use",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        }
+      }
+    },
+    {
+      "type": "tool_resolution",
+      "toolResolution": {
+        "callId": "call-1",
+        "decision": "execute"
+      }
+    },
+    {
+      "type": "tool_result",
+      "toolResult": {
+        "callId": "call-1",
+        "result": {
+          "ok": true,
+          "data": {
+            "time": "10:00"
+          }
+        }
+      }
+    },
+    {
+      "type": "provider_event",
+      "providerEvent": {
+        "type": "text_delta",
+        "text": "The time is 10:00."
+      }
+    },
+    {
+      "type": "provider_event",
+      "providerEvent": {
+        "type": "completed",
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        }
+      }
+    }
+  ],
+  "expectedTransitions": [
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "model_pending",
+        "sequence": 1,
+        "stepCount": 0,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "What time is it?"
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 0
+      },
+      "effects": [
+        {
+          "type": "request_model_turn",
+          "turnId": "turn-1"
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "model_streaming",
+        "sequence": 2,
+        "stepCount": 0,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "What time is it?"
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "repeatedToolCalls": 0,
+        "pendingToolCall": {
+          "id": "call-1",
+          "name": "test.clock.read",
+          "input": {}
+        }
+      },
+      "effects": []
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "tool_pending",
+        "sequence": 3,
+        "stepCount": 0,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "What time is it?"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {}
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "pendingToolCall": {
+          "id": "call-1",
+          "name": "test.clock.read",
+          "input": {}
+        },
+        "lastToolFingerprint": "test.clock.read:{}",
+        "repeatedToolCalls": 1
+      },
+      "effects": [
+        {
+          "type": "resolve_tool",
+          "toolCall": {
+            "id": "call-1",
+            "name": "test.clock.read",
+            "input": {}
+          }
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "tool_pending",
+        "sequence": 4,
+        "stepCount": 1,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "What time is it?"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {}
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "lastToolFingerprint": "test.clock.read:{}",
+        "repeatedToolCalls": 1
+      },
+      "effects": [
+        {
+          "type": "execute_tool",
+          "toolCall": {
+            "id": "call-1",
+            "name": "test.clock.read",
+            "input": {}
+          }
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "model_pending",
+        "sequence": 5,
+        "stepCount": 1,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "What time is it?"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {}
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolResult": {
+                  "ok": true,
+                  "data": {
+                    "time": "10:00"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "lastToolFingerprint": "test.clock.read:{}",
+        "repeatedToolCalls": 1
+      },
+      "effects": [
+        {
+          "type": "request_model_turn",
+          "turnId": "turn-5"
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "model_streaming",
+        "sequence": 6,
+        "stepCount": 1,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "What time is it?"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {}
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolResult": {
+                  "ok": true,
+                  "data": {
+                    "time": "10:00"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "assistantDraft": "The time is 10:00.",
+        "lastToolFingerprint": "test.clock.read:{}",
+        "repeatedToolCalls": 1
+      },
+      "effects": [
+        {
+          "type": "emit_text",
+          "text": "The time is 10:00."
+        }
+      ]
+    },
+    {
+      "state": {
+        "protocolVersion": "2.0",
+        "runId": "run-1",
+        "executionMode": "foreground",
+        "phase": "completed",
+        "sequence": 7,
+        "stepCount": 1,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "What time is it?"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_call",
+                "toolCall": {
+                  "id": "call-1",
+                  "name": "test.clock.read",
+                  "input": {}
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool_result",
+                "toolResult": {
+                  "ok": true,
+                  "data": {
+                    "time": "10:00"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "The time is 10:00."
+              }
+            ]
+          }
+        ],
+        "capabilitySnapshot": {
+          "runtimeVersion": "2.0.0",
+          "executionMode": "foreground",
+          "toolIds": [
+            "test.clock.read"
+          ],
+          "skills": [],
+          "scope": {
+            "domains": [
+              "test"
+            ]
+          }
+        },
+        "budget": {
+          "maxSteps": 4,
+          "maxTokens": 1000,
+          "maxDurationMs": 30000,
+          "maxWorkers": 1,
+          "maxConcurrency": 1,
+          "maxRepeatedToolCalls": 2
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "lastToolFingerprint": "test.clock.read:{}",
+        "repeatedToolCalls": 1
+      },
+      "effects": [
+        {
+          "type": "complete_run"
+        }
+      ]
+    }
+  ]
+}

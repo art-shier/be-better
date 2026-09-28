@@ -73,7 +73,7 @@ func TestEmbeddedMigrationsContainApprovedSchemaAndSecurityBoundaries(t *testing
 		"goals", "goal_milestones", "tasks", "calendar_events", "calendar_event_reminders",
 		"records", "notes", "daily_reviews", "tags", "record_tags", "note_tags", "entity_links",
 		"agent_runs", "agent_steps", "agent_changes", "agent_source_refs", "audit_events",
-		"audit_event_entities", "sync_changes", "client_mutations", "outbox_events",
+		"agent_run_executions", "agent_run_operations", "audit_event_entities", "sync_changes", "client_mutations", "outbox_events",
 	}
 	for _, table := range wantTables {
 		if !strings.Contains(sql, "create table dayorder."+table) {
