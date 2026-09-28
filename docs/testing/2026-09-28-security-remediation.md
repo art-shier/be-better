@@ -26,3 +26,7 @@ Local validation used Node 24.15.0 and Go 1.26.8:
 - Rebuilt Caddy validates the existing Caddyfile. Linux Caddy and gosu cross-compilation succeeds.
 
 Final Linux container builds, all five image scans, the gosu execution check, and Compose TLS/runtime acceptance are enforced by the existing PR workflows. Their live results are linked from [PR #14](https://github.com/art-shier/be-better/pull/14). These checks do not enable the production Agent or exercise a real model provider.
+
+## CI follow-up
+
+Security run [36376375260](https://github.com/art-shier/be-better/actions/runs/36376375260) passed all six jobs, including the five final images and gosu execution. The functional CI race run exposed an overly specific shutdown-test message assertion: Gateway cancellation may persist `execution_interrupted` before Runtime completion attempts to persist `runtime interrupted`. Both paths preserve the first durable terminal state. The test now accepts these two interruption messages, additionally requires `retryable=false` and rejects a late Provider summary, and retains the no-replay and unknown-operation assertions. Production Agent behavior is unchanged.

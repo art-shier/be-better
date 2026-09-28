@@ -693,10 +693,16 @@ func TestBackgroundCancellationAndInterruptionDoNotPublishLateResultsOrReplay(t 
 		if failed.Error == nil {
 			t.Fatalf("interrupted run status=%q has no error", failed.Status)
 		}
+		// Gateway cancellation and Runtime completion can persist the interruption
+		// in either order; the first durable terminal result remains authoritative.
+		interruptedMessage := failed.Error.Message == "runtime interrupted" || failed.Error.Message == "execution_interrupted"
 		if failed.Status != agentprotocol.ReadonlyRunViewStatusFailed ||
-			failed.Error.Code != agentprotocol.ErrorCodeInternalError || failed.Error.Message != "runtime interrupted" {
-			t.Fatalf("interrupted run status=%q code=%q message=%q retryable=%t; want failed/internal_error/runtime interrupted",
+			failed.Error.Code != agentprotocol.ErrorCodeInternalError || failed.Error.Retryable || !interruptedMessage {
+			t.Fatalf("interrupted run status=%q code=%q message=%q retryable=%t; want non-retryable failed/internal_error interruption",
 				failed.Status, failed.Error.Code, failed.Error.Message, failed.Error.Retryable)
+		}
+		if failed.Summary != nil && *failed.Summary == "late result must not be published" {
+			t.Fatal("late provider result was published after interruption")
 		}
 		before := adapter.calls.Load()
 		event.Attempts++
