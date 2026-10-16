@@ -15,7 +15,7 @@
     "@radix-ui/react-dialog": "1.1.15",
     "date-fns": "3.6.0",
     "idb": "^8.0.3",
-    "lucide-react": "0.468.0",
+    "lucide-react": "1.34.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
