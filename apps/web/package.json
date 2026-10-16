@@ -27,7 +27,7 @@
     "@types/react-dom": "19.2.5",
     "@vitejs/plugin-react": "6.1.0",
     "cross-env": "7.0.3",
-    "fake-indexeddb": "^6.2.4",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "30.0.1",
     "typescript": "5.9.2",
     "vite": "8.2.2",
